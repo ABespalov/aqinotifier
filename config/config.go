@@ -9,6 +9,8 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+const AppVersion = "0.4.2a"
+
 // Server holds HTTP server binding settings and the URL path used by the
 // application to receive POST requests from sensors.
 type Server struct {
@@ -158,12 +160,12 @@ func NewSystemConfig() *System {
 }
 
 type Monitor struct {
-	PM10Value float64  `yaml:"pm10_value"`
-	PM25Value float64  `yaml:"pm25_value"`
-	DiffTime  int      `yaml:"diff_time"`
-	PM10Diff  float64  `yaml:"pm10_diff"`
-	PM25Diff  float64  `yaml:"pm25_diff"`
-	Warnings  []string `yaml:"warnings"`
+	PM10Value float64  `yaml:"pm10_value" json:"pm10_value"`
+	PM25Value float64  `yaml:"pm25_value" json:"pm25_value"`
+	DiffTime  int      `yaml:"diff_time" json:"diff_time"`
+	PM10Diff  float64  `yaml:"pm10_diff" json:"pm10_diff"`
+	PM25Diff  float64  `yaml:"pm25_diff" json:"pm25_diff"`
+	Warnings  []string `yaml:"warnings" json:"warnings"`
 }
 
 // NewMonitorConfig returns a Monitor pre-populated with default values
@@ -193,16 +195,25 @@ type TgBot struct {
 	JsonFile string `yaml:"json_file"`
 	// Debug enables verbose Telegram API logging.
 	Debug bool `yaml:"debug"`
+	// ChartWidth specifies the width of generated charts.
+	ChartWidth int `yaml:"chart_width"`
+	// ChartHeight specifies the height of generated charts.
+	ChartHeight int `yaml:"chart_height"`
+	// ChartFontSize specifies the font size used in generated charts.
+	ChartFontSize float64 `yaml:"chart_font_size"`
 }
 
 // NewTgBotConfig returns a TgBot with sensible defaults.
 func NewTgBotConfig() *TgBot {
 	return &TgBot{
-		Enabled:   false,
-		Token:     "",
-		TokenFile: "{app}.tgbot.token",
-		JsonFile:  "{app}.tgbot.json",
-		Debug:     false,
+		Enabled:       false,
+		Token:         "",
+		TokenFile:     "{app}.tgbot.token",
+		JsonFile:      "{app}.tgbot.json",
+		Debug:         false,
+		ChartWidth:    800,
+		ChartHeight:   600,
+		ChartFontSize: 12.0,
 	}
 }
 
@@ -234,19 +245,25 @@ func NewConfig() *Config {
 // It returns a regular error on failure so callers can handle it in a
 // conventional way (wrapping is used to preserve the underlying cause).
 func (cfg *Config) LoadFromFile(fileName string) error {
-	// 1. Resolve {app} placeholders using the executable name/directory.
 	exe, exeErr := os.Executable()
 	var exeDir, exeName string
 	if exeErr == nil {
 		exePath, _ := filepath.Abs(exe)
 		exeDir = filepath.Dir(exePath)
-		exeName = filepath.Base(exePath)
-		if ext := filepath.Ext(exeName); ext != "" {
-			exeName = strings.TrimSuffix(exeName, ext)
+		// Handle "go run" which puts the executable in a temp directory
+		if strings.Contains(exeDir, "go-build") || strings.Contains(exeDir, "Temp") {
+			exeDir, _ = os.Getwd()
+			exeName = "aqinotifier"
+		} else {
+			exeName = filepath.Base(exePath)
+			if ext := filepath.Ext(exeName); ext != "" {
+				exeName = strings.TrimSuffix(exeName, ext)
+			}
 		}
 	} else {
 		// Fallback for app name if Executable() fails
-		exeName = "config"
+		exeDir, _ = os.Getwd()
+		exeName = "aqinotifier"
 	}
 
 	resolveAppPath := func(raw string) string {

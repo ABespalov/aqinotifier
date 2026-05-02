@@ -11,7 +11,7 @@ server:
   # Address to bind the HTTPS server to. Use 0.0.0.0 to accept external requests.
   host: "0.0.0.0"
   # TCP port to listen on
-  port: 8088
+  port: 28288
   # URL path where sensors will POST data
   url: "/aqi"
   # Protocol: "http" or "https"
@@ -121,3 +121,9 @@ tgbot:
   json_file: "{app}.tgbot.json"
   # Enable verbose Telegram API debug output (prints all API calls to stdout).
   debug: false
+  # Chart width in pixels
+  chart_width: 640
+  # Chart height in pixels
+  chart_height: 480
+  # Chart font size
+  chart_font_size: 12.0

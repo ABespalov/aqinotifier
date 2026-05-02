@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,10 +17,19 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// main is the entry point of the application. It loads the configuration,
+// initializes the logger, monitor service, Telegram bot, and starts the HTTP server.
 func main() {
+	execPath, err := os.Executable()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to get executable path: %v\n", err)
+		os.Exit(1)
+	}
+	configName := strings.TrimSuffix(filepath.Base(execPath), filepath.Ext(execPath)) + ".yaml"
+
 	cfg := config.NewConfig()
-	if err := cfg.LoadFromFile(""); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+	if err := cfg.LoadFromFile(configName); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load config %s: %v\n", configName, err)
 		os.Exit(1)
 	}
 
@@ -30,11 +41,16 @@ func main() {
 	}
 	defer cleanup()
 
+	ms := monitor.NewMonitorService(cfg)
+
+	// Channels to signal restarts
+	restartServer := make(chan struct{}, 1)
+	restartBot := make(chan struct{}, 1)
+
 	// Config reload goroutine
 	if cfg.System.ConfigReloadTime > 0 {
 		go func() {
-			fileName := "aqinotifier.yaml" // Default
-			info, err := os.Stat(fileName)
+			info, err := os.Stat(configName)
 			if err != nil {
 				log.Error().Err(err).Msg("config reload: failed to stat config file")
 				return
@@ -45,92 +61,154 @@ func main() {
 			defer ticker.Stop()
 
 			for range ticker.C {
-				info, err := os.Stat(fileName)
+				info, err := os.Stat(configName)
 				if err != nil {
 					continue
 				}
 				if info.ModTime().After(lastMod) {
 					log.Info().Msg("config reload: file changed, reloading...")
 					newCfg := config.NewConfig()
-					if err := newCfg.LoadFromFile(fileName); err != nil {
+					if err := newCfg.LoadFromFile(configName); err != nil {
 						log.Error().Err(err).Msg("config reload: failed to load new config")
 					} else {
+						// Capture old settings for comparison
+						oldNode := cfg.Server.Node()
+						oldProto := cfg.Server.Protocol
+						oldUrl := cfg.Server.Url
+						oldCert := cfg.Server.CertFile
+						oldKey := cfg.Server.KeyFile
+						oldTgEnabled := cfg.TgBot.Enabled
+						oldTgToken := cfg.TgBot.Token
+
 						// Update existing config values
 						*cfg = *newCfg
 						lastMod = info.ModTime()
-						log.Info().Msg("config reload: success")
+						log.Info().Msgf("config reload: success (new chart width: %d, height: %d, fontSize: %.1f)", cfg.TgBot.ChartWidth, cfg.TgBot.ChartHeight, cfg.TgBot.ChartFontSize)
+
+						// Check if server needs restart
+						if cfg.Server.Node() != oldNode ||
+							cfg.Server.Protocol != oldProto ||
+							cfg.Server.Url != oldUrl ||
+							cfg.Server.CertFile != oldCert ||
+							cfg.Server.KeyFile != oldKey {
+							log.Info().Msg("config reload: server settings changed, signaling restart")
+							select {
+							case restartServer <- struct{}{}:
+							default:
+							}
+						}
+
+						// Check if bot needs restart
+						if cfg.TgBot.Enabled != oldTgEnabled || cfg.TgBot.Token != oldTgToken {
+							log.Info().Msg("config reload: bot settings changed, signaling restart")
+							select {
+							case restartBot <- struct{}{}:
+							default:
+							}
+						}
 					}
 				}
 			}
 		}()
 	}
 
-	ms := monitor.NewMonitorService(cfg)
+	var bot *tgbot.Bot
+	var srv *http.Server
 
-	// Start Telegram bot if enabled
-	if cfg.TgBot.Enabled {
-		if cfg.TgBot.Token == "" {
-			log.Fatal().Msg("tgbot.enabled is true but tgbot.token is not set in configuration or token_file")
+	// Bot management loop
+	go func() {
+		for {
+			// Start Telegram bot if enabled
+			if cfg.TgBot.Enabled {
+				if cfg.TgBot.Token == "" {
+					log.Error().Msg("tgbot.enabled is true but tgbot.token is not set")
+				} else {
+					var err error
+					bot, err = tgbot.NewBot(&cfg.TgBot, &cfg.Monitor, ms)
+					if err != nil {
+						log.Error().Err(err).Msg("failed to start Telegram bot")
+					} else {
+						ms.SetNotifier(bot)
+						go bot.Run()
+						log.Info().Str("json_file", cfg.TgBot.JsonFile).Msg("tgbot: started")
+					}
+				}
+			} else {
+				ms.SetNotifier(nil)
+				log.Debug().Msg("tgbot: disabled")
+			}
+
+			// Wait for restart signal
+			<-restartBot
+			if bot != nil {
+				bot.Stop()
+				bot = nil
+			}
+			log.Info().Msg("tgbot: restarting...")
 		}
-		bot, err := tgbot.NewBot(&cfg.TgBot, ms)
-		if err != nil {
-			log.Fatal().Err(err).Msg("failed to start Telegram bot")
+	}()
+
+	// Server management loop
+	for {
+		log.Info().Msgf("starting server at %s", cfg.Server.Node())
+
+		// Debug logs for config
+		log.Debug().Msgf("system: values_in_ram=%d, config_reload_time=%d",
+			cfg.System.ValuesInRam, cfg.System.ConfigReloadTime)
+		log.Debug().Msgf("protocol: %s", cfg.Server.Protocol)
+		log.Debug().Msgf("server timeouts: server=%ds, read=%ds, write=%ds, idle=%ds",
+			cfg.Server.Timeout.Server, cfg.Server.Timeout.Read, cfg.Server.Timeout.Write, cfg.Server.Timeout.Idle)
+
+		if cfg.Database.Type == "json" {
+			log.Debug().Msgf("db: type=%s, file=%s, max_values=%d",
+				cfg.Database.Type, cfg.Database.JsonFile, cfg.Database.MaxValues)
+		} else {
+			log.Debug().Msgf("db: type=%s", cfg.Database.Type)
 		}
-		ms.SetNotifier(bot)
-		go bot.Run()
-		log.Info().Str("json_file", cfg.TgBot.JsonFile).Msg("tgbot: started")
-	} else {
-		log.Debug().Msg("tgbot: disabled (set tgbot.enabled: true in configuration to activate)")
-	}
 
-	log.Info().Msgf("starting server at %s", cfg.Server.Node())
+		log.Debug().Msgf("monitor: pm10_val=%.1f, pm25_val=%.1f, diff_time=%ds, pm10_diff=%.1f%%, pm25_diff=%.1f%%",
+			cfg.Monitor.PM10Value, cfg.Monitor.PM25Value, cfg.Monitor.DiffTime, cfg.Monitor.PM10Diff, cfg.Monitor.PM25Diff)
 
-	// Debug logs for config
-	log.Debug().Msgf("system: values_in_ram=%d, config_reload_time=%d",
-		cfg.System.ValuesInRam, cfg.System.ConfigReloadTime)
-	log.Debug().Msgf("protocol: %s", cfg.Server.Protocol)
-	log.Debug().Msgf("server timeouts: server=%ds, read=%ds, write=%ds, idle=%ds",
-		cfg.Server.Timeout.Server, cfg.Server.Timeout.Read, cfg.Server.Timeout.Write, cfg.Server.Timeout.Idle)
+		log.Debug().Msgf("listening at %s", cfg.Server.Url)
 
-	if cfg.Database.Type == "json" {
-		log.Debug().Msgf("db: type=%s, file=%s, max_values=%d",
-			cfg.Database.Type, cfg.Database.JsonFile, cfg.Database.MaxValues)
-	} else {
-		log.Debug().Msgf("db: type=%s", cfg.Database.Type)
-	}
+		mux := http.NewServeMux()
+		mux.HandleFunc(cfg.Server.Url, func(w http.ResponseWriter, r *http.Request) {
+			apiHandler(w, r, ms)
+		})
 
-	log.Debug().Msgf("monitor: pm10_val=%.1f, pm25_val=%.1f, diff_time=%ds, pm10_diff=%.1f%%, pm25_diff=%.1f%%",
-		cfg.Monitor.PM10Value, cfg.Monitor.PM25Value, cfg.Monitor.DiffTime, cfg.Monitor.PM10Diff, cfg.Monitor.PM25Diff)
-
-	log.Debug().Msgf("warnings: %s", strings.Join(cfg.Monitor.Warnings, ", "))
-	log.Debug().Msgf("listening at %s", cfg.Server.Url)
-
-	http.HandleFunc(cfg.Server.Url, func(w http.ResponseWriter, r *http.Request) {
-		apiHandler(w, r, ms)
-	})
-
-	if cfg.Server.Protocol == "https" {
-		if cfg.Server.CertFile == "" || cfg.Server.KeyFile == "" {
-			log.Fatal().Msg("HTTPS requested but cert_file or key_file is empty in configuration")
+		srv = &http.Server{
+			Addr:    cfg.Server.Node(),
+			Handler: mux,
 		}
-		// Check if files exist and are readable
-		if _, err := os.Stat(cfg.Server.CertFile); os.IsNotExist(err) {
-			log.Fatal().Msgf("SSL certificate file not found: %s", cfg.Server.CertFile)
-		}
-		if _, err := os.Stat(cfg.Server.KeyFile); os.IsNotExist(err) {
-			log.Fatal().Msgf("SSL key file not found: %s", cfg.Server.KeyFile)
-		}
-		err = http.ListenAndServeTLS(cfg.Server.Node(), cfg.Server.CertFile, cfg.Server.KeyFile, nil)
-	} else {
-		err = http.ListenAndServe(cfg.Server.Node(), nil)
-	}
 
-	if err != nil {
-		log.Fatal().Err(err).Msg("server failed")
+		go func() {
+			var err error
+			if cfg.Server.Protocol == "https" {
+				if cfg.Server.CertFile == "" || cfg.Server.KeyFile == "" {
+					log.Error().Msg("HTTPS requested but cert_file or key_file is empty")
+					return
+				}
+				err = srv.ListenAndServeTLS(cfg.Server.CertFile, cfg.Server.KeyFile)
+			} else {
+				err = srv.ListenAndServe()
+			}
+			if err != nil && err != http.ErrServerClosed {
+				log.Error().Err(err).Msg("server failed")
+			}
+		}()
+
+		// Wait for restart signal
+		<-restartServer
+		log.Info().Msg("server: stopping for restart...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = srv.Shutdown(ctx)
+		cancel()
+		log.Info().Msg("server: stopped")
 	}
 }
 
-
+// apiHandler processes incoming POST requests from sensors, parses the JSON payload,
+// and passes the data to the monitor service.
 func apiHandler(w http.ResponseWriter, r *http.Request, ms *monitor.MonitorService) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
@@ -155,9 +233,10 @@ func apiHandler(w http.ResponseWriter, r *http.Request, ms *monitor.MonitorServi
 	// Log data receipt
 	var pm10, pm25 string
 	for _, v := range data.Values {
-		if v.Type == "SDS_P1" {
+		switch v.Type {
+		case "SDS_P1":
 			pm10 = v.Value
-		} else if v.Type == "SDS_P2" {
+		case "SDS_P2":
 			pm25 = v.Value
 		}
 	}

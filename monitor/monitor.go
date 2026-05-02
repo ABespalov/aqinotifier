@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -32,22 +31,29 @@ type Measurement struct {
 // (e.g. the Telegram bot). Using an interface keeps the monitor package
 // decoupled from the tgbot package.
 type Notifier interface {
-	// SendWarning is called when a threshold is newly exceeded.
-	// The silent flag indicates if the message should be delivered without sound.
-	SendWarning(deviceID string, m *Measurement, messages []string, silent bool)
-	// SendClear is called when a previously active absolute-threshold alert
-	// has cleared (values returned to normal).
-	SendClear(deviceID string, m *Measurement, messages []string)
+	// GetSubscribers returns all chat IDs subscribed to deviceID.
+	GetSubscribers(deviceID string) []int64
+	// GetUserSettings returns the personalized monitor settings for a chat.
+	GetUserSettings(chatID int64) *config.Monitor
+	// SendWarning delivers a warning message to a specific subscriber.
+	SendWarning(chatID int64, deviceID string, m *Measurement, messages []string, silent bool)
+	// SendClear delivers a "values returned to normal" notification to a specific subscriber.
+	SendClear(chatID int64, deviceID string, m *Measurement, messages []string)
+	// Notify delivers a unified notification with appropriate styling.
+	Notify(chatID int64, deviceID string, m *Measurement, alertMessages []string, clearMessages []string, silent bool)
+	// T returns a localized string for a given key and arguments.
+	T(chatID int64, key string, args ...interface{}) string
 }
 
 type MonitorService struct {
-	cfg         *config.Config
-	history     map[string][]Measurement
-	mu          sync.Mutex
-	notifier    Notifier
+	cfg      *config.Config
+	history  map[string][]Measurement
+	mu       sync.Mutex
+	notifier Notifier
 	// alertStates tracks which absolute-threshold alert keys are currently
-	// active per device, enabling edge-triggered (one-shot) notifications.
-	alertStates map[string]map[string]bool
+	// active per user per device.
+	// chatID -> deviceID -> alertKey -> bool
+	alertStates map[int64]map[string]map[string]bool
 }
 
 // SetNotifier attaches a Notifier that will receive warning callbacks.
@@ -71,6 +77,7 @@ func (s *MonitorService) LastMeasurement(deviceID string) *Measurement {
 }
 
 // GetMonitorConfig returns a copy of the current monitor configuration.
+// Deprecated: use personalized settings from notifier.
 func (s *MonitorService) GetMonitorConfig() config.Monitor {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -95,28 +102,33 @@ func NewMonitorService(cfg *config.Config) *MonitorService {
 	s := &MonitorService{
 		cfg:         cfg,
 		history:     make(map[string][]Measurement),
-		alertStates: make(map[string]map[string]bool),
+		alertStates: make(map[int64]map[string]map[string]bool),
 	}
 	s.loadHistory()
 	return s
 }
 
 // isAlertActive returns true if the given alert key is currently active for
-// the device. Must be called with s.mu held.
-func (s *MonitorService) isAlertActive(deviceID, key string) bool {
-	if m, ok := s.alertStates[deviceID]; ok {
-		return m[key]
+// the user and device. Must be called with s.mu held.
+func (s *MonitorService) isAlertActive(chatID int64, deviceID, key string) bool {
+	if m1, ok := s.alertStates[chatID]; ok {
+		if m2, ok := m1[deviceID]; ok {
+			return m2[key]
+		}
 	}
 	return false
 }
 
-// setAlertActive updates the alert state for key/device.
+// setAlertActive updates the alert state for key/device/user.
 // Must be called with s.mu held.
-func (s *MonitorService) setAlertActive(deviceID, key string, active bool) {
-	if _, ok := s.alertStates[deviceID]; !ok {
-		s.alertStates[deviceID] = make(map[string]bool)
+func (s *MonitorService) setAlertActive(chatID int64, deviceID, key string, active bool) {
+	if _, ok := s.alertStates[chatID]; !ok {
+		s.alertStates[chatID] = make(map[string]map[string]bool)
 	}
-	s.alertStates[deviceID][key] = active
+	if _, ok := s.alertStates[chatID][deviceID]; !ok {
+		s.alertStates[chatID][deviceID] = make(map[string]bool)
+	}
+	s.alertStates[chatID][deviceID][key] = active
 }
 
 func (s *MonitorService) loadHistory() {
@@ -139,33 +151,9 @@ func (s *MonitorService) loadHistory() {
 		s.history[m.DeviceID] = append(s.history[m.DeviceID], m)
 	}
 
-	// Reconstruct initial alert states from the last measurement of each device.
-	// This prevents re-triggering absolute alerts upon server restart if the
-	// pollution level is still high.
-	for deviceID, hist := range s.history {
-		if len(hist) == 0 {
-			continue
-		}
-		m := hist[len(hist)-1]
-		pm10AbsExceeded := m.PM10 > s.cfg.Monitor.PM10Value
-		pm25AbsExceeded := m.PM25 > s.cfg.Monitor.PM25Value
-
-		// Reconstruction mirrors the notify logic (vals priority, etc.)
-		warnings := make(map[string]bool)
-		for _, w := range s.cfg.Monitor.Warnings {
-			warnings[w] = true
-		}
-
-		if warnings["vals"] && pm10AbsExceeded && pm25AbsExceeded {
-			s.setAlertActive(deviceID, "vals", true)
-		}
-		if warnings["val10"] && pm10AbsExceeded {
-			s.setAlertActive(deviceID, "val10", true)
-		}
-		if warnings["val25"] && pm25AbsExceeded {
-			s.setAlertActive(deviceID, "val25", true)
-		}
-	}
+	// Reconstruct initial alert states is skipped here because we don't have
+	// access to user settings yet (notifier is nil during NewMonitorService).
+	// They will be initialized on the first data point for each user.
 }
 
 func (s *MonitorService) saveHistory() {
@@ -250,7 +238,7 @@ func (s *MonitorService) calculateDiff(m *Measurement) {
 	for i := 0; i < len(hist); i++ {
 		prev := &hist[i]
 		actualDiffSec := m.Timestamp.Sub(prev.Timestamp).Seconds()
-		// Берутся показания макимально близкие по разнице времени к этому значению
+		// Get readings closest in time to the diffLimit
 		if actualDiffSec > 0 && actualDiffSec <= diffLimit+10 {
 			if actualDiffSec > maxDiff {
 				maxDiff = actualDiffSec
@@ -276,173 +264,165 @@ func (s *MonitorService) calculateDiff(m *Measurement) {
 }
 
 func (s *MonitorService) notify(m *Measurement) {
-	var messages []string
-	var clearMessages []string
-	isTransition := false
-
-	warnings := make(map[string]bool)
-	for _, w := range s.cfg.Monitor.Warnings {
-		warnings[w] = true
+	if s.notifier == nil {
+		return
 	}
 
-	pm10AbsExceeded := m.PM10 >= s.cfg.Monitor.PM10Value
-	pm25AbsExceeded := m.PM25 >= s.cfg.Monitor.PM25Value
+	subscribers := s.notifier.GetSubscribers(m.DeviceID)
+	if len(subscribers) == 0 {
+		return
+	}
 
-	// val10, val25, vals — edge-triggered: fire only on state change.
-	// When vals is enabled it can be included alongside val10/val25.
-	
-	// val10: при достижении абсолютных значений PM10. При достижении и превышении порога - красная зона, при значениях меньше поргового - зеленая зона
-	if warnings["val10"] {
-		wasActive := s.isAlertActive(m.DeviceID, "val10")
-		if pm10AbsExceeded && !wasActive {
-			s.setAlertActive(m.DeviceID, "val10", true)
+	for _, chatID := range subscribers {
+		mcfg := s.notifier.GetUserSettings(chatID)
+		if mcfg == nil {
+			continue
+		}
+
+		var messages []string
+		var clearMessages []string
+		isTransition := false
+
+		warnings := make(map[string]bool)
+		for _, w := range mcfg.Warnings {
+			warnings[w] = true
+		}
+
+		pm10AbsExceeded := m.PM10 >= mcfg.PM10Value
+		pm25AbsExceeded := m.PM25 >= mcfg.PM25Value
+
+		// val10, val25, vals — edge-triggered: fire only on state change.
+		// When vals is enabled it can be included alongside val10/val25.
+
+		// val10: absolute PM10 threshold. Triggers when exceeding or returning below the threshold.
+		if warnings["val10"] {
+			wasActive := s.isAlertActive(chatID, m.DeviceID, "val10")
+			if pm10AbsExceeded && !wasActive {
+				s.setAlertActive(chatID, m.DeviceID, "val10", true)
+				isTransition = true
+				messages = append(messages, s.notifier.T(chatID, "alert_val10_exceeded",
+					m.PM10, mcfg.PM10Value))
+			} else if !pm10AbsExceeded && wasActive {
+				s.setAlertActive(chatID, m.DeviceID, "val10", false)
+				clearMessages = append(clearMessages, s.notifier.T(chatID, "alert_val10_normal", m.PM10, mcfg.PM10Value))
+			}
+		}
+		// val25: absolute PM2.5 threshold. Triggers when exceeding or returning below the threshold.
+		if warnings["val25"] {
+			wasActive := s.isAlertActive(chatID, m.DeviceID, "val25")
+			if pm25AbsExceeded && !wasActive {
+				s.setAlertActive(chatID, m.DeviceID, "val25", true)
+				isTransition = true
+				messages = append(messages, s.notifier.T(chatID, "alert_val25_exceeded",
+					m.PM25, mcfg.PM25Value))
+			} else if !pm25AbsExceeded && wasActive {
+				s.setAlertActive(chatID, m.DeviceID, "val25", false)
+				clearMessages = append(clearMessages, s.notifier.T(chatID, "alert_val25_normal", m.PM25, mcfg.PM25Value))
+			}
+		}
+		// vals: triggers when both PM10 and PM2.5 absolute thresholds are exceeded.
+		if warnings["vals"] {
+			bothExceeded := pm10AbsExceeded && pm25AbsExceeded
+			wasActive := s.isAlertActive(chatID, m.DeviceID, "vals")
+			if bothExceeded && !wasActive {
+				s.setAlertActive(chatID, m.DeviceID, "vals", true)
+				isTransition = true
+				messages = append(messages, s.notifier.T(chatID, "alert_vals_exceeded",
+					m.PM10, m.PM25))
+			} else if !bothExceeded && wasActive {
+				s.setAlertActive(chatID, m.DeviceID, "vals", false)
+				clearMessages = append(clearMessages, s.notifier.T(chatID, "alert_vals_normal",
+					m.PM10, m.PM25))
+			}
+		}
+
+		// diff10, diff25, diffs
+		pm10DiffExceeded := m.PM10Diff != nil && *m.PM10Diff >= mcfg.PM10Diff
+		pm25DiffExceeded := m.PM25Diff != nil && *m.PM25Diff >= mcfg.PM25Diff
+
+		// diff10: PM10 percentage growth >= pm10_diff
+		if warnings["diff10"] && pm10DiffExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diff10_growth",
+				*m.PM10Diff, mcfg.PM10Diff, m.DiffTime, m.PM10Prev, m.PM10))
+		}
+		// diff25: PM2.5 percentage growth >= pm25_diff
+		if warnings["diff25"] && pm25DiffExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diff25_growth",
+				*m.PM25Diff, mcfg.PM25Diff, m.DiffTime, m.PM25Prev, m.PM25))
+		}
+		// diffs: both PM10 and PM2.5 increase simultaneously by their respective diff values
+		if warnings["diffs"] && pm10DiffExceeded && pm25DiffExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diffs_growth",
+				*m.PM10Diff, *m.PM25Diff, m.DiffTime))
+		}
+
+		// diff10_neg, diff25_neg, diffs_neg
+		pm10NegDiffExceeded := m.PM10Diff != nil && *m.PM10Diff <= -mcfg.PM10Diff
+		pm25NegDiffExceeded := m.PM25Diff != nil && *m.PM25Diff <= -mcfg.PM25Diff
+
+		// diff10_neg: PM10 percentage decrease >= pm10_diff
+		if warnings["diff10_neg"] && pm10NegDiffExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diff10_decrease",
+				*m.PM10Diff, m.DiffTime, m.PM10Prev, m.PM10))
+		}
+		// diff25_neg: PM2.5 percentage decrease >= pm25_diff
+		if warnings["diff25_neg"] && pm25NegDiffExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diff25_decrease",
+				*m.PM25Diff, m.DiffTime, m.PM25Prev, m.PM25))
+		}
+		// diffs_neg: both PM10 and PM2.5 decrease simultaneously by their respective diff values
+		if warnings["diffs_neg"] && pm10NegDiffExceeded && pm25NegDiffExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diffs_decrease",
+				*m.PM10Diff, *m.PM25Diff, m.DiffTime))
+		}
+
+		// diff10_over, diff25_over, diffs_over
+		// diff10_over: PM10 growth >= pm10_diff while already above absolute threshold
+		if warnings["diff10_over"] && pm10DiffExceeded && pm10AbsExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diff10_crit",
+				*m.PM10Diff, m.DiffTime, m.PM10))
+		}
+		// diff25_over: PM2.5 growth >= pm25_diff while already above absolute threshold
+		if warnings["diff25_over"] && pm25DiffExceeded && pm25AbsExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diff25_crit",
+				*m.PM25Diff, m.DiffTime, m.PM25))
+		}
+		// diffs_over: both PM10/PM2.5 growth >= diff values while both are above absolute thresholds
+		if warnings["diffs_over"] && pm10DiffExceeded && pm25DiffExceeded && pm10AbsExceeded && pm25AbsExceeded {
+			messages = append(messages, s.notifier.T(chatID, "alert_diffs_crit",
+				*m.PM10Diff, *m.PM25Diff))
+		}
+
+		// diff10_neg_over, diff25_neg_over, diffs_neg_over
+		// diff10_neg_over: PM10 decrease >= pm10_diff resulting in value below absolute threshold
+		if warnings["diff10_neg_over"] && pm10NegDiffExceeded && !pm10AbsExceeded {
 			isTransition = true
-			messages = append(messages, fmt.Sprintf(
-				"PM10 превысил порог: %.2f >= %.2f",
-				m.PM10, s.cfg.Monitor.PM10Value))
-		} else if !pm10AbsExceeded && wasActive {
-			s.setAlertActive(m.DeviceID, "val10", false)
-			clearMessages = append(clearMessages, fmt.Sprintf(
-				"PM10 (%.2f) вернулся в норму (< %.2f)", m.PM10, s.cfg.Monitor.PM10Value))
+			messages = append(messages, s.notifier.T(chatID, "alert_diff10_clean",
+				*m.PM10Diff, m.PM10))
 		}
-	}
-	// val25: при достижении абсолютных значений PM2.5. При достижении и превышении порога - красная зона, при значениях меньше поргового - зеленая зона
-	if warnings["val25"] {
-		wasActive := s.isAlertActive(m.DeviceID, "val25")
-		if pm25AbsExceeded && !wasActive {
-			s.setAlertActive(m.DeviceID, "val25", true)
+		// diff25_neg_over: PM2.5 decrease >= pm25_diff resulting in value below absolute threshold
+		if warnings["diff25_neg_over"] && pm25NegDiffExceeded && !pm25AbsExceeded {
 			isTransition = true
-			messages = append(messages, fmt.Sprintf(
-				"PM2.5 превысил порог: %.2f >= %.2f",
-				m.PM25, s.cfg.Monitor.PM25Value))
-		} else if !pm25AbsExceeded && wasActive {
-			s.setAlertActive(m.DeviceID, "val25", false)
-			clearMessages = append(clearMessages, fmt.Sprintf(
-				"PM2.5 (%.2f) вернулся в норму (< %.2f)", m.PM25, s.cfg.Monitor.PM25Value))
+			messages = append(messages, s.notifier.T(chatID, "alert_diff25_clean",
+				*m.PM25Diff, m.PM25))
 		}
-	}
-	// vals: при достижении и превышении обоих порогов (и PM10, и PM2.5). 
-	if warnings["vals"] {
-		bothExceeded := pm10AbsExceeded && pm25AbsExceeded
-		wasActive := s.isAlertActive(m.DeviceID, "vals")
-		if bothExceeded && !wasActive {
-			s.setAlertActive(m.DeviceID, "vals", true)
+		// diffs_neg_over: both PM10/PM2.5 decrease >= diff values resulting in both values below thresholds
+		if warnings["diffs_neg_over"] && pm10NegDiffExceeded && pm25NegDiffExceeded && !pm10AbsExceeded && !pm25AbsExceeded {
 			isTransition = true
-			messages = append(messages, fmt.Sprintf(
-				"PM10 (%.2f) и PM2.5 (%.2f) превысили пороговые значения",
-				m.PM10, m.PM25))
-		} else if !bothExceeded && wasActive {
-			s.setAlertActive(m.DeviceID, "vals", false)
-			clearMessages = append(clearMessages, fmt.Sprintf(
-				"PM10 (%.2f) и PM2.5 (%.2f) вернулись в норму",
-				m.PM10, m.PM25))
+			messages = append(messages, s.notifier.T(chatID, "alert_diffs_clean",
+				*m.PM10Diff, *m.PM25Diff))
 		}
-	}
 
-	// diff10, diff25, diffs
-	pm10DiffExceeded := m.PM10Diff != nil && *m.PM10Diff >= s.cfg.Monitor.PM10Diff
-	pm25DiffExceeded := m.PM25Diff != nil && *m.PM25Diff >= s.cfg.Monitor.PM25Diff
-
-	// diff10: при увеличении PM10 на велечину, большую или равную pm10_diff
-	if warnings["diff10"] && pm10DiffExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Резкий рост PM10: %.1f%% >= %.1f%% за %dс (было: %.2f, стало: %.2f)",
-			*m.PM10Diff, s.cfg.Monitor.PM10Diff, m.DiffTime, m.PM10Prev, m.PM10))
-	}
-	// diff25: при увеличении PM2.5 на велечину, большую или равную pm25_diff
-	if warnings["diff25"] && pm25DiffExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Резкий рост PM2.5: %.1f%% >= %.1f%% за %dс (было: %.2f, стало: %.2f)",
-			*m.PM25Diff, s.cfg.Monitor.PM25Diff, m.DiffTime, m.PM25Prev, m.PM25))
-	}
-	// diffs: при увеличении обоих значений одновременно на соответствующие величины
-	if warnings["diffs"] && pm10DiffExceeded && pm25DiffExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Резкий рост PM10 (%.1f%%) и PM2.5 (%.1f%%) за %dс",
-			*m.PM10Diff, *m.PM25Diff, m.DiffTime))
-	}
-
-	// diff10_neg, diff25_neg, diffs_neg
-	pm10NegDiffExceeded := m.PM10Diff != nil && *m.PM10Diff <= -s.cfg.Monitor.PM10Diff
-	pm25NegDiffExceeded := m.PM25Diff != nil && *m.PM25Diff <= -s.cfg.Monitor.PM25Diff
-
-	// diff10_neg: при уменьшении PM10 на велечину, большую или равную pm10_diff
-	if warnings["diff10_neg"] && pm10NegDiffExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Резкое снижение PM10: %.1f%% за %dс (было: %.2f, стало: %.2f)",
-			*m.PM10Diff, m.DiffTime, m.PM10Prev, m.PM10))
-	}
-	// diff25_neg: при уменьшении PM2.5 на велечину, большую или равную pm25_diff
-	if warnings["diff25_neg"] && pm25NegDiffExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Резкое снижение PM2.5: %.1f%% за %dс (было: %.2f, стало: %.2f)",
-			*m.PM25Diff, m.DiffTime, m.PM25Prev, m.PM25))
-	}
-	// diffs_neg: при уменьшении обоих значений одновременно на соответствующие величины
-	if warnings["diffs_neg"] && pm10NegDiffExceeded && pm25NegDiffExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Резкое снижение PM10 (%.1f%%) и PM2.5 (%.1f%%) за %dс",
-			*m.PM10Diff, *m.PM25Diff, m.DiffTime))
-	}
-
-	// diff10_over, diff25_over, diffs_over
-	// diff10_over: при увеличении PM10 на велечину, большую или равную pm10_diff и, одновременно, при превышении PM10 порга
-	if warnings["diff10_over"] && pm10DiffExceeded && pm10AbsExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Критический рост PM10 в зоне загрязнения: %.1f%% за %dс (стало %.2f)",
-			*m.PM10Diff, m.DiffTime, m.PM10))
-	}
-	// diff25_over: при увеличении PM2.5 на велечину, большую или равную pm25_diff и, одновременно, при превышении PM2.5 порга
-	if warnings["diff25_over"] && pm25DiffExceeded && pm25AbsExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Критический рост PM2.5 в зоне загрязнения: %.1f%% за %dс (стало %.2f)",
-			*m.PM25Diff, m.DiffTime, m.PM25))
-	}
-	// diffs_over: при увеличении обоих значений одновременно на соответствующие величины и, одновременно, при превышении обоих значений порогов
-	if warnings["diffs_over"] && pm10DiffExceeded && pm25DiffExceeded && pm10AbsExceeded && pm25AbsExceeded {
-		messages = append(messages, fmt.Sprintf(
-			"Критический рост показателей в зоне загрязнения (PM10: %.1f%%, PM2.5: %.1f%%)",
-			*m.PM10Diff, *m.PM25Diff))
-	}
-
-	// diff10_neg_over, diff25_neg_over, diffs_neg_over
-	// diff10_neg_over: при уменшении PM10 на велечину, большую или равную pm10_diff и, одновременно, при значении PM10 ниже порга
-	if warnings["diff10_neg_over"] && pm10NegDiffExceeded && !pm10AbsExceeded {
-		isTransition = true
-		messages = append(messages, fmt.Sprintf(
-			"Резкое снижение PM10 в чистую зону: %.1f%% (стало %.2f)",
-			*m.PM10Diff, m.PM10))
-	}
-	// diff25_neg_over: при уменьшени PM2.5 на велечину, большую или равную pm25_diff и, одновременно, при значении PM2.5 ниже порга
-	if warnings["diff25_neg_over"] && pm25NegDiffExceeded && !pm25AbsExceeded {
-		isTransition = true
-		messages = append(messages, fmt.Sprintf(
-			"Резкое снижение PM2.5 в чистую зону: %.1f%% (стало %.2f)",
-			*m.PM25Diff, m.PM25))
-	}
-	// diffs_neg_over: при уменьшении обоих значений одновременно на соответствующие величины и, одновременно, при обоих значениях ниже порогов
-	if warnings["diffs_neg_over"] && pm10NegDiffExceeded && pm25NegDiffExceeded && !pm10AbsExceeded && !pm25AbsExceeded {
-		isTransition = true
-		messages = append(messages, fmt.Sprintf(
-			"Резкое снижение показателей в чистую зону (PM10: %.1f%%, PM2.5: %.1f%%)",
-			*m.PM10Diff, *m.PM25Diff))
-	}
-
-	if len(messages) > 0 {
-		for _, msg := range messages {
-			log.Warn().Str("device", m.DeviceID).Msg(msg)
-		}
-		if s.notifier != nil {
-			s.notifier.SendWarning(m.DeviceID, m, messages, !isTransition)
-		}
-	}
-
-	if len(clearMessages) > 0 {
-		for _, msg := range clearMessages {
-			log.Info().Str("device", m.DeviceID).Msg("cleared: " + msg)
-		}
-		if s.notifier != nil {
-			s.notifier.SendClear(m.DeviceID, m, clearMessages)
+		if len(messages) > 0 || len(clearMessages) > 0 {
+			for _, msg := range messages {
+				log.Warn().Int64("chat", chatID).Str("device", m.DeviceID).Msg(msg)
+			}
+			for _, msg := range clearMessages {
+				log.Info().Int64("chat", chatID).Str("device", m.DeviceID).Msg("cleared: " + msg)
+			}
+			// Use the unified Notify method.
+			// It should be loud if there's a transition or a clear message.
+			s.notifier.Notify(chatID, m.DeviceID, m, messages, clearMessages, !isTransition && len(clearMessages) == 0)
 		}
 	}
 }
