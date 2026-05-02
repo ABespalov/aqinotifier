@@ -1,0 +1,123 @@
+# System settings.
+system:
+  # Maximum number of measurements to keep in RAM for one device (by ID).
+  values_in_ram: 10
+  # Interval in seconds to check for configuration file changes (0 to disable).
+  config_reload_time: 5
+
+# Server settings used to launch the Service. The service is expected to
+# accept POST requests on `server.url` (for example POST /aqi).
+server:
+  # Address to bind the HTTPS server to. Use 0.0.0.0 to accept external requests.
+  host: "0.0.0.0"
+  # TCP port to listen on
+  port: 8088
+  # URL path where sensors will POST data
+  url: "/aqi"
+  # Protocol: "http" or "https"
+  protocol: "https"
+  # Paths to SSL/TLS certificate and key files. Required if protocol is "https",
+  # otherwise these parameters are ignored.
+  cert_file: "localhost.pem"
+  key_file: "localhost-key.pem"
+  # Timeouts are in seconds. Tune according to expected request sizes and
+  # network conditions.
+  timeout:
+    server: 30   # overall server timeout (informational)
+    read: 15     # read timeout for incoming requests
+    write: 15    # write timeout for responses
+    idle: 5      # idle timeout for keep-alive connections
+
+# Database settings used for storing received sensor data.
+database:
+  # Supported types: "postgres", "json".
+  type: "json"
+  # JSON file settings (for type: "json")
+  # {app} will be replaced with the executable name.
+  # If no directory is specified, the executable's directory is used.
+  json_file: "{app}.data.json"
+  # Maximum number of values to keep in the JSON file
+  # Use 0 for no limit.
+  max_values: 0
+
+  # host: "1.1.1.1"
+  # port: 5432
+  # db: "dbname"
+  # user: "dbuser"
+  # password: "dbpassword"
+  # sslmode: "enable"
+  # max_open_conns: 25
+  # max_idle_conns: 5
+  # conn_max_lifetime: 300
+
+# Local logging configuration (using zerolog).
+# - If 'file' is empty, file logging is disabled and logs should go to stdout.
+# - 'format' can be 'json' (recommended for production) or 'console' (human).
+log:
+  # log level: debug, info, warn, error, fatal
+  level: "debug"
+  # File to write logs to. Relative paths are resolved from the working dir.
+  # Example: "logs/aqinotifier.log". Leave empty to disable file logging.
+  file: "{app}.log"
+  # Note: Console output is always human-readable (ConsoleWriter),
+  # while file output is always JSON for structured analysis.
+  format: "json"
+  # Rotation settings (used by file-rotation helper such as lumberjack).
+  rotate:
+    enabled: false
+    # Maximum log file size in megabytes before rotation
+    max_size_mb: 20
+    # Maximum number of rotated files to keep
+    max_backups: 1
+    # Maximum age in days to keep a rotated file
+    max_age_days: 30
+    # Compress rotated files to save disk space
+    compress: true
+
+# Monitoring and notification settings.
+monitor:
+  # Absolute thresholds for PM10 and PM2.5. Alerts trigger when values exceed these.
+  pm10_value: 10.0
+  pm25_value: 5.0
+  # Time in seconds used to calculate the change in readings.
+  diff_time: 150
+  # Percentage change thresholds for PM10 and PM2.5 over diff_time.
+  pm10_diff: 45.0
+  pm25_diff: 37.5
+  # Enabled notifications.
+  # val10: absolute PM10 threshold
+  # val25: absolute PM2.5 threshold
+  # vals: triggers ONLY if both PM10 and PM2.5 exceed absolute thresholds
+  # diff10: PM10 percentage change threshold
+  # diff25: PM2.5 percentage change threshold
+  # diffs: triggers ONLY if both PM10 and PM2.5 exceed change thresholds
+  # diff10_neg: PM10 sudden drop threshold
+  # diff25_neg: PM2.5 sudden drop threshold
+  # diffs_neg: triggers ONLY if both PM10 and PM2.5 exceed drop thresholds
+  # diff10_over: diff10 triggered AND PM10 absolute threshold exceeded
+  # diff25_over: diff25 triggered AND PM2.5 absolute threshold exceeded
+  # diffs_over: diffs triggered AND both PM10/PM2.5 absolute thresholds exceeded
+  # diff10_neg_over: PM10 drop AND PM10 value below threshold
+  # diff25_neg_over: PM2.5 drop AND PM2.5 value below threshold
+  # diffs_neg_over: both PM10/PM2.5 drop AND both below thresholds
+  warnings:
+    - vals
+    - diffs_over
+
+# Optional: metrics / observability settings could be added here later.
+
+# Telegram bot settings.
+# To activate: set enabled to true and provide a valid bot token from @BotFather.
+tgbot:
+  # Set to true to start the Telegram bot alongside the HTTP server.
+  enabled: true
+  # Bot token issued by @BotFather. Keep this secret!
+  # token: "0000000000:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  # File to read the token from if 'token' is not provided.
+  token_file: "{app}.tgbot.token"
+  # JSON file to persist user subscriptions.
+  # {app} is replaced with the executable name. If no directory is specified,
+  # the file is placed next to the executable.
+  json_file: "{app}.tgbot.json"
+  # Enable verbose Telegram API debug output (prints all API calls to stdout).
+  debug: false
