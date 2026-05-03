@@ -31,20 +31,23 @@ server:
 # Database settings used for storing received sensor data.
 database:
   # Supported types: "postgres", "json".
-  type: "json"
+  type: "postgres"
   # JSON file settings (for type: "json")
   # {app} will be replaced with the executable name.
   # If no directory is specified, the executable's directory is used.
   json_file: "{app}.data.json"
+  # PostgreSQL sub-config file (for type: "postgres")
+  # If specified and exists, settings will be loaded from this file.
+  pgsql_file: "{app}.pgsql"
   # Maximum number of values to keep in the JSON file
   # Use 0 for no limit.
-  max_values: 0
+  max_values: 1500
 
-  # host: "1.1.1.1"
+  # host: "[IP_ADDRESS]"
   # port: 5432
-  # db: "dbname"
-  # user: "dbuser"
-  # password: "dbpassword"
+  # db: "postgres"
+  # user: "aqinotifier"
+  # password: "[PASSWORD]"
   # sslmode: "enable"
   # max_open_conns: 25
   # max_idle_conns: 5
@@ -55,7 +58,7 @@ database:
 # - 'format' can be 'json' (recommended for production) or 'console' (human).
 log:
   # log level: debug, info, warn, error, fatal
-  level: "debug"
+  level: "info"
   # File to write logs to. Relative paths are resolved from the working dir.
   # Example: "logs/aqinotifier.log". Leave empty to disable file logging.
   file: "{app}.log"
@@ -122,8 +125,8 @@ tgbot:
   # Enable verbose Telegram API debug output (prints all API calls to stdout).
   debug: false
   # Chart width in pixels
-  chart_width: 640
+  chart_width: 1024
   # Chart height in pixels
-  chart_height: 480
+  chart_height: 768
   # Chart font size
   chart_font_size: 12.0

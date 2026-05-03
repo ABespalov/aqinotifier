@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const AppVersion = "0.4.2a"
+const AppVersion = "0.6.7a"
 
 // Server holds HTTP server binding settings and the URL path used by the
 // application to receive POST requests from sensors.
@@ -108,6 +108,7 @@ func (s Server) String() string {
 type Database struct {
 	Type            string `yaml:"type"`
 	JsonFile        string `yaml:"json_file"`
+	PgsqlFile       string `yaml:"pgsql_file"`
 	MaxValues       int    `yaml:"max_values"`
 	Host            string `yaml:"host"`
 	Port            int    `yaml:"port"`
@@ -127,6 +128,7 @@ func NewDatabaseConfig() *Database {
 	return &Database{
 		Type:            "json",
 		JsonFile:        "{app}.data.json",
+		PgsqlFile:       "",
 		MaxValues:       10,
 		Host:            "localhost",
 		Port:            5432,
@@ -296,8 +298,20 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 	}
 
 	// 4. Post-processing for other fields that support {app}
-	if cfg.Database.Type == "json" && cfg.Database.JsonFile != "" {
+	if cfg.Database.JsonFile != "" {
 		cfg.Database.JsonFile = resolveAppPath(cfg.Database.JsonFile)
+	}
+	if cfg.Database.PgsqlFile != "" {
+		cfg.Database.PgsqlFile = resolveAppPath(cfg.Database.PgsqlFile)
+		// Load from pgsql_file if it exists
+		if _, err := os.Stat(cfg.Database.PgsqlFile); err == nil {
+			pgData, err := os.ReadFile(cfg.Database.PgsqlFile)
+			if err == nil {
+				if err := yaml.Unmarshal(pgData, &cfg.Database); err != nil {
+					return fmt.Errorf("unmarshalling pgsql file %q: %w", cfg.Database.PgsqlFile, err)
+				}
+			}
+		}
 	}
 	if cfg.TgBot.TokenFile != "" {
 		cfg.TgBot.TokenFile = resolveAppPath(cfg.TgBot.TokenFile)

@@ -3,10 +3,12 @@ package tgbot
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"html"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
@@ -16,6 +18,8 @@ import (
 	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/monitor"
 )
+
+const BotVersion = "0.4.3a"
 
 // chatState tracks what the bot is waiting for from a specific chat.
 type chatState int
@@ -44,6 +48,11 @@ const (
 	btnSilentProfiles = "btn_silent_profiles"
 	btnPM10Threshold  = "btn_pm10_threshold"
 	btnPM25Threshold  = "btn_pm25_threshold"
+	btnCharts         = "btn_charts"
+	btnChartPM        = "btn_chart_pm"
+	btnChartTemp      = "btn_chart_temp"
+	btnChartHum       = "btn_chart_hum"
+	btnChartPress     = "btn_chart_press"
 )
 
 // Icons used throughout the bot UI.
@@ -104,8 +113,6 @@ type Bot struct {
 	version  string
 }
 
-const BotVersion = "0.2.2a"
-
 // NewBot creates and starts the Telegram bot using Telego library.
 func NewBot(cfg *config.TgBot, monitorDefaults *config.Monitor, ms *monitor.MonitorService) (*Bot, error) {
 	var opts []telego.BotOption
@@ -148,7 +155,10 @@ func NewBot(cfg *config.TgBot, monitorDefaults *config.Monitor, ms *monitor.Moni
 	b.registerHandlers()
 	b.registerCommands()
 
-	self, _ := api.GetMe(context.Background())
+	self, err := api.GetMe(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("tgbot: failed to get bot info: %w", err)
+	}
 	log.Info().Str("username", self.Username).Msg("tgbot: bot authorized (telego)")
 	return b, nil
 }
@@ -189,6 +199,7 @@ func (b *Bot) syncUser(u *telego.User, chatID int64) bool {
 	changed := b.store.SyncLanguage(chatID, u.LanguageCode, detected)
 	if changed {
 		log.Info().Int64("chat_id", chatID).Str("new", detected).Str("tg_code", u.LanguageCode).Msg("tgbot: language automatically synced from Telegram")
+		b.updateCommandsForUser(chatID, detected)
 	}
 	return changed
 }
@@ -251,7 +262,7 @@ func (b *Bot) registerHandlers() {
 		chatID := update.Message.Chat.ID
 		changed := b.syncUser(update.Message.From, chatID)
 		if changed {
-			log.Info().Int64("chat_id", chatID).Msg("tgbot: language changed, refreshing menu")
+			log.Debug().Int64("chat_id", chatID).Msg("tgbot: language changed, refreshing menu")
 			// If language changed, send a welcome message in the new language and refresh keyboard
 			b.sendWithKeyboard(chatID, b.T(chatID, "msg_help", iconBot, iconList, iconSettings), b.mainKeyboard(chatID))
 			return nil
@@ -273,11 +284,11 @@ func (b *Bot) mainKeyboard(chatID int64) *telego.ReplyKeyboardMarkup {
 	return &telego.ReplyKeyboardMarkup{
 		Keyboard: [][]telego.KeyboardButton{
 			tu.KeyboardRow(
-				tu.KeyboardButton(b.T(chatID, btnList, iconList)),
+				tu.KeyboardButton(b.T(chatID, btnSettings, iconSettings)),
 				tu.KeyboardButton(b.T(chatID, btnStatus, iconStatus)),
 			),
 			tu.KeyboardRow(
-				tu.KeyboardButton(b.T(chatID, btnSettings, iconSettings)),
+				tu.KeyboardButton(b.T(chatID, btnCharts, iconHistory)),
 				tu.KeyboardButton(b.T(chatID, btnHistory, iconHistory)),
 			),
 		},
@@ -291,14 +302,15 @@ func (b *Bot) settingsKeyboard(chatID int64) *telego.ReplyKeyboardMarkup {
 	return &telego.ReplyKeyboardMarkup{
 		Keyboard: [][]telego.KeyboardButton{
 			tu.KeyboardRow(
+				tu.KeyboardButton(b.T(chatID, btnList, iconList)),
 				tu.KeyboardButton(b.T(chatID, btnInterval, iconClock)),
+			),
+			tu.KeyboardRow(
 				tu.KeyboardButton(b.T(chatID, btnThresholds, iconThreshold)),
-			),
-			tu.KeyboardRow(
 				tu.KeyboardButton(b.T(chatID, btnSoundProfiles, iconLoud)),
-				tu.KeyboardButton(b.T(chatID, btnSilentProfiles, iconSilent)),
 			),
 			tu.KeyboardRow(
+				tu.KeyboardButton(b.T(chatID, btnSilentProfiles, iconSilent)),
 				tu.KeyboardButton(b.T(chatID, btnMainMenu, iconBack)),
 			),
 		},
@@ -308,6 +320,26 @@ func (b *Bot) settingsKeyboard(chatID int64) *telego.ReplyKeyboardMarkup {
 }
 
 // thresholdsKeyboard returns the keyboard for the thresholds submenu.
+
+func (b *Bot) chartsMenuKeyboard(chatID int64) *telego.ReplyKeyboardMarkup {
+	return &telego.ReplyKeyboardMarkup{
+		Keyboard: [][]telego.KeyboardButton{
+			tu.KeyboardRow(
+				tu.KeyboardButton(b.T(chatID, btnChartPM, iconPM10)),
+				tu.KeyboardButton(b.T(chatID, btnChartTemp, iconTemp)),
+			),
+			tu.KeyboardRow(
+				tu.KeyboardButton(b.T(chatID, btnChartHum, iconHum)),
+				tu.KeyboardButton(b.T(chatID, btnChartPress, iconPress)),
+			),
+			tu.KeyboardRow(
+				tu.KeyboardButton(b.T(chatID, btnMainMenu, iconBack)),
+			),
+		},
+		ResizeKeyboard: true,
+		IsPersistent:   true,
+	}
+}
 func (b *Bot) thresholdsKeyboard(chatID int64) *telego.ReplyKeyboardMarkup {
 	return &telego.ReplyKeyboardMarkup{
 		Keyboard: [][]telego.KeyboardButton{
@@ -345,9 +377,9 @@ func (b *Bot) subscriptionKeyboard(chatID int64) *telego.ReplyKeyboardMarkup {
 func (b *Bot) Run() {
 	b.handler.Start()
 	log.Info().Msg("tgbot: bot is running and listening for updates")
-	// Block here to keep the goroutine alive. 
+	// Block here to keep the goroutine alive.
 	// The actual processing is handled by b.handler in its own goroutine.
-	select {} 
+	select {}
 }
 
 // GetSubscribers returns all chat IDs subscribed to deviceID.
@@ -464,11 +496,16 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 	}
 
 	lang := b.store.GetLanguage(chatID)
-	log.Info().Int64("chat_id", chatID).Str("text", text).Str("lang", lang).Interface("state", state).Msg("tgbot: received message")
+	log.Debug().Int64("chat_id", chatID).Str("text", text).Str("lang", lang).Interface("state", state).Msg("tgbot: received message")
 
 	if text == "/start" || text == "/help" {
 		log.Debug().Msg("tgbot: handling /start or /help")
-		b.sendHelp(chatID)
+		if text == "/start" && len(b.store.Subscriptions(chatID)) == 0 {
+			b.sendHelp(chatID)
+			b.promptDeviceID(chatID)
+		} else {
+			b.sendHelp(chatID)
+		}
 		return
 	}
 
@@ -486,6 +523,16 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 	switch {
 	case match(btnList, iconList):
 		b.cmdList(chatID)
+	case match(btnCharts, iconHistory):
+		b.cmdChartsMenu(chatID)
+	case match(btnChartPM, iconPM10):
+		b.cmdDeviceChart(chatID, "pm")
+	case match(btnChartTemp, iconTemp):
+		b.cmdDeviceChart(chatID, "temp")
+	case match(btnChartHum, iconHum):
+		b.cmdDeviceChart(chatID, "hum")
+	case match(btnChartPress, iconPress):
+		b.cmdDeviceChart(chatID, "press")
 	case match(btnStatus, iconStatus):
 		b.cmdStatusMenu(chatID)
 	case match(btnSettings, iconSettings):
@@ -519,27 +566,70 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 // ─── commands ─────────────────────────────────────────────────────────────────
 
 func (b *Bot) cmdLangMenu(chatID int64) {
-	current := b.store.GetLanguage(chatID)
-	
+	currentLang := b.store.GetLanguage(chatID)
+	currentTemp := b.store.GetUnitTemp(chatID)
+	currentPress := b.store.GetUnitPress(chatID)
+
 	btnRU := b.T(chatID, "lang_ru")
 	btnEN := b.T(chatID, "lang_en")
-	
-	if current == "ru" {
+	if currentLang == "ru" {
 		btnRU = "✅ " + btnRU
 	} else {
 		btnEN = "✅ " + btnEN
 	}
-	
+
+	btnC := b.T(chatID, "unit_c")
+	btnF := b.T(chatID, "unit_f")
+	if currentTemp == "c" {
+		btnC = "✅ " + btnC
+	} else {
+		btnF = "✅ " + btnF
+	}
+
+	btnMMHG := b.T(chatID, "unit_mmhg")
+	btnHPA := b.T(chatID, "unit_hpa")
+	if currentPress == "mmhg" {
+		btnMMHG = "✅ " + btnMMHG
+	} else {
+		btnHPA = "✅ " + btnHPA
+	}
+
 	inlineKeyboard := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(btnRU).WithCallbackData("lang_set:ru"),
 			tu.InlineKeyboardButton(btnEN).WithCallbackData("lang_set:en"),
 		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(btnC).WithCallbackData("unit_set:temp:c"),
+			tu.InlineKeyboardButton(btnF).WithCallbackData("unit_set:temp:f"),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(btnMMHG).WithCallbackData("unit_set:press:mmhg"),
+			tu.InlineKeyboardButton(btnHPA).WithCallbackData("unit_set:press:hpa"),
+		),
 	)
-	
-	params := tu.Message(tu.ID(chatID), b.T(chatID, "msg_select_lang")).
+
+	params := tu.Message(tu.ID(chatID), b.T(chatID, "msg_select_lang_units")).
 		WithReplyMarkup(inlineKeyboard)
 	_, _ = b.api.SendMessage(context.Background(), params)
+}
+
+func (b *Bot) updateCommandsForUser(chatID int64, lang string) {
+	if lang == "" {
+		lang = "en"
+	}
+	cmds := []telego.BotCommand{
+		{Command: "start", Description: b.TLang(lang, "cmd_start_desc")},
+		{Command: "list", Description: b.TLang(lang, "cmd_list_desc")},
+		{Command: "status", Description: b.TLang(lang, "cmd_status_desc")},
+		{Command: "help", Description: b.TLang(lang, "cmd_help_desc")},
+		{Command: "lang", Description: b.TLang(lang, "cmd_lang_desc")},
+	}
+	log.Debug().Int64("chat_id", chatID).Str("lang", lang).Msg("tgbot: updating commands for user scope")
+	_ = b.api.SetMyCommands(context.Background(), &telego.SetMyCommandsParams{
+		Commands: cmds,
+		Scope:    &telego.BotCommandScopeChat{Type: "chat", ChatID: tu.ID(chatID)},
+	})
 }
 
 func (b *Bot) sendHelp(chatID int64) {
@@ -661,12 +751,71 @@ func (b *Bot) cmdSettings(chatID int64) {
 	b.sendWithKeyboard(chatID, b.T(chatID, "msg_settings_title", iconSettings), b.settingsKeyboard(chatID))
 }
 
+func (b *Bot) cmdChartsMenu(chatID int64) {
+	b.sendWithKeyboard(chatID, b.T(chatID, "msg_charts_menu", iconHistory), b.chartsMenuKeyboard(chatID))
+}
+
+func (b *Bot) cmdDeviceChart(chatID int64, chartType string) {
+	devices := b.store.Subscriptions(chatID)
+	if len(devices) == 0 {
+		b.sendWithKeyboard(chatID, b.T(chatID, "msg_no_subs", iconEmpty, iconSubscribe), b.subscriptionKeyboard(chatID))
+		return
+	}
+	if len(devices) == 1 {
+		b.sendChartForDevice(chatID, devices[0], chartType)
+		return
+	}
+
+	var rows [][]telego.InlineKeyboardButton
+	for _, id := range devices {
+		rows = append(rows, []telego.InlineKeyboardButton{
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", iconStatus, id)).WithCallbackData(fmt.Sprintf("chart:%s:%s", chartType, id)),
+		})
+	}
+
+	params := tu.Message(tu.ID(chatID), b.T(chatID, "msg_select_device", iconDevice)).
+		WithParseMode(telego.ModeHTML).
+		WithReplyMarkup(tu.InlineKeyboard(rows...))
+	_, _ = b.api.SendMessage(context.Background(), params)
+}
+
+func (b *Bot) sendChartForDevice(chatID int64, deviceID string, chartType string) {
+	hist := b.monitor.GetHistoryByDuration(deviceID, 24*time.Hour)
+	if len(hist) == 0 {
+		b.sendWithKeyboard(chatID, b.T(chatID, "msg_history_empty", iconHistory, deviceID), b.chartsMenuKeyboard(chatID))
+		return
+	}
+
+	mcfg := b.GetUserSettings(chatID)
+	log.Debug().Msgf("Generating %s chart with width=%d, height=%d, fontSize=%.1f", chartType, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize)
+	buf, err := generateSingleChart(b, chatID, hist, chartType, mcfg.PM10Value, mcfg.PM25Value, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize)
+	if err != nil || buf == nil {
+		b.sendWithKeyboard(chatID, b.T(chatID, "msg_error_charts", iconAlert, err), b.chartsMenuKeyboard(chatID))
+		return
+	}
+
+	nr := &bytesNamedReader{
+		Reader: bytes.NewReader(buf),
+		name:   fmt.Sprintf("chart_%s.png", chartType),
+	}
+
+	params := tu.Photo(tu.ID(chatID), tu.File(nr)).
+		WithCaption(b.T(chatID, "msg_history_title", iconHistory, deviceID)).
+		WithParseMode(telego.ModeHTML)
+	_, err = b.api.SendPhoto(context.Background(), params)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to send chart")
+		b.sendWithKeyboard(chatID, b.T(chatID, "msg_error_send_ch", iconAlert), b.chartsMenuKeyboard(chatID))
+	}
+}
 func (b *Bot) cmdInfo(chatID int64) {
 	mcfg := b.GetUserSettings(chatID)
 	var sb strings.Builder
 	sb.WriteString(b.T(chatID, "msg_info_title", iconInfo))
 	sb.WriteString(b.T(chatID, "msg_app_version", config.AppVersion))
 	sb.WriteString(b.T(chatID, "msg_bot_version", b.version))
+	sb.WriteString(fmt.Sprintf("%s %s: <b>%s</b>\n", iconTemp, b.T(chatID, "msg_temp"), b.unitTempLabel(chatID)))
+	sb.WriteString(fmt.Sprintf("%s %s: <b>%s</b>\n", iconPress, b.T(chatID, "msg_press"), b.unitPressLabel(chatID)))
 	sb.WriteString(b.T(chatID, "msg_mon_settings", iconSettings))
 	sb.WriteString(b.T(chatID, "msg_interval_info", mcfg.DiffTime))
 	sb.WriteString(b.T(chatID, "msg_pm10_info", mcfg.PM10Value, mcfg.PM10Diff))
@@ -903,17 +1052,37 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 			_, _ = b.api.EditMessageText(context.Background(), params)
 		}
 
+	case strings.HasPrefix(data, "unit_set:"):
+		parts := strings.Split(data, ":")
+		if len(parts) == 3 {
+			cat := parts[1]
+			val := parts[2]
+			if cat == "temp" {
+				b.store.SetUnitTemp(chatID, val)
+			} else {
+				b.store.SetUnitPress(chatID, val)
+			}
+			_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
+				ChatID:    tu.ID(chatID),
+				MessageID: cq.Message.GetMessageID(),
+			})
+			b.cmdLangMenu(chatID)
+		}
+
 	case strings.HasPrefix(data, "lang_set:"):
 		lang := strings.TrimPrefix(data, "lang_set:")
 		b.store.SetLanguage(chatID, lang)
-		log.Info().Int64("chat_id", chatID).Str("to", lang).Msg("tgbot: language changed via menu")
-		
+		log.Debug().Int64("chat_id", chatID).Str("to", lang).Msg("tgbot: language changed via menu")
+
+		// Update commands for this user
+		b.updateCommandsForUser(chatID, lang)
+
 		// Delete the language selection message
 		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
 			ChatID:    tu.ID(chatID),
 			MessageID: cq.Message.GetMessageID(),
 		})
-		
+
 		// Send help message and refresh keyboard in the new language
 		b.sendWithKeyboard(chatID, b.T(chatID, "msg_help", iconBot, iconList, iconSettings), b.mainKeyboard(chatID))
 
@@ -945,6 +1114,14 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 	case strings.HasPrefix(data, "status:"):
 		deviceID := strings.TrimPrefix(data, "status:")
 		b.sendWithKeyboard(chatID, b.formatDeviceStatus(chatID, deviceID), b.mainKeyboard(chatID))
+
+	case strings.HasPrefix(data, "chart:"):
+		parts := strings.SplitN(strings.TrimPrefix(data, "chart:"), ":", 2)
+		if len(parts) == 2 {
+			chartType := parts[0]
+			deviceID := parts[1]
+			b.sendChartForDevice(chatID, deviceID, chartType)
+		}
 
 	case strings.HasPrefix(data, "history:"):
 		deviceID := strings.TrimPrefix(data, "history:")
@@ -1032,6 +1209,38 @@ func (b *Bot) diffTag(chatID int64, pct float64, prev float64) string {
 	return fmt.Sprintf(" %s", iconTrendFlat)
 }
 
+func (b *Bot) convertTemp(celsius float64, chatID int64) float64 {
+	unit := b.store.GetUnitTemp(chatID)
+	if unit == "f" {
+		return celsius*1.8 + 32
+	}
+	return celsius
+}
+
+func (b *Bot) convertPress(hpa float64, chatID int64) float64 {
+	unit := b.store.GetUnitPress(chatID)
+	if unit == "mmhg" {
+		return hpa * hPaToMmHg
+	}
+	return hpa
+}
+
+func (b *Bot) unitTempLabel(chatID int64) string {
+	unit := b.store.GetUnitTemp(chatID)
+	if unit == "f" {
+		return "°F"
+	}
+	return "°C"
+}
+
+func (b *Bot) unitPressLabel(chatID int64) string {
+	unit := b.store.GetUnitPress(chatID)
+	if unit == "mmhg" {
+		return b.T(chatID, "msg_unit_mmhg")
+	}
+	return b.T(chatID, "unit_hpa")
+}
+
 func (b *Bot) formatMeasurement(chatID int64, deviceID string, m *monitor.Measurement) string {
 	var sb strings.Builder
 
@@ -1054,14 +1263,15 @@ func (b *Bot) formatMeasurement(chatID int64, deviceID string, m *monitor.Measur
 	sb.WriteString("\n")
 
 	if m.Temperature != 0 {
-		sb.WriteString(fmt.Sprintf("%s <b>%s:</b> %.1f °C\n", iconTemp, b.T(chatID, "msg_temp"), m.Temperature))
+		val := b.convertTemp(m.Temperature, chatID)
+		sb.WriteString(fmt.Sprintf("%s <b>%s:</b> %.1f %s\n", iconTemp, b.T(chatID, "msg_temp"), val, b.unitTempLabel(chatID)))
 	}
 	if m.Humidity != 0 {
 		sb.WriteString(fmt.Sprintf("%s <b>%s:</b> %.1f%%\n", iconHum, b.T(chatID, "msg_hum"), m.Humidity))
 	}
 	if m.Pressure != 0 {
-		mmhg := m.Pressure * hPaToMmHg
-		sb.WriteString(fmt.Sprintf("%s <b>%s:</b> %.1f %s\n", iconPress, b.T(chatID, "msg_press"), mmhg, b.T(chatID, "msg_unit_mmhg")))
+		val := b.convertPress(m.Pressure, chatID)
+		sb.WriteString(fmt.Sprintf("%s <b>%s:</b> %.1f %s\n", iconPress, b.T(chatID, "msg_press"), val, b.unitPressLabel(chatID)))
 	}
 
 	sb.WriteString(fmt.Sprintf("\n%s <b>%s:</b> <code>%s</code>\n", iconDevice, b.T(chatID, "msg_device"), deviceID))
@@ -1102,4 +1312,16 @@ func (b *Bot) sendWithKeyboard(chatID int64, text string, markup telego.ReplyMar
 		WithReplyMarkup(markup).
 		WithParseMode(telego.ModeHTML)
 	_, _ = b.api.SendMessage(context.Background(), params)
+}
+
+func (b *Bot) SetDB(db *sql.DB) {
+	if b.store != nil {
+		b.store.SetDB(db)
+	}
+}
+
+func (b *Bot) SyncDB() {
+	if b.store != nil {
+		b.store.SyncDB()
+	}
 }

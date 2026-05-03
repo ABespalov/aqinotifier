@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,8 +18,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// main is the entry point of the application. It loads the configuration,
-// initializes the logger, monitor service, Telegram bot, and starts the HTTP server.
 func main() {
 	execPath, err := os.Executable()
 	if err != nil {
@@ -33,78 +32,139 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize zerolog
 	_, cleanup, err := config.NewLogger(cfg.Log)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
-	defer cleanup()
+	activeCleanup := cleanup
+	defer func() {
+		if activeCleanup != nil {
+			activeCleanup()
+		}
+	}()
 
+	var bot *tgbot.Bot
 	ms := monitor.NewMonitorService(cfg)
+	
+	// Database initialization with reconnection logic
+	var db *sql.DB
+	if cfg.Database.Type == "postgres" {
+		for i := 0; i < 5; i++ {
+			db, err = config.NewDB(cfg.Database)
+			if err == nil {
+				break
+			}
+			log.Warn().Err(err).Msgf("db: connection failed, retrying in 5s... (%d/5)", i+1)
+			time.Sleep(5 * time.Second)
+		}
+		if err != nil {
+			log.Error().Err(err).Msg("db: failed to connect to postgres after retries, falling back to JSON")
+		} else {
+			ms.SetDB(db)
+		}
+	}
 
-	// Channels to signal restarts
+	// Database reconnection and background sync worker
+	if cfg.Database.Type == "postgres" && db != nil {
+		go func() {
+			ticker := time.NewTicker(1 * time.Minute)
+			for range ticker.C {
+				if err := db.Ping(); err != nil {
+					log.Warn().Err(err).Msg("db: connection lost, background ping failed")
+				} else {
+					ms.SyncDB()
+					if bot != nil {
+						bot.SyncDB()
+					}
+				}
+			}
+		}()
+	}
+
 	restartServer := make(chan struct{}, 1)
 	restartBot := make(chan struct{}, 1)
 
-	// Config reload goroutine
 	if cfg.System.ConfigReloadTime > 0 {
 		go func() {
-			info, err := os.Stat(configName)
-			if err != nil {
-				log.Error().Err(err).Msg("config reload: failed to stat config file")
-				return
-			}
-			lastMod := info.ModTime()
-
-			ticker := time.NewTicker(time.Duration(cfg.System.ConfigReloadTime) * time.Second)
-			defer ticker.Stop()
-
-			for range ticker.C {
-				info, err := os.Stat(configName)
-				if err != nil {
-					continue
+			getWatchList := func(c *config.Config) []string {
+				return []string{
+					configName,
+					c.Server.CertFile,
+					c.Server.KeyFile,
+					c.TgBot.TokenFile,
+					c.Database.PgsqlFile,
 				}
-				if info.ModTime().After(lastMod) {
-					log.Info().Msg("config reload: file changed, reloading...")
+			}
+
+			lastMod := make(map[string]time.Time)
+			updateModTimes := func(c *config.Config) {
+				for _, f := range getWatchList(c) {
+					if f != "" {
+						if info, err := os.Stat(f); err == nil {
+							lastMod[f] = info.ModTime()
+						}
+					}
+				}
+			}
+
+			updateModTimes(cfg)
+			ticker := time.NewTicker(time.Duration(cfg.System.ConfigReloadTime) * time.Second)
+			for range ticker.C {
+				changed := false
+				for _, f := range getWatchList(cfg) {
+					if f == "" {
+						continue
+					}
+					if info, err := os.Stat(f); err == nil {
+						if info.ModTime().After(lastMod[f]) {
+							changed = true
+							break
+						}
+					}
+				}
+
+				if changed {
 					newCfg := config.NewConfig()
 					if err := newCfg.LoadFromFile(configName); err != nil {
 						log.Error().Err(err).Msg("config reload: failed to load new config")
-					} else {
-						// Capture old settings for comparison
-						oldNode := cfg.Server.Node()
-						oldProto := cfg.Server.Protocol
-						oldUrl := cfg.Server.Url
-						oldCert := cfg.Server.CertFile
-						oldKey := cfg.Server.KeyFile
-						oldTgEnabled := cfg.TgBot.Enabled
-						oldTgToken := cfg.TgBot.Token
+						// Update mod times even on failure to avoid looping on a broken file
+						updateModTimes(cfg)
+						continue
+					}
 
-						// Update existing config values
-						*cfg = *newCfg
-						lastMod = info.ModTime()
-						log.Info().Msgf("config reload: success (new chart width: %d, height: %d, fontSize: %.1f)", cfg.TgBot.ChartWidth, cfg.TgBot.ChartHeight, cfg.TgBot.ChartFontSize)
+					oldNode := cfg.Server.Node()
+					oldProto := cfg.Server.Protocol
+					oldUrl := cfg.Server.Url
+					oldCert := cfg.Server.CertFile
+					oldKey := cfg.Server.KeyFile
+					oldTgEnabled := cfg.TgBot.Enabled
+					oldTgToken := cfg.TgBot.Token
+					oldLogLevel := cfg.Log.Level
+					oldLogFile := cfg.Log.File
 
-						// Check if server needs restart
-						if cfg.Server.Node() != oldNode ||
-							cfg.Server.Protocol != oldProto ||
-							cfg.Server.Url != oldUrl ||
-							cfg.Server.CertFile != oldCert ||
-							cfg.Server.KeyFile != oldKey {
-							log.Info().Msg("config reload: server settings changed, signaling restart")
-							select {
-							case restartServer <- struct{}{}:
-							default:
-							}
+					*cfg = *newCfg
+					updateModTimes(cfg)
+					log.Info().Msg("config reload: success")
+
+					if cfg.Log.Level != oldLogLevel || cfg.Log.File != oldLogFile {
+						log.Info().Msg("config reload: updating logger...")
+						if activeCleanup != nil {
+							activeCleanup()
 						}
+						_, activeCleanup, _ = config.NewLogger(cfg.Log)
+					}
 
-						// Check if bot needs restart
-						if cfg.TgBot.Enabled != oldTgEnabled || cfg.TgBot.Token != oldTgToken {
-							log.Info().Msg("config reload: bot settings changed, signaling restart")
-							select {
-							case restartBot <- struct{}{}:
-							default:
-							}
+					if cfg.Server.Node() != oldNode || cfg.Server.Protocol != oldProto || cfg.Server.Url != oldUrl || cfg.Server.CertFile != oldCert || cfg.Server.KeyFile != oldKey {
+						select {
+						case restartServer <- struct{}{}:
+						default:
+						}
+					}
+					if cfg.TgBot.Enabled != oldTgEnabled || cfg.TgBot.Token != oldTgToken {
+						select {
+						case restartBot <- struct{}{}:
+						default:
 						}
 					}
 				}
@@ -112,13 +172,10 @@ func main() {
 		}()
 	}
 
-	var bot *tgbot.Bot
 	var srv *http.Server
 
-	// Bot management loop
 	go func() {
 		for {
-			// Start Telegram bot if enabled
 			if cfg.TgBot.Enabled {
 				if cfg.TgBot.Token == "" {
 					log.Error().Msg("tgbot.enabled is true but tgbot.token is not set")
@@ -128,6 +185,9 @@ func main() {
 					if err != nil {
 						log.Error().Err(err).Msg("failed to start Telegram bot")
 					} else {
+						if db != nil {
+							bot.SetDB(db)
+						}
 						ms.SetNotifier(bot)
 						go bot.Run()
 						log.Info().Str("json_file", cfg.TgBot.JsonFile).Msg("tgbot: started")
@@ -137,8 +197,6 @@ func main() {
 				ms.SetNotifier(nil)
 				log.Debug().Msg("tgbot: disabled")
 			}
-
-			// Wait for restart signal
 			<-restartBot
 			if bot != nil {
 				bot.Stop()
@@ -148,46 +206,19 @@ func main() {
 		}
 	}()
 
-	// Server management loop
 	for {
 		log.Info().Msgf("starting server at %s", cfg.Server.Node())
-
-		// Debug logs for config
-		log.Debug().Msgf("system: values_in_ram=%d, config_reload_time=%d",
-			cfg.System.ValuesInRam, cfg.System.ConfigReloadTime)
-		log.Debug().Msgf("protocol: %s", cfg.Server.Protocol)
-		log.Debug().Msgf("server timeouts: server=%ds, read=%ds, write=%ds, idle=%ds",
-			cfg.Server.Timeout.Server, cfg.Server.Timeout.Read, cfg.Server.Timeout.Write, cfg.Server.Timeout.Idle)
-
-		if cfg.Database.Type == "json" {
-			log.Debug().Msgf("db: type=%s, file=%s, max_values=%d",
-				cfg.Database.Type, cfg.Database.JsonFile, cfg.Database.MaxValues)
-		} else {
-			log.Debug().Msgf("db: type=%s", cfg.Database.Type)
-		}
-
-		log.Debug().Msgf("monitor: pm10_val=%.1f, pm25_val=%.1f, diff_time=%ds, pm10_diff=%.1f%%, pm25_diff=%.1f%%",
-			cfg.Monitor.PM10Value, cfg.Monitor.PM25Value, cfg.Monitor.DiffTime, cfg.Monitor.PM10Diff, cfg.Monitor.PM25Diff)
-
-		log.Debug().Msgf("listening at %s", cfg.Server.Url)
-
 		mux := http.NewServeMux()
 		mux.HandleFunc(cfg.Server.Url, func(w http.ResponseWriter, r *http.Request) {
 			apiHandler(w, r, ms)
 		})
-
 		srv = &http.Server{
 			Addr:    cfg.Server.Node(),
 			Handler: mux,
 		}
-
 		go func() {
 			var err error
 			if cfg.Server.Protocol == "https" {
-				if cfg.Server.CertFile == "" || cfg.Server.KeyFile == "" {
-					log.Error().Msg("HTTPS requested but cert_file or key_file is empty")
-					return
-				}
 				err = srv.ListenAndServeTLS(cfg.Server.CertFile, cfg.Server.KeyFile)
 			} else {
 				err = srv.ListenAndServe()
@@ -196,62 +227,29 @@ func main() {
 				log.Error().Err(err).Msg("server failed")
 			}
 		}()
-
-		// Wait for restart signal
 		<-restartServer
-		log.Info().Msg("server: stopping for restart...")
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = srv.Shutdown(ctx)
 		cancel()
-		log.Info().Msg("server: stopped")
 	}
 }
 
-// apiHandler processes incoming POST requests from sensors, parses the JSON payload,
-// and passes the data to the monitor service.
 func apiHandler(w http.ResponseWriter, r *http.Request, ms *monitor.MonitorService) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-		log.Warn().Str("method", r.Method).Msg("wrong http method")
 		return
 	}
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Error reading request body", http.StatusInternalServerError)
-		log.Error().Err(err).Msg("error reading request body")
+		http.Error(w, "Error reading body", http.StatusInternalServerError)
 		return
 	}
-
 	data, err := sensor.Parse(r.RemoteAddr, body)
 	if err != nil {
-		http.Error(w, "Error unmarshaling JSON", http.StatusBadRequest)
-		log.Error().Err(err).Str("ip", r.RemoteAddr).Msg("error unmarshaling json")
+		http.Error(w, "Error parsing JSON", http.StatusBadRequest)
 		return
 	}
-
-	// Log data receipt
-	var pm10, pm25 string
-	for _, v := range data.Values {
-		switch v.Type {
-		case "SDS_P1":
-			pm10 = v.Value
-		case "SDS_P2":
-			pm25 = v.Value
-		}
-	}
-
-	log.Info().
-		Str("ip", r.RemoteAddr).
-		Str("id", data.ParentID).
-		Int("size", len(body)).
-		Str("pm10", pm10).
-		Str("pm25", pm25).
-		Msg("received data")
-
-	// Process data through monitor service
 	ms.Process(data)
-
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Data received successfully!")
+	fmt.Fprintf(w, "Data received")
 }

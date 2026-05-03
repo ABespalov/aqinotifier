@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -45,24 +46,33 @@ func NewLogger(cfg Log) (zerolog.Logger, func(), error) {
 	multi := zerolog.MultiLevelWriter(writers...)
 	logger := zerolog.New(multi).With().Timestamp().Logger()
 
-	// set level
-	switch cfg.Level {
+	// set level (case-insensitive)
+	lvl := strings.ToLower(cfg.Level)
+	switch lvl {
 	case "debug":
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+		logger = logger.Level(zerolog.DebugLevel)
 	case "info":
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		logger = logger.Level(zerolog.InfoLevel)
 	case "warn", "warning":
 		zerolog.SetGlobalLevel(zerolog.WarnLevel)
+		logger = logger.Level(zerolog.WarnLevel)
 	case "error":
 		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
+		logger = logger.Level(zerolog.ErrorLevel)
 	case "fatal":
 		zerolog.SetGlobalLevel(zerolog.FatalLevel)
+		logger = logger.Level(zerolog.FatalLevel)
 	default:
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
+		logger = logger.Level(zerolog.InfoLevel)
 	}
 
 	// set the global logger
 	log.Logger = logger
+
+	log.Info().Str("level", zerolog.GlobalLevel().String()).Msg("log: logger initialized")
 
 	cleanup := func() {
 		if fileWriter != nil {
@@ -81,11 +91,17 @@ func NewDB(cfg Database) (*sql.DB, error) {
 	}
 
 	dsn := fmt.Sprintf(
+		"host=%s port=%d user=%s password=xxxx dbname=%s sslmode=%s",
+		cfg.Host, cfg.Port, cfg.User, cfg.Db, cfg.SslMode,
+	)
+	log.Info().Str("dsn", dsn).Msg("db: connecting to postgres...")
+
+	realDSN := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Db, cfg.SslMode,
 	)
 
-	db, err := sql.Open("postgres", dsn)
+	db, err := sql.Open("postgres", realDSN)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
@@ -107,5 +123,6 @@ func NewDB(cfg Database) (*sql.DB, error) {
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
 
+	log.Info().Msg("db: postgres connected successfully")
 	return db, nil
 }

@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -48,12 +49,16 @@ type Notifier interface {
 type MonitorService struct {
 	cfg      *config.Config
 	history  map[string][]Measurement
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	notifier Notifier
+	db       *sql.DB
 	// alertStates tracks which absolute-threshold alert keys are currently
 	// active per user per device.
 	// chatID -> deviceID -> alertKey -> bool
 	alertStates map[int64]map[string]map[string]bool
+	persistChan chan Measurement // queue for persistent storage
+	done        chan struct{}    // signal worker to stop
+	fileMu      sync.RWMutex     // protects JSON file from concurrent writes
 }
 
 // SetNotifier attaches a Notifier that will receive warning callbacks.
@@ -104,8 +109,132 @@ func NewMonitorService(cfg *config.Config) *MonitorService {
 		history:     make(map[string][]Measurement),
 		alertStates: make(map[int64]map[string]map[string]bool),
 	}
+	s.persistChan = make(chan Measurement, 100)
+	s.done = make(chan struct{})
+	go s.persistenceWorker()
 	s.loadHistory()
 	return s
+}
+
+func (s *MonitorService) SetDB(db *sql.DB) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.db = db
+
+	// Initialize table
+	query := `
+	CREATE TABLE IF NOT EXISTS measurements (
+		device_id TEXT,
+		timestamp TIMESTAMPTZ,
+		pm10 DOUBLE PRECISION,
+		pm25 DOUBLE PRECISION,
+		temperature DOUBLE PRECISION,
+		humidity DOUBLE PRECISION,
+		pressure DOUBLE PRECISION
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_measurements_unique ON measurements (device_id, timestamp);
+	CREATE INDEX IF NOT EXISTS idx_measurements_device_time ON measurements (device_id, timestamp);
+	`
+	_, err := s.db.Exec(query)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to initialize SQL table")
+		return
+	}
+
+	// Always attempt incremental migration from JSON to Postgres
+	s.migrateFromJSON()
+
+	// Load last N values into RAM for each device
+	s.loadHistoryFromSQL()
+}
+
+// SyncDB attempts to reconcile JSON data with Postgres.
+func (s *MonitorService) SyncDB() {
+	s.mu.RLock()
+	db := s.db
+	s.mu.RUnlock()
+
+	if db == nil {
+		return
+	}
+	if err := db.Ping(); err != nil {
+		return
+	}
+	s.migrateFromJSON()
+}
+
+func (s *MonitorService) migrateFromJSON() {
+	if s.cfg.Database.JsonFile == "" {
+		return
+	}
+	data, err := os.ReadFile(s.cfg.Database.JsonFile)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Error().Err(err).Msg("monitor: migration failed to read json")
+		}
+		return
+	}
+
+	var all []Measurement
+	if err := json.Unmarshal(data, &all); err != nil {
+		log.Error().Err(err).Msg("monitor: migration failed to unmarshal json")
+		return
+	}
+
+	if len(all) == 0 {
+		return
+	}
+
+	log.Info().Str("file", s.cfg.Database.JsonFile).Int("total_records", len(all)).Msg("monitor: ensuring json data is synced to postgres...")
+	
+	countMigrated := 0
+	batchSize := 100
+	for i := 0; i < len(all); i += batchSize {
+		end := i + batchSize
+		if end > len(all) {
+			end = len(all)
+		}
+		batch := all[i:end]
+
+		err := func() error {
+			tx, err := s.db.Begin()
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+
+			stmt, err := tx.Prepare(`
+				INSERT INTO measurements (device_id, timestamp, pm10, pm25, temperature, humidity, pressure)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				ON CONFLICT (device_id, timestamp) DO NOTHING
+			`)
+			if err != nil {
+				return err
+			}
+			defer stmt.Close()
+
+			for _, m := range batch {
+				res, err := stmt.Exec(m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.Temperature, m.Humidity, m.Pressure)
+				if err == nil {
+					n, _ := res.RowsAffected()
+					if n > 0 {
+						countMigrated++
+					}
+				}
+			}
+			return tx.Commit()
+		}()
+
+		if err != nil {
+			log.Error().Err(err).Int("start", i).Msg("monitor: migration batch failed")
+		}
+	}
+
+	if countMigrated > 0 {
+		log.Info().Int("count", countMigrated).Msg("monitor: sync from json successful")
+	} else {
+		log.Debug().Msg("monitor: postgres is already up to date with json")
+	}
 }
 
 // isAlertActive returns true if the given alert key is currently active for
@@ -147,31 +276,118 @@ func (s *MonitorService) loadHistory() {
 		log.Error().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("failed to unmarshal history")
 		return
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, m := range all {
 		s.history[m.DeviceID] = append(s.history[m.DeviceID], m)
 	}
-
-	// Reconstruct initial alert states is skipped here because we don't have
-	// access to user settings yet (notifier is nil during NewMonitorService).
-	// They will be initialized on the first data point for each user.
+	s.trimHistoryInternal()
+	log.Info().Int("records", len(all)).Msg("monitor: history loaded from JSON")
 }
 
-func (s *MonitorService) saveHistory() {
-	if s.cfg.Database.Type != "json" || s.cfg.Database.JsonFile == "" {
+func (s *MonitorService) loadHistoryFromSQL() {
+	// Must be called with s.mu held if s.history is already being used,
+	// but SetDB holds the lock.
+
+	// 1. Get unique device IDs
+	rows, err := s.db.Query("SELECT DISTINCT device_id FROM measurements")
+	if err != nil {
+		log.Error().Err(err).Msg("monitor: failed to query device IDs for history load")
 		return
 	}
+	defer rows.Close()
+
+	var deviceIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err == nil {
+			deviceIDs = append(deviceIDs, id)
+		}
+	}
+
+	max := s.cfg.System.ValuesInRam
+	if max <= 0 {
+		max = 10
+	}
+
+	for _, id := range deviceIDs {
+		mRows, err := s.db.Query(`
+			SELECT device_id, timestamp, pm10, pm25, temperature, humidity, pressure 
+			FROM measurements 
+			WHERE device_id = $1 
+			ORDER BY timestamp DESC 
+			LIMIT $2`, id, max)
+		if err != nil {
+			log.Error().Err(err).Str("device", id).Msg("monitor: failed to query history for device")
+			continue
+		}
+
+		var deviceHist []Measurement
+		for mRows.Next() {
+			var m Measurement
+			if err := mRows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
+				deviceHist = append([]Measurement{m}, deviceHist...) // Prepend to keep chronological order
+			}
+		}
+		mRows.Close()
+		s.history[id] = deviceHist
+	}
+	log.Info().Int("devices", len(deviceIDs)).Int("limit_per_device", max).Msg("monitor: history loaded from SQL")
+}
+
+func (s *MonitorService) trimHistoryInternal() {
+	max := s.cfg.System.ValuesInRam
+	if max <= 0 {
+		return
+	}
+	for deviceID, hist := range s.history {
+		if len(hist) > max {
+			s.history[deviceID] = hist[len(hist)-max:]
+		}
+	}
+}
+
+func (s *MonitorService) saveHistory(m Measurement) {
+	// 1. JSON Persistence
+	if s.cfg.Database.Type == "json" && s.cfg.Database.JsonFile != "" {
+		s.saveToJSON(m)
+	}
+
+	// 2. SQL Persistence
+	if s.db != nil {
+		s.saveToSQL(m)
+	}
+}
+
+func (s *MonitorService) saveToJSON(m Measurement) {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+
+	data, err := os.ReadFile(s.cfg.Database.JsonFile)
 	var all []Measurement
-	for _, ms := range s.history {
-		all = append(all, ms...)
+	if err == nil {
+		_ = json.Unmarshal(data, &all)
 	}
-	data, err := json.MarshalIndent(all, "", "  ")
-	if err != nil {
-		log.Error().Err(err).Msg("failed to marshal history for saving")
-		return
+	all = append(all, m)
+
+	// Optional: keep total file size reasonable (max_values from config)
+	if s.cfg.Database.MaxValues > 0 && len(all) > s.cfg.Database.MaxValues {
+		all = all[len(all)-s.cfg.Database.MaxValues:]
 	}
-	err = os.WriteFile(s.cfg.Database.JsonFile, data, 0644)
+
+	out, err := json.MarshalIndent(all, "", "  ")
+	if err == nil {
+		_ = os.WriteFile(s.cfg.Database.JsonFile, out, 0644)
+	}
+}
+
+func (s *MonitorService) saveToSQL(m Measurement) {
+	log.Debug().Str("device", m.DeviceID).Time("ts", m.Timestamp).Msg("db: saving measurement to sql")
+	query := "INSERT INTO measurements (device_id, timestamp, pm10, pm25, temperature, humidity, pressure) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+	_, err := s.db.Exec(query, m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.Temperature, m.Humidity, m.Pressure)
 	if err != nil {
-		log.Error().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("failed to write history file")
+		log.Error().Err(err).Msg("failed to save to SQL")
 	}
 }
 
@@ -219,7 +435,7 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 	s.history[m.DeviceID] = hist
 
 	// Save to JSON
-	s.saveHistory()
+	s.saveHistory(m)
 
 	// Check warnings
 	s.notify(&m)
@@ -279,7 +495,8 @@ func (s *MonitorService) notify(m *Measurement) {
 			continue
 		}
 
-		var messages []string
+		var soundMessages []string
+		var silentMessages []string
 		var clearMessages []string
 		isTransition := false
 
@@ -300,7 +517,7 @@ func (s *MonitorService) notify(m *Measurement) {
 			if pm10AbsExceeded && !wasActive {
 				s.setAlertActive(chatID, m.DeviceID, "val10", true)
 				isTransition = true
-				messages = append(messages, s.notifier.T(chatID, "alert_val10_exceeded",
+				soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val10_exceeded",
 					m.PM10, mcfg.PM10Value))
 			} else if !pm10AbsExceeded && wasActive {
 				s.setAlertActive(chatID, m.DeviceID, "val10", false)
@@ -313,7 +530,7 @@ func (s *MonitorService) notify(m *Measurement) {
 			if pm25AbsExceeded && !wasActive {
 				s.setAlertActive(chatID, m.DeviceID, "val25", true)
 				isTransition = true
-				messages = append(messages, s.notifier.T(chatID, "alert_val25_exceeded",
+				soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val25_exceeded",
 					m.PM25, mcfg.PM25Value))
 			} else if !pm25AbsExceeded && wasActive {
 				s.setAlertActive(chatID, m.DeviceID, "val25", false)
@@ -327,7 +544,7 @@ func (s *MonitorService) notify(m *Measurement) {
 			if bothExceeded && !wasActive {
 				s.setAlertActive(chatID, m.DeviceID, "vals", true)
 				isTransition = true
-				messages = append(messages, s.notifier.T(chatID, "alert_vals_exceeded",
+				soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_vals_exceeded",
 					m.PM10, m.PM25))
 			} else if !bothExceeded && wasActive {
 				s.setAlertActive(chatID, m.DeviceID, "vals", false)
@@ -342,17 +559,17 @@ func (s *MonitorService) notify(m *Measurement) {
 
 		// diff10: PM10 percentage growth >= pm10_diff
 		if warnings["diff10"] && pm10DiffExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diff10_growth",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_growth",
 				*m.PM10Diff, mcfg.PM10Diff, m.DiffTime, m.PM10Prev, m.PM10))
 		}
 		// diff25: PM2.5 percentage growth >= pm25_diff
 		if warnings["diff25"] && pm25DiffExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diff25_growth",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_growth",
 				*m.PM25Diff, mcfg.PM25Diff, m.DiffTime, m.PM25Prev, m.PM25))
 		}
 		// diffs: both PM10 and PM2.5 increase simultaneously by their respective diff values
 		if warnings["diffs"] && pm10DiffExceeded && pm25DiffExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diffs_growth",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_growth",
 				*m.PM10Diff, *m.PM25Diff, m.DiffTime))
 		}
 
@@ -362,34 +579,34 @@ func (s *MonitorService) notify(m *Measurement) {
 
 		// diff10_neg: PM10 percentage decrease >= pm10_diff
 		if warnings["diff10_neg"] && pm10NegDiffExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diff10_decrease",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_decrease",
 				*m.PM10Diff, m.DiffTime, m.PM10Prev, m.PM10))
 		}
 		// diff25_neg: PM2.5 percentage decrease >= pm25_diff
 		if warnings["diff25_neg"] && pm25NegDiffExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diff25_decrease",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_decrease",
 				*m.PM25Diff, m.DiffTime, m.PM25Prev, m.PM25))
 		}
 		// diffs_neg: both PM10 and PM2.5 decrease simultaneously by their respective diff values
 		if warnings["diffs_neg"] && pm10NegDiffExceeded && pm25NegDiffExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diffs_decrease",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_decrease",
 				*m.PM10Diff, *m.PM25Diff, m.DiffTime))
 		}
 
 		// diff10_over, diff25_over, diffs_over
 		// diff10_over: PM10 growth >= pm10_diff while already above absolute threshold
 		if warnings["diff10_over"] && pm10DiffExceeded && pm10AbsExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diff10_crit",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_crit",
 				*m.PM10Diff, m.DiffTime, m.PM10))
 		}
 		// diff25_over: PM2.5 growth >= pm25_diff while already above absolute threshold
 		if warnings["diff25_over"] && pm25DiffExceeded && pm25AbsExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diff25_crit",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_crit",
 				*m.PM25Diff, m.DiffTime, m.PM25))
 		}
 		// diffs_over: both PM10/PM2.5 growth >= diff values while both are above absolute thresholds
 		if warnings["diffs_over"] && pm10DiffExceeded && pm25DiffExceeded && pm10AbsExceeded && pm25AbsExceeded {
-			messages = append(messages, s.notifier.T(chatID, "alert_diffs_crit",
+			silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_crit",
 				*m.PM10Diff, *m.PM25Diff))
 		}
 
@@ -397,24 +614,31 @@ func (s *MonitorService) notify(m *Measurement) {
 		// diff10_neg_over: PM10 decrease >= pm10_diff resulting in value below absolute threshold
 		if warnings["diff10_neg_over"] && pm10NegDiffExceeded && !pm10AbsExceeded {
 			isTransition = true
-			messages = append(messages, s.notifier.T(chatID, "alert_diff10_clean",
+			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_diff10_clean",
 				*m.PM10Diff, m.PM10))
 		}
 		// diff25_neg_over: PM2.5 decrease >= pm25_diff resulting in value below absolute threshold
 		if warnings["diff25_neg_over"] && pm25NegDiffExceeded && !pm25AbsExceeded {
 			isTransition = true
-			messages = append(messages, s.notifier.T(chatID, "alert_diff25_clean",
+			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_diff25_clean",
 				*m.PM25Diff, m.PM25))
 		}
 		// diffs_neg_over: both PM10/PM2.5 decrease >= diff values resulting in both values below thresholds
 		if warnings["diffs_neg_over"] && pm10NegDiffExceeded && pm25NegDiffExceeded && !pm10AbsExceeded && !pm25AbsExceeded {
 			isTransition = true
-			messages = append(messages, s.notifier.T(chatID, "alert_diffs_clean",
+			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_diffs_clean",
 				*m.PM10Diff, *m.PM25Diff))
 		}
 
-		if len(messages) > 0 || len(clearMessages) > 0 {
-			for _, msg := range messages {
+		var finalMessages []string
+		if len(soundMessages) > 0 || len(clearMessages) > 0 {
+			finalMessages = soundMessages
+		} else {
+			finalMessages = silentMessages
+		}
+
+		if len(finalMessages) > 0 || len(clearMessages) > 0 {
+			for _, msg := range finalMessages {
 				log.Warn().Int64("chat", chatID).Str("device", m.DeviceID).Msg(msg)
 			}
 			for _, msg := range clearMessages {
@@ -422,7 +646,93 @@ func (s *MonitorService) notify(m *Measurement) {
 			}
 			// Use the unified Notify method.
 			// It should be loud if there's a transition or a clear message.
-			s.notifier.Notify(chatID, m.DeviceID, m, messages, clearMessages, !isTransition && len(clearMessages) == 0)
+			s.notifier.Notify(chatID, m.DeviceID, m, finalMessages, clearMessages, !isTransition && len(clearMessages) == 0)
 		}
 	}
+}
+
+// GetHistoryByDuration returns history for the given device up to 24h back.
+// It prioritizes DB/Persistent store if available.
+func (s *MonitorService) GetHistoryByDuration(deviceID string, duration time.Duration) []Measurement {
+	var res []Measurement
+	// 1. Try SQL
+	if s.db != nil {
+		res = s.getHistoryFromSQL(deviceID, duration)
+		if len(res) > 0 {
+			return res
+		}
+	}
+	// 2. Try JSON
+	if s.cfg.Database.JsonFile != "" {
+		res = s.getHistoryFromJSON(deviceID, duration)
+		if len(res) > 0 {
+			return res
+		}
+	}
+	// 3. Try RAM
+	res = s.GetHistory(deviceID)
+	log.Debug().Str("device", deviceID).Dur("duration", duration).Int("count", len(res)).Msg("monitor: history fetched (fallback)")
+	return res
+}
+
+func (s *MonitorService) getHistoryFromSQL(deviceID string, duration time.Duration) []Measurement {
+	since := time.Now().UTC().Add(-duration)
+	log.Debug().Str("device", deviceID).Dur("duration", duration).Msg("db: querying sql history")
+	query := "SELECT device_id, timestamp, pm10, pm25, temperature, humidity, pressure FROM measurements WHERE device_id = $1 AND timestamp >= $2 ORDER BY timestamp ASC"
+	rows, err := s.db.Query(query, deviceID, since)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to query SQL history")
+		return nil
+	}
+	defer rows.Close()
+
+	var res []Measurement
+	for rows.Next() {
+		var m Measurement
+		if err := rows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
+			res = append(res, m)
+		}
+	}
+	return res
+}
+
+func (s *MonitorService) getHistoryFromJSON(deviceID string, duration time.Duration) []Measurement {
+	s.fileMu.RLock()
+	defer s.fileMu.RUnlock()
+
+	data, err := os.ReadFile(s.cfg.Database.JsonFile)
+	if err != nil {
+		return nil
+	}
+	var all []Measurement
+	json.Unmarshal(data, &all)
+
+	since := time.Now().UTC().Add(-duration)
+	var res []Measurement
+	for _, m := range all {
+		if m.DeviceID == deviceID && m.Timestamp.After(since) {
+			res = append(res, m)
+		}
+	}
+	return res
+}
+
+func (s *MonitorService) persistenceWorker() {
+	for {
+		select {
+		case m := <-s.persistChan:
+			s.saveHistory(m)
+		case <-s.done:
+			// Drain channel before exiting
+			close(s.persistChan)
+			for m := range s.persistChan {
+				s.saveHistory(m)
+			}
+			return
+		}
+	}
+}
+
+func (s *MonitorService) Close() {
+	close(s.done)
 }
