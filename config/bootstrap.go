@@ -31,9 +31,9 @@ func NewLogger(cfg Log) (zerolog.Logger, func(), error) {
 
 	// 2. File output (always JSON for structured logging)
 	var fileWriter io.WriteCloser
-	if cfg.File != "" {
+	if cfg.LogFile != "" {
 		lj := &lumberjack.Logger{
-			Filename:   cfg.File,
+			Filename:   cfg.LogFile,
 			MaxSize:    cfg.Rotate.MaxSizeMB,
 			MaxBackups: cfg.Rotate.MaxBackups,
 			MaxAge:     cfg.Rotate.MaxAgeDays,

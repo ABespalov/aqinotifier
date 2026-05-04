@@ -44,6 +44,11 @@ func main() {
 		}
 	}()
 
+	if cfg.Database.JsonFile == "" {
+		fmt.Fprintf(os.Stderr, "database.json_file is required for the application to function\n")
+		os.Exit(1)
+	}
+
 	var bot *tgbot.Bot
 	ms := monitor.NewMonitorService(cfg)
 	
@@ -141,13 +146,13 @@ func main() {
 					oldTgEnabled := cfg.TgBot.Enabled
 					oldTgToken := cfg.TgBot.Token
 					oldLogLevel := cfg.Log.Level
-					oldLogFile := cfg.Log.File
+					oldLogFile := cfg.Log.LogFile
 
 					*cfg = *newCfg
 					updateModTimes(cfg)
 					log.Info().Msg("config reload: success")
 
-					if cfg.Log.Level != oldLogLevel || cfg.Log.File != oldLogFile {
+					if cfg.Log.Level != oldLogLevel || cfg.Log.LogFile != oldLogFile {
 						log.Info().Msg("config reload: updating logger...")
 						if activeCleanup != nil {
 							activeCleanup()
@@ -181,7 +186,7 @@ func main() {
 					log.Error().Msg("tgbot.enabled is true but tgbot.token is not set")
 				} else {
 					var err error
-					bot, err = tgbot.NewBot(&cfg.TgBot, &cfg.Monitor, ms)
+					bot, err = tgbot.NewBot(cfg, &cfg.Monitor, ms)
 					if err != nil {
 						log.Error().Err(err).Msg("failed to start Telegram bot")
 					} else {

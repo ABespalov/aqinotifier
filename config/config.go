@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const AppVersion = "0.6.7a"
+const AppVersion = "0.8.0a"
 
 // Server holds HTTP server binding settings and the URL path used by the
 // application to receive POST requests from sensors.
@@ -44,23 +44,24 @@ type LogRotate struct {
 
 // Log holds local logging configuration (for zerolog/lumberjack).
 type Log struct {
-	Level  string    `yaml:"level"`
-	File   string    `yaml:"file"`
-	Format string    `yaml:"format"`
-	Rotate LogRotate `yaml:"rotate"`
+	Level   string    `yaml:"level"`
+	LogFile string    `yaml:"log_file"`
+	Format  string    `yaml:"format"`
+	Rotate  LogRotate `yaml:"rotate"`
 }
 
 // NewLogConfig returns a Log pre-populated with sensible defaults.
 // These defaults enable JSON output with file rotation enabled.
 func NewLogConfig() *Log {
+	app := getAppName()
 	return &Log{
-		Level:  "info",
-		File:   "logs/aqinotifier.log",
-		Format: "json",
+		Level:   "info",
+		LogFile: app + ".log",
+		Format:  "json",
 		Rotate: LogRotate{
-			Enabled:    true,
-			MaxSizeMB:  100,
-			MaxBackups: 7,
+			Enabled:    false,
+			MaxSizeMB:  20,
+			MaxBackups: 1,
 			MaxAgeDays: 30,
 			Compress:   true,
 		},
@@ -71,11 +72,11 @@ func NewLogConfig() *Log {
 func NewServerConfig() *Server {
 	return &Server{
 		Host:     "0.0.0.0",
-		Port:     8088,
+		Port:     28288,
 		Url:      "/aqi",
-		Protocol: "http",
-		CertFile: "",
-		KeyFile:  "",
+		Protocol: "https",
+		CertFile: "localhost.pem",
+		KeyFile:  "localhost-key.pem",
 		Timeout: ServerTimeout{
 			Server: 30,
 			Read:   15,
@@ -106,7 +107,13 @@ func (s Server) String() string {
 // Database contains settings required to open a connection to the SQL
 // database and tune the connection pool.
 type Database struct {
-	Type            string `yaml:"type"`
+	// Supported types: "postgres", "json".
+	// Logic: data is always written to JSON (if json_file is set).
+	// If type is "json", data is ONLY written to JSON.
+	// If type is "postgres", data is written to Postgres AND JSON (for stability).
+	Type string `yaml:"type"`
+	// JSON file settings (always used for persistence and stability).
+	// If json_file is not set, the application cannot function.
 	JsonFile        string `yaml:"json_file"`
 	PgsqlFile       string `yaml:"pgsql_file"`
 	MaxValues       int    `yaml:"max_values"`
@@ -125,11 +132,12 @@ type Database struct {
 // suitable for local development. Adjust SslMode and pool sizes for
 // production environments.
 func NewDatabaseConfig() *Database {
+	app := getAppName()
 	return &Database{
-		Type:            "json",
-		JsonFile:        "{app}.data.json",
-		PgsqlFile:       "",
-		MaxValues:       10,
+		Type:            "postgres",
+		JsonFile:        app + ".data.json",
+		PgsqlFile:       app + ".pgsql",
+		MaxValues:       1500,
 		Host:            "localhost",
 		Port:            5432,
 		Db:              "postgres",
@@ -162,12 +170,17 @@ func NewSystemConfig() *System {
 }
 
 type Monitor struct {
-	PM10Value float64  `yaml:"pm10_value" json:"pm10_value"`
-	PM25Value float64  `yaml:"pm25_value" json:"pm25_value"`
-	DiffTime  int      `yaml:"diff_time" json:"diff_time"`
-	PM10Diff  float64  `yaml:"pm10_diff" json:"pm10_diff"`
-	PM25Diff  float64  `yaml:"pm25_diff" json:"pm25_diff"`
-	Warnings  []string `yaml:"warnings" json:"warnings"`
+	PM10Green  float64  `yaml:"pm10_green" json:"pm10_green"`
+	PM25Green  float64  `yaml:"pm25_green" json:"pm25_green"`
+	PM10Yellow float64  `yaml:"pm10_yellow" json:"pm10_yellow"`
+	PM25Yellow float64  `yaml:"pm25_yellow" json:"pm25_yellow"`
+	PM10Diff   float64  `yaml:"pm10_diff" json:"pm10_diff"`
+	PM25Diff   float64  `yaml:"pm25_diff" json:"pm25_diff"`
+	Warnings   []string `yaml:"warnings" json:"warnings"`
+
+	// Migration fields (deprecated)
+	PM10Value float64 `yaml:"-" json:"pm10_value,omitempty"`
+	PM25Value float64 `yaml:"-" json:"pm25_value,omitempty"`
 }
 
 // NewMonitorConfig returns a Monitor pre-populated with default values
@@ -175,12 +188,13 @@ type Monitor struct {
 // PM10 diff 45.0%, PM2.5 diff 37.5%, and default warnings.
 func NewMonitorConfig() *Monitor {
 	return &Monitor{
-		PM10Value: 10.0,
-		PM25Value: 5.0,
-		DiffTime:  150,
-		PM10Diff:  45.0,
-		PM25Diff:  37.5,
-		Warnings:  []string{"vals", "diffs_over"},
+		PM10Green:  10.0,
+		PM25Green:  5.0,
+		PM10Yellow: 20.0,
+		PM25Yellow: 10.0,
+		PM10Diff:   45.0,
+		PM25Diff:   37.5,
+		Warnings:   []string{"vals-ru", "vals-gd"},
 	}
 }
 
@@ -207,14 +221,15 @@ type TgBot struct {
 
 // NewTgBotConfig returns a TgBot with sensible defaults.
 func NewTgBotConfig() *TgBot {
+	app := getAppName()
 	return &TgBot{
-		Enabled:       false,
+		Enabled:       true,
 		Token:         "",
-		TokenFile:     "{app}.tgbot.token",
-		JsonFile:      "{app}.tgbot.json",
+		TokenFile:     app + ".tgbot.token",
+		JsonFile:      app + ".tgbot.json",
 		Debug:         false,
-		ChartWidth:    800,
-		ChartHeight:   600,
+		ChartWidth:    1024,
+		ChartHeight:   768,
 		ChartFontSize: 12.0,
 	}
 }
@@ -247,25 +262,13 @@ func NewConfig() *Config {
 // It returns a regular error on failure so callers can handle it in a
 // conventional way (wrapping is used to preserve the underlying cause).
 func (cfg *Config) LoadFromFile(fileName string) error {
-	exe, exeErr := os.Executable()
-	var exeDir, exeName string
-	if exeErr == nil {
-		exePath, _ := filepath.Abs(exe)
-		exeDir = filepath.Dir(exePath)
-		// Handle "go run" which puts the executable in a temp directory
+	exeName := getAppName()
+	exeDir := "."
+	if exe, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(exe)
 		if strings.Contains(exeDir, "go-build") || strings.Contains(exeDir, "Temp") {
-			exeDir, _ = os.Getwd()
-			exeName = "aqinotifier"
-		} else {
-			exeName = filepath.Base(exePath)
-			if ext := filepath.Ext(exeName); ext != "" {
-				exeName = strings.TrimSuffix(exeName, ext)
-			}
+			exeDir = "."
 		}
-	} else {
-		// Fallback for app name if Executable() fails
-		exeDir, _ = os.Getwd()
-		exeName = "aqinotifier"
 	}
 
 	resolveAppPath := func(raw string) string {
@@ -275,7 +278,7 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 		resolved := strings.ReplaceAll(raw, "{app}", exeName)
 		// If only a filename (no directory component) and we have exeDir,
 		// place next to the executable.
-		if exeErr == nil && filepath.Base(resolved) == resolved {
+		if filepath.Base(resolved) == resolved && exeDir != "." {
 			return filepath.Join(exeDir, resolved)
 		}
 		return resolved
@@ -319,8 +322,8 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 	if cfg.TgBot.JsonFile != "" {
 		cfg.TgBot.JsonFile = resolveAppPath(cfg.TgBot.JsonFile)
 	}
-	if cfg.Log.File != "" {
-		cfg.Log.File = resolveAppPath(cfg.Log.File)
+	if cfg.Log.LogFile != "" {
+		cfg.Log.LogFile = resolveAppPath(cfg.Log.LogFile)
 	}
 
 	// 5. Load token from file if not provided in YAML
@@ -343,4 +346,20 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 	}
 
 	return nil
+}
+
+func getAppName() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "aqinotifier"
+	}
+	exeDir := filepath.Dir(exe)
+	if strings.Contains(exeDir, "go-build") || strings.Contains(exeDir, "Temp") {
+		return "aqinotifier"
+	}
+	name := filepath.Base(exe)
+	if ext := filepath.Ext(name); ext != "" {
+		name = strings.TrimSuffix(name, ext)
+	}
+	return name
 }

@@ -19,6 +19,7 @@ type Subscription struct {
 	TGCode    string          `json:"tg_code,omitempty"`
 	UnitTemp  string          `json:"unit_temp,omitempty"`  // "c", "f"
 	UnitPress string          `json:"unit_press,omitempty"` // "mmhg", "hpa"
+	Version   int             `json:"version,omitempty"`    // for migrations
 }
 
 // Store manages Telegram bot state persisted to a JSON file or Postgres.
@@ -166,17 +167,108 @@ func (s *Store) GetSettings(chatID int64, defaults *config.Monitor) *config.Moni
 		sub = &Subscription{
 			ChatID:   chatID,
 			Settings: s.cloneMonitor(defaults),
+			Version:  1,
 		}
 		s.subs[chatID] = sub
 		log.Info().Int64("chat_id", chatID).Msg("tgbot: new user registered")
 		s.save()
 		return sub.Settings
 	}
+	// Forced reset for old users during "update"
+	if sub.Version == 0 {
+		log.Info().Int64("chat_id", chatID).Msg("tgbot: resetting old user settings to defaults")
+		sub.Settings = s.cloneMonitor(defaults)
+		sub.Version = 1
+		s.save()
+		return sub.Settings
+	}
 	if sub.Settings == nil {
 		sub.Settings = s.cloneMonitor(defaults)
 		s.save()
+	} else {
+		if s.migrateSettings(sub.Settings, defaults) {
+			s.save()
+		}
 	}
 	return sub.Settings
+}
+
+// ResetSettings clears user settings and restores defaults.
+func (s *Store) ResetSettings(chatID int64, defaults *config.Monitor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sub, ok := s.subs[chatID]
+	if ok {
+		sub.Settings = s.cloneMonitor(defaults)
+		sub.Version = 1
+		s.save()
+	}
+}
+
+func (s *Store) migrateSettings(m *config.Monitor, defaults *config.Monitor) bool {
+	changed := false
+
+	// 1. Thresholds migration
+	if m.PM10Green == 0 && m.PM10Value > 0 {
+		m.PM10Green = m.PM10Value
+		m.PM10Value = 0
+		changed = true
+	}
+	if m.PM25Green == 0 && m.PM25Value > 0 {
+		m.PM25Green = m.PM25Value
+		m.PM25Value = 0
+		changed = true
+	}
+	if m.PM10Yellow == 0 {
+		m.PM10Yellow = defaults.PM10Yellow
+		changed = true
+	}
+	if m.PM25Yellow == 0 {
+		m.PM25Yellow = defaults.PM25Yellow
+		changed = true
+	}
+
+	// 2. Warnings migration (old keys to new keys)
+	oldToNew := map[string][]string{
+		"val10":          {"val10-yu", "val10-ru", "val10-yd", "val10-gd"},
+		"val25":          {"val10-yu", "val10-ru", "val10-yd", "val10-gd"},
+		"vals":           {"vals-yu", "vals-ru", "vals-yd", "vals-gd"},
+		"diff10":         {"diff10-gu", "diff10-yu", "diff10-ru"},
+		"diff25":         {"diff25-gu", "diff25-yu", "diff25-ru"},
+		"diffs":          {"diffs-gu", "diffs-yu", "diffs-ru"},
+		"diff10_neg":     {"diff10-gd", "diff10-yd", "diff10-rd"},
+		"diff25_neg":     {"diff25-gd", "diff25-yd", "diff25-rd"},
+		"diffs_neg":      {"diffs-gd", "diffs-yd", "diffs-rd"},
+		"diff10_over":    {"diff10-yu", "diff10-ru"},
+		"diff25_over":    {"diff25-yu", "diff25-ru"},
+		"diffs_over":     {"diffs-yu", "diffs-ru"},
+		"diff10_neg_over": {"diff10-gd", "diff10-yd"},
+		"diff25_neg_over": {"diff25-gd", "diff25-yd"},
+		"diffs_neg_over":  {"diffs-gd", "diffs-yd"},
+	}
+
+	newWarnings := make(map[string]bool)
+	hasOld := false
+	for _, w := range m.Warnings {
+		if targets, ok := oldToNew[w]; ok {
+			for _, t := range targets {
+				newWarnings[t] = true
+			}
+			hasOld = true
+		} else {
+			newWarnings[w] = true
+		}
+	}
+
+	if hasOld {
+		m.Warnings = make([]string, 0, len(newWarnings))
+		for w := range newWarnings {
+			m.Warnings = append(m.Warnings, w)
+		}
+		changed = true
+	}
+
+	return changed
 }
 
 func (s *Store) cloneMonitor(m *config.Monitor) *config.Monitor {
@@ -201,6 +293,35 @@ func (s *Store) UpdateSettings(chatID int64, settings *config.Monitor) {
 	}
 	sub.Settings = settings
 	s.save()
+}
+
+// BatchUpdateThresholds updates specific threshold values and notification settings for all registered users.
+func (s *Store) BatchUpdateThresholds(pm10G, pm10Y, pm25G, pm25Y, pm10D, pm25D float64, warnings []string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for _, sub := range s.subs {
+		if sub.Settings == nil {
+			sub.Settings = &config.Monitor{}
+		}
+		sub.Settings.PM10Green = pm10G
+		sub.Settings.PM10Yellow = pm10Y
+		sub.Settings.PM25Green = pm25G
+		sub.Settings.PM25Yellow = pm25Y
+		sub.Settings.PM10Diff = pm10D
+		sub.Settings.PM25Diff = pm25D
+
+		// Update warnings
+		newWarnings := make([]string, len(warnings))
+		copy(newWarnings, warnings)
+		sub.Settings.Warnings = newWarnings
+
+		count++
+	}
+	if count > 0 {
+		s.save()
+	}
+	return count
 }
 
 // GetLanguage returns the language code for a chat.
