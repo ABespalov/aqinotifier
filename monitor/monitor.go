@@ -3,6 +3,7 @@ package monitor
 import (
 	"database/sql"
 	"encoding/json"
+	"math"
 	"os"
 	"strconv"
 	"sync"
@@ -28,6 +29,13 @@ type Measurement struct {
 	DiffTime    int       `json:"diff_time"`
 }
 
+// AlertEvent represents a specific monitoring event that triggered a notification.
+// It carries the event type and optional associated value (like AQI).
+type AlertEvent struct {
+	ID    string
+	Value float64
+}
+
 // Notifier is implemented by anything that can deliver warning messages
 // (e.g. the Telegram bot). Using an interface keeps the monitor package
 // decoupled from the tgbot package.
@@ -36,14 +44,8 @@ type Notifier interface {
 	GetSubscribers(deviceID string) []int64
 	// GetUserSettings returns the personalized monitor settings for a chat.
 	GetUserSettings(chatID int64) *config.Monitor
-	// SendWarning delivers a warning message to a specific subscriber.
-	SendWarning(chatID int64, deviceID string, m *Measurement, messages []string, silent bool)
-	// SendClear delivers a "values returned to normal" notification to a specific subscriber.
-	SendClear(chatID int64, deviceID string, m *Measurement, messages []string)
-	// Notify delivers a unified notification with appropriate styling.
-	Notify(chatID int64, deviceID string, m *Measurement, alertMessages []string, clearMessages []string, silent bool)
-	// T returns a localized string for a given key and arguments.
-	T(chatID int64, key string, args ...interface{}) string
+	// Notify delivers a unified notification with appropriate styling based on events.
+	Notify(chatID int64, m *Measurement, alerts []AlertEvent, clears []AlertEvent, silent bool)
 }
 
 type MonitorService struct {
@@ -52,7 +54,7 @@ type MonitorService struct {
 	mu       sync.RWMutex
 	notifier Notifier
 	db       *sql.DB
-	fileMu      sync.RWMutex     // protects JSON file from concurrent writes
+	fileMu   sync.RWMutex // protects JSON file from concurrent writes
 }
 
 // SetNotifier attaches a Notifier that will receive warning callbacks.
@@ -167,7 +169,7 @@ func (s *MonitorService) migrateFromJSON() {
 	}
 
 	log.Info().Str("file", s.cfg.Database.JsonFile).Int("total_records", len(all)).Msg("monitor: ensuring json data is synced to postgres...")
-	
+
 	countMigrated := 0
 	batchSize := 100
 	for i := 0; i < len(all); i += batchSize {
@@ -240,6 +242,9 @@ func (s *MonitorService) loadHistory() {
 	for _, m := range all {
 		s.history[m.DeviceID] = append(s.history[m.DeviceID], m)
 	}
+	for id := range s.history {
+		s.recalculateDiffs(id)
+	}
 	s.trimHistoryInternal()
 	log.Info().Int("records", len(all)).Msg("monitor: history loaded from JSON")
 }
@@ -290,8 +295,33 @@ func (s *MonitorService) loadHistoryFromSQL() {
 		}
 		mRows.Close()
 		s.history[id] = deviceHist
+		s.recalculateDiffs(id)
 	}
 	log.Info().Int("devices", len(deviceIDs)).Int("limit_per_device", max).Msg("monitor: history loaded from SQL")
+}
+
+func (s *MonitorService) recalculateDiffs(deviceID string) {
+	hist := s.history[deviceID]
+	if len(hist) < 2 {
+		return
+	}
+	for i := 1; i < len(hist); i++ {
+		prev := &hist[i-1]
+		curr := &hist[i]
+
+		curr.PM10Prev = prev.PM10
+		curr.PM25Prev = prev.PM25
+		curr.DiffTime = int(curr.Timestamp.Sub(prev.Timestamp).Seconds())
+
+		if prev.PM10 > 0 {
+			diff := ((curr.PM10 - prev.PM10) / prev.PM10) * 100.0
+			curr.PM10Diff = &diff
+		}
+		if prev.PM25 > 0 {
+			diff := ((curr.PM25 - prev.PM25) / prev.PM25) * 100.0
+			curr.PM25Diff = &diff
+		}
+	}
 }
 
 func (s *MonitorService) trimHistoryInternal() {
@@ -469,164 +499,234 @@ func (s *MonitorService) notify(m *Measurement) {
 		prevZ10 := getZone(m.PM10Prev, pm10Green, pm10Yellow)
 		prevZ25 := getZone(m.PM25Prev, pm25Green, pm25Yellow)
 
-		var soundMessages []string
-		var silentMessages []string
-		var clearMessages []string // Used for "vals-gd" or similar "back to green"
+		notifications := make(map[string]bool)
+		for _, n := range mcfg.Notifications {
+			notifications[n] = true
+		}
 
 		warnings := make(map[string]bool)
 		for _, w := range mcfg.Warnings {
 			warnings[w] = true
 		}
 
-		// Sound Notifications (val10-*, val25-*, vals-*)
-		
-		// PM10 transitions
 		p10d := 0.0
 		if m.PM10Diff != nil {
 			p10d = *m.PM10Diff
 		}
-
-		if warnings["val10-yu"] && z10 == zoneYellow && prevZ10 == zoneGreen {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val10_yu", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-		}
-		if warnings["val10-ru"] && z10 == zoneRed && prevZ10 != zoneRed {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val10_ru", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-		}
-		if warnings["val10-yd"] && z10 == zoneYellow && prevZ10 == zoneRed {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val10_yd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-		}
-		if warnings["val10-gd"] && z10 == zoneGreen && prevZ10 != zoneGreen {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val10_gd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-		}
-
-		// PM2.5 transitions
 		p25d := 0.0
 		if m.PM25Diff != nil {
 			p25d = *m.PM25Diff
 		}
 
-		if warnings["val25-yu"] && z25 == zoneYellow && prevZ25 == zoneGreen {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val25_yu", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
+		var soundEvents []AlertEvent
+		var silentEvents []AlertEvent
+		var clearEvents []AlertEvent
+		isLoud := false
+		addEvent := func(id string, val ...float64) {
+			if !notifications[id] {
+				return
+			}
+			v := 0.0
+			if len(val) > 0 {
+				v = val[0]
+			}
+			evt := AlertEvent{ID: id, Value: v}
+			if warnings[id] {
+				soundEvents = append(soundEvents, evt)
+				isLoud = true
+			} else {
+				silentEvents = append(silentEvents, evt)
+			}
 		}
-		if warnings["val25-ru"] && z25 == zoneRed && prevZ25 != zoneRed {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val25_ru", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
+
+		addClear := func(id string, val ...float64) {
+			if !notifications[id] {
+				return
+			}
+			v := 0.0
+			if len(val) > 0 {
+				v = val[0]
+			}
+			evt := AlertEvent{ID: id, Value: v}
+			clearEvents = append(clearEvents, evt)
+			if warnings[id] {
+				isLoud = true
+			}
 		}
-		if warnings["val25-yd"] && z25 == zoneYellow && prevZ25 == zoneRed {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val25_yd", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
+
+		// PM10 transitions
+		if z10 == zoneYellow && prevZ10 == zoneGreen {
+			addEvent("val10-yu")
 		}
-		if warnings["val25-gd"] && z25 == zoneGreen && prevZ25 != zoneGreen {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_val25_gd", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
+		if z10 == zoneRed && prevZ10 != zoneRed {
+			addEvent("val10-ru")
+		}
+		if z10 == zoneYellow && prevZ10 == zoneRed {
+			addEvent("val10-yd")
+		}
+		if z10 == zoneGreen && prevZ10 != zoneGreen {
+			addClear("val10-gd")
+		}
+
+		// PM2.5 transitions
+		if z25 == zoneYellow && prevZ25 == zoneGreen {
+			addEvent("val25-yu")
+		}
+		if z25 == zoneRed && prevZ25 != zoneRed {
+			addEvent("val25-ru")
+		}
+		if z25 == zoneYellow && prevZ25 == zoneRed {
+			addEvent("val25-yd")
+		}
+		if z25 == zoneGreen && prevZ25 != zoneGreen {
+			addClear("val25-gd")
 		}
 
 		// Combined transitions
-		if warnings["vals-yu"] && (z10 >= zoneYellow && z25 >= zoneYellow) && (prevZ10 == zoneGreen && prevZ25 == zoneGreen) && (z10 == zoneYellow || z25 == zoneYellow) {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_vals_yu", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
+		if (z10 >= zoneYellow && z25 >= zoneYellow) && (prevZ10 == zoneGreen && prevZ25 == zoneGreen) && (z10 == zoneYellow || z25 == zoneYellow) {
+			addEvent("vals-yu")
 		}
-		if warnings["vals-ru"] && (z10 == zoneRed && z25 == zoneRed) && (prevZ10 != zoneRed || prevZ25 != zoneRed) {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_vals_ru", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
+		if (z10 == zoneRed && z25 == zoneRed) && (prevZ10 != zoneRed || prevZ25 != zoneRed) {
+			addEvent("vals-ru")
 		}
-		if warnings["vals-yd"] && (z10 == zoneYellow && z25 == zoneYellow) && (prevZ10 == zoneRed && prevZ25 == zoneRed) {
-			soundMessages = append(soundMessages, s.notifier.T(chatID, "alert_vals_yd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
+		if (z10 == zoneYellow && z25 == zoneYellow) && (prevZ10 == zoneRed && prevZ25 == zoneRed) {
+			addEvent("vals-yd")
 		}
-		if warnings["vals-gd"] && (z10 == zoneGreen && z25 == zoneGreen) && (prevZ10 != zoneGreen || prevZ25 != zoneGreen) {
-			clearMessages = append(clearMessages, s.notifier.T(chatID, "alert_vals_gd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-		}
-
-		// Silent Notifications (diff10-*, diff25-*, diffs-*)
-		pm10DiffExceeded := m.PM10Diff != nil && *m.PM10Diff >= mcfg.PM10Diff
-		pm25DiffExceeded := m.PM25Diff != nil && *m.PM25Diff >= mcfg.PM25Diff
-		pm10NegDiffExceeded := m.PM10Diff != nil && *m.PM10Diff <= -mcfg.PM10Diff
-		pm25NegDiffExceeded := m.PM25Diff != nil && *m.PM25Diff <= -mcfg.PM25Diff
-
-		// Growth
-		if pm10DiffExceeded {
-			if warnings["diff10-gu"] && z10 == zoneGreen {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_gu", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-			}
-			if warnings["diff10-yu"] && z10 == zoneYellow {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_yu", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-			}
-			if warnings["diff10-ru"] && z10 == zoneRed {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_ru", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-			}
-		}
-		if pm25DiffExceeded {
-			if warnings["diff25-gu"] && z25 == zoneGreen {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_gu", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-			if warnings["diff25-yu"] && z25 == zoneYellow {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_yu", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-			if warnings["diff25-ru"] && z25 == zoneRed {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_ru", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-		}
-		if pm10DiffExceeded && pm25DiffExceeded {
-			if warnings["diffs-gu"] && z10 == zoneGreen && z25 == zoneGreen {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_gu", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-			if warnings["diffs-yu"] && z10 == zoneYellow && z25 == zoneYellow {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_yu", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-			if warnings["diffs-ru"] && z10 == zoneRed && z25 == zoneRed {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_ru", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
+		if (z10 == zoneGreen && z25 == zoneGreen) && (prevZ10 != zoneGreen || prevZ25 != zoneGreen) {
+			addClear("vals-gd")
 		}
 
-		// Drop
-		if pm10NegDiffExceeded {
-			if warnings["diff10-gd"] && z10 == zoneGreen {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_gd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-			}
-			if warnings["diff10-yd"] && z10 == zoneYellow {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_yd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-			}
-			if warnings["diff10-rd"] && z10 == zoneRed {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff10_rd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow))
-			}
-		}
-		if pm25NegDiffExceeded {
-			if warnings["diff25-gd"] && z25 == zoneGreen {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_gd", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-			if warnings["diff25-yd"] && z25 == zoneYellow {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_yd", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-			if warnings["diff25-rd"] && z25 == zoneRed {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diff25_rd", m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-		}
-		if pm10NegDiffExceeded && pm25NegDiffExceeded {
-			if warnings["diffs-gd"] && z10 == zoneGreen && z25 == zoneGreen {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_gd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-			if warnings["diffs-yd"] && z10 == zoneYellow && z25 == zoneYellow {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_yd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-			if warnings["diffs-rd"] && z10 == zoneRed && z25 == zoneRed {
-				silentMessages = append(silentMessages, s.notifier.T(chatID, "alert_diffs_rd", m.PM10-m.PM10Prev, p10d, m.PM10Prev, m.PM10, pm10Green, pm10Yellow, m.PM25-m.PM25Prev, p25d, m.PM25Prev, m.PM25, pm25Green, pm25Yellow))
-			}
-		}
+		// AQI Notifications
+		var aqi float64
+		var level sensor.AQILevel
+		var prevLevel sensor.AQILevel
 
-		var finalMessages []string
-		isTransition := false
-		if len(soundMessages) > 0 {
-			finalMessages = soundMessages
-			isTransition = true
+		if mcfg.AQIStandard == "US" {
+			aqi, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
+			_, prevLevel = sensor.CalculateUS_AQI(m.PM25Prev, m.PM10Prev)
 		} else {
-			finalMessages = silentMessages
+			aqi, level = sensor.CalculateEU_AQI(m.PM25, m.PM10)
+			_, prevLevel = sensor.CalculateEU_AQI(m.PM25Prev, m.PM10Prev)
 		}
 
-		if len(finalMessages) > 0 || len(clearMessages) > 0 {
-			for _, msg := range finalMessages {
-				log.Warn().Int64("chat", chatID).Str("device", m.DeviceID).Msg(msg)
+		if level != prevLevel {
+			var aqiID string
+			switch level {
+			case sensor.LevelGood:
+				aqiID = "aqi_z1"
+			case sensor.LevelModerate:
+				aqiID = "aqi_z2"
+			case sensor.LevelSlightlyUnhealthy:
+				aqiID = "aqi_z3"
+			case sensor.LevelUnhealthy:
+				aqiID = "aqi_z4"
+			case sensor.LevelVeryUnhealthy:
+				aqiID = "aqi_z5"
+			case sensor.LevelHazardous:
+				aqiID = "aqi_z6"
+			case sensor.LevelExtremelyHazardous:
+				aqiID = "aqi_z7"
 			}
-			for _, msg := range clearMessages {
-				log.Info().Int64("chat", chatID).Str("device", m.DeviceID).Msg("cleared: " + msg)
+
+			if aqiID != "" {
+				if level == sensor.LevelGood {
+					addClear(aqiID, aqi)
+				} else {
+					addEvent(aqiID, aqi)
+				}
+			}
+		}
+
+		// Silent Notifications (Growth/Drop within zones)
+		pm10DiffExceeded := m.PM10Diff != nil && math.Abs(*m.PM10Diff) >= mcfg.PM10Diff
+		pm25DiffExceeded := m.PM25Diff != nil && math.Abs(*m.PM25Diff) >= mcfg.PM25Diff
+
+		// PM10 Growth
+		if pm10DiffExceeded && p10d > 0 {
+			if z10 == zoneGreen {
+				addEvent("diff10-gu")
+			}
+			if z10 == zoneYellow {
+				addEvent("diff10-yu")
+			}
+			if z10 == zoneRed {
+				addEvent("diff10-ru")
+			}
+		}
+		// PM2.5 Growth
+		if pm25DiffExceeded && p25d > 0 {
+			if z25 == zoneGreen {
+				addEvent("diff25-gu")
+			}
+			if z25 == zoneYellow {
+				addEvent("diff25-yu")
+			}
+			if z25 == zoneRed {
+				addEvent("diff25-ru")
+			}
+		}
+		// Combined Growth
+		if pm10DiffExceeded && p10d > 0 && pm25DiffExceeded && p25d > 0 {
+			if z10 == zoneGreen && z25 == zoneGreen {
+				addEvent("diffs-gu")
+			}
+			if z10 == zoneYellow && z25 == zoneYellow {
+				addEvent("diffs-yu")
+			}
+			if z10 == zoneRed && z25 == zoneRed {
+				addEvent("diffs-ru")
+			}
+		}
+		// PM10 Drop
+		if pm10DiffExceeded && p10d < 0 {
+			if z10 == zoneGreen {
+				addEvent("diff10-gd")
+			}
+			if z10 == zoneYellow {
+				addEvent("diff10-yd")
+			}
+			if z10 == zoneRed {
+				addEvent("diff10-rd")
+			}
+		}
+		// PM2.5 Drop
+		if pm25DiffExceeded && p25d < 0 {
+			if z25 == zoneGreen {
+				addEvent("diff25-gd")
+			}
+			if z25 == zoneYellow {
+				addEvent("diff25-yd")
+			}
+			if z25 == zoneRed {
+				addEvent("diff25-rd")
+			}
+		}
+		// Combined Drop
+		if pm10DiffExceeded && p10d < 0 && pm25DiffExceeded && p25d < 0 {
+			if z10 == zoneGreen && z25 == zoneGreen {
+				addEvent("diffs-gd")
+			}
+			if z10 == zoneYellow && z25 == zoneYellow {
+				addEvent("diffs-yd")
+			}
+			if z10 == zoneRed && z25 == zoneRed {
+				addEvent("diffs-rd")
+			}
+		}
+
+		var finalEvents []AlertEvent
+		finalEvents = append(finalEvents, soundEvents...)
+		finalEvents = append(finalEvents, silentEvents...)
+
+		if len(finalEvents) > 0 || len(clearEvents) > 0 {
+			for _, evt := range finalEvents {
+				log.Warn().Int64("chat", chatID).Str("device", m.DeviceID).Str("event", evt.ID).Msg("Alert triggered")
+			}
+			for _, evt := range clearEvents {
+				log.Info().Int64("chat", chatID).Str("device", m.DeviceID).Str("event", evt.ID).Msg("Normal state restored")
 			}
 			// Use the unified Notify method.
-			// It should be loud if there's a transition (soundMessages) or a clear message.
-			s.notifier.Notify(chatID, m.DeviceID, m, finalMessages, clearMessages, !isTransition && len(clearMessages) == 0)
+			s.notifier.Notify(chatID, m, finalEvents, clearEvents, !isLoud)
 		}
 	}
 }

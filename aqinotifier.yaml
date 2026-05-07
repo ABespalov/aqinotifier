@@ -83,40 +83,81 @@ log:
 
 # Monitoring and notification settings.
 monitor:
-  # Thresholds for PM10 and PM2.5 zones.
+  # Thresholds for PM2.5 and PM10 zones.
   # Green zone: [0, green]
   # Yellow zone: (green, yellow]
   # Red zone: (yellow, infinity)
   # Values must satisfy: yellow >= green
-  pm10_green: 54.0
-  pm10_yellow: 154.0
   pm25_green: 9.0
   pm25_yellow: 35.0
+  pm10_green: 54.0
+  pm10_yellow: 154.0
 
-  # Percentage change thresholds for PM10 and PM2.5 compared to the previous measurement.
-  pm10_diff: 66.0
+  # Percentage change thresholds for PM2.5 and PM10 compared to the previous measurement.
   pm25_diff: 50.0
+  pm10_diff: 66.0
+
+  # Air Quality Index (AQI) calculation standard: "EU" (default) or "US".
+  aqi_standard: "EU"
 
   # Enabled notifications.
+  # AQI zone notifications (based on selected aqi_standard):
+  # - aqi_z1: Good (US: Good, EU: Good)
+  # - aqi_z2: Moderate (US: Moderate, EU: Fair)
+  # - aqi_z3: Sensitive/Moderate (US: Slightly unhealthy, EU: Moderate)
+  # - aqi_z4: Unhealthy/Poor (US: Unhealthy, EU: Poor)
+  # - aqi_z5: Very unhealthy (US: Very unhealthy, EU: Very poor)
+  # - aqi_z6: Hazardous/Extreme (US: Hazardous, EU: Extremely poor)
+  # - aqi_z7: Extremely Hazardous (US: Extremely Hazardous, EU: -)
   # Sound notifications (absolute transitions):
-  # - val10-yu: PM10 Green -> Yellow
-  # - val10-ru: PM10 Green/Yellow -> Red
-  # - val10-yd: PM10 Red -> Yellow
-  # - val10-gd: PM10 Red/Yellow -> Green
-  # - val25-yu, val25-ru, val25-yd, val25-gd: same for PM2.5
-  # - vals-yu: Both PM10/PM2.5 Green -> Yellow (at least one in Yellow)
-  # - vals-ru: Both PM10/PM2.5 -> Red (both in Red)
-  # - vals-yd: Both PM10/PM2.5 Red -> Yellow (both in Yellow)
-  # - vals-gd: Both PM10/PM2.5 -> Green (both in Green)
+  # - val25-yu: PM2.5 Green -> Yellow
+  # - val25-ru: PM2.5 Green/Yellow -> Red
+  # - val25-yd: PM2.5 Red -> Yellow
+  # - val25-gd: PM2.5 Red/Yellow -> Green
+  # - val10-yu, val10-ru, val10-yd, val10-gd: same for PM10
+  # - vals-yu: Both PM2.5/PM10 Green -> Yellow (at least one in Yellow)
+  # - vals-ru: Both PM2.5/PM10 -> Red (both in Red)
+  # - vals-yd: Both PM2.5/PM10 Red -> Yellow (both in Yellow)
+  # - vals-gd: Both PM2.5/PM10 -> Green (both in Green)
   # Silent notifications (relative changes):
-  # - diff10-gu, diff25-gu, diffs-gu: Growth while staying in Green
-  # - diff10-gd, diff25-gd, diffs-gd: Drop resulting in Green
-  # - diff10-yu, diff25-yu, diffs-yu: Growth resulting in Yellow
-  # - diff10-yd, diff25-yd, diffs-yd: Drop resulting in Yellow
-  # - diff10-ru, diff25-ru, diffs-ru: Growth resulting in Red
-  # - diff10-rd, diff25-rd, diffs-rd: Drop while staying in Red
-  warnings:
+  # - diff25-gu, diff10-gu, diffs-gu: Growth while staying in Green
+  # - diff25-gd, diff10-gd, diffs-gd: Drop resulting in Green
+  # - diff25-yu, diff10-yu, diffs-yu: Growth resulting in Yellow
+  # - diff25-yd, diff10-yd, diffs-yd: Drop resulting in Yellow
+  # - diff25-ru, diff10-ru, diffs-ru: Growth resulting in Red
+  # - diff25-rd, diff10-rd, diffs-rd: Drop while staying in Red
+  notifications:
+    - aqi_z1
+    - aqi_z2
+    - aqi_z3
+    - aqi_z4
+    - aqi_z5
+    - aqi_z6
+    - aqi_z7
     - vals-ru
+    - vals-gd
+
+  # List of notifications that should be sent WITH sound by default.
+  # Others will be silent unless changed by the user in the bot settings.
+  warnings:
+    - aqi_z1
+    - aqi_z2
+    - aqi_z3
+    - aqi_z4
+    - aqi_z5
+    - aqi_z6
+    - aqi_z7
+    - val25-yu
+    - val25-ru
+    - val25-yd
+    - val25-gd
+    - val10-yu
+    - val10-ru
+    - val10-yd
+    - val10-gd
+    - vals-yu
+    - vals-ru
+    - vals-yd
     - vals-gd
 
 # Optional: metrics / observability settings could be added here later.
@@ -142,3 +183,6 @@ tgbot:
   chart_height: 768
   # Chart font size
   chart_font_size: 12.0
+  # Default units for measurements (Temperature: c/f, Pressure: mmhg/hpa)
+  default_unit_temp: "c"
+  default_unit_press: "mmhg"

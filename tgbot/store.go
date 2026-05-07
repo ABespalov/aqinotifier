@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/ABespalov/aqinotifier/config"
@@ -29,13 +30,17 @@ type Store struct {
 	db     *sql.DB
 	subs   map[int64]*Subscription // keyed by chat_id
 	fileMu sync.RWMutex           // protects JSON file from concurrent writes
+	defaultUnitTemp  string
+	defaultUnitPress string
 }
 
 // NewStore creates a Store backed by the given file path.
-func NewStore(file string) *Store {
+func NewStore(file string, defaultUnitTemp, defaultUnitPress string) *Store {
 	s := &Store{
-		file: file,
-		subs: make(map[int64]*Subscription),
+		file:             file,
+		subs:             make(map[int64]*Subscription),
+		defaultUnitTemp:  defaultUnitTemp,
+		defaultUnitPress: defaultUnitPress,
 	}
 	s.load()
 	return s
@@ -200,6 +205,8 @@ func (s *Store) ResetSettings(chatID int64, defaults *config.Monitor) {
 	sub, ok := s.subs[chatID]
 	if ok {
 		sub.Settings = s.cloneMonitor(defaults)
+		sub.UnitTemp = s.defaultUnitTemp
+		sub.UnitPress = s.defaultUnitPress
 		sub.Version = 1
 		s.save()
 	}
@@ -228,43 +235,93 @@ func (s *Store) migrateSettings(m *config.Monitor, defaults *config.Monitor) boo
 		changed = true
 	}
 
-	// 2. Warnings migration (old keys to new keys)
-	oldToNew := map[string][]string{
-		"val10":          {"val10-yu", "val10-ru", "val10-yd", "val10-gd"},
-		"val25":          {"val10-yu", "val10-ru", "val10-yd", "val10-gd"},
-		"vals":           {"vals-yu", "vals-ru", "vals-yd", "vals-gd"},
-		"diff10":         {"diff10-gu", "diff10-yu", "diff10-ru"},
-		"diff25":         {"diff25-gu", "diff25-yu", "diff25-ru"},
-		"diffs":          {"diffs-gu", "diffs-yu", "diffs-ru"},
-		"diff10_neg":     {"diff10-gd", "diff10-yd", "diff10-rd"},
-		"diff25_neg":     {"diff25-gd", "diff25-yd", "diff25-rd"},
-		"diffs_neg":      {"diffs-gd", "diffs-yd", "diffs-rd"},
-		"diff10_over":    {"diff10-yu", "diff10-ru"},
-		"diff25_over":    {"diff25-yu", "diff25-ru"},
-		"diffs_over":     {"diffs-yu", "diffs-ru"},
-		"diff10_neg_over": {"diff10-gd", "diff10-yd"},
-		"diff25_neg_over": {"diff25-gd", "diff25-yd"},
-		"diffs_neg_over":  {"diffs-gd", "diffs-yd"},
-	}
-
-	newWarnings := make(map[string]bool)
-	hasOld := false
-	for _, w := range m.Warnings {
-		if targets, ok := oldToNew[w]; ok {
-			for _, t := range targets {
-				newWarnings[t] = true
+	// 2. Notifications/Warnings migration (Old Schema to New Schema)
+	// We detect old schema if Notifications is empty but we have data in Warnings (which was 'active list')
+	// or OldLoudWarnings is populated.
+	if len(m.Notifications) == 0 && (len(m.Warnings) > 0 || len(m.OldLoudWarnings) > 0) {
+		log.Info().Msg("tgbot: migrating user to new notification schema")
+		
+		mapAQI := func(id string) string {
+			switch id {
+			case "aqi_g": return "aqi_z1"
+			case "aqi_y": return "aqi_z2"
+			case "aqi_o": return "aqi_z3"
+			case "aqi_r": return "aqi_z4"
+			case "aqi_v": return "aqi_z5"
+			case "aqi_b": return "aqi_z6"
+			default: return id
 			}
-			hasOld = true
-		} else {
-			newWarnings[w] = true
+		}
+
+		// New Notifications list: all transitions (val10, val25, vals) 
+		// and AQI that were loud in old schema.
+		newNotes := []string{
+			"val10-yu", "val10-ru", "val10-yd", "val10-gd",
+			"val25-yu", "val25-ru", "val25-yd", "val25-gd",
+			"vals-yu", "vals-ru", "vals-yd", "vals-gd",
+		}
+		
+		// Add previously loud AQI alerts (with mapping)
+		for _, lw := range m.OldLoudWarnings {
+			if strings.HasPrefix(lw, "aqi_") {
+				newNotes = append(newNotes, mapAQI(lw))
+			}
+		}
+		m.Notifications = newNotes
+
+		// New Warnings list: default to "everything loud" as per user request
+		m.Warnings = []string{
+			"val10-yu", "val10-ru", "val10-yd", "val10-gd",
+			"val25-yu", "val25-ru", "val25-yd", "val25-gd",
+			"vals-yu", "vals-ru", "vals-yd", "vals-gd",
+			"aqi_z1", "aqi_z2", "aqi_z3", "aqi_z4", "aqi_z5", "aqi_z6", "aqi_z7",
+		}
+		
+		m.OldLoudWarnings = nil // Clear migration field
+		changed = true
+	}
+
+	// 2b. Map remaining old AQI IDs if any (for intermediate versions)
+	for i, n := range m.Notifications {
+		if strings.HasPrefix(n, "aqi_") && !strings.Contains(n, "_z") {
+			switch n {
+			case "aqi_g": m.Notifications[i] = "aqi_z1"
+			case "aqi_y": m.Notifications[i] = "aqi_z2"
+			case "aqi_o": m.Notifications[i] = "aqi_z3"
+			case "aqi_r": m.Notifications[i] = "aqi_z4"
+			case "aqi_v": m.Notifications[i] = "aqi_z5"
+			case "aqi_b": m.Notifications[i] = "aqi_z6"
+			}
+			changed = true
+		}
+	}
+	for i, w := range m.Warnings {
+		if strings.HasPrefix(w, "aqi_") && !strings.Contains(w, "_z") {
+			switch w {
+			case "aqi_g": m.Warnings[i] = "aqi_z1"
+			case "aqi_y": m.Warnings[i] = "aqi_z2"
+			case "aqi_o": m.Warnings[i] = "aqi_z3"
+			case "aqi_r": m.Warnings[i] = "aqi_z4"
+			case "aqi_v": m.Warnings[i] = "aqi_z5"
+			case "aqi_b": m.Warnings[i] = "aqi_z6"
+			}
+			changed = true
 		}
 	}
 
-	if hasOld {
-		m.Warnings = make([]string, 0, len(newWarnings))
-		for w := range newWarnings {
-			m.Warnings = append(m.Warnings, w)
-		}
+	// 3. AQI settings migration
+	if m.AQIStandard == "" {
+		m.AQIStandard = defaults.AQIStandard
+		changed = true
+	}
+	if len(m.Notifications) == 0 {
+		m.Notifications = make([]string, len(defaults.Notifications))
+		copy(m.Notifications, defaults.Notifications)
+		changed = true
+	}
+	if len(m.Warnings) == 0 {
+		m.Warnings = make([]string, len(defaults.Warnings))
+		copy(m.Warnings, defaults.Warnings)
 		changed = true
 	}
 
@@ -276,6 +333,8 @@ func (s *Store) cloneMonitor(m *config.Monitor) *config.Monitor {
 		return nil
 	}
 	clone := *m
+	clone.Notifications = make([]string, len(m.Notifications))
+	copy(clone.Notifications, m.Notifications)
 	clone.Warnings = make([]string, len(m.Warnings))
 	copy(clone.Warnings, m.Warnings)
 	return &clone
@@ -295,34 +354,7 @@ func (s *Store) UpdateSettings(chatID int64, settings *config.Monitor) {
 	s.save()
 }
 
-// BatchUpdateThresholds updates specific threshold values and notification settings for all registered users.
-func (s *Store) BatchUpdateThresholds(pm10G, pm10Y, pm25G, pm25Y, pm10D, pm25D float64, warnings []string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	count := 0
-	for _, sub := range s.subs {
-		if sub.Settings == nil {
-			sub.Settings = &config.Monitor{}
-		}
-		sub.Settings.PM10Green = pm10G
-		sub.Settings.PM10Yellow = pm10Y
-		sub.Settings.PM25Green = pm25G
-		sub.Settings.PM25Yellow = pm25Y
-		sub.Settings.PM10Diff = pm10D
-		sub.Settings.PM25Diff = pm25D
 
-		// Update warnings
-		newWarnings := make([]string, len(warnings))
-		copy(newWarnings, warnings)
-		sub.Settings.Warnings = newWarnings
-
-		count++
-	}
-	if count > 0 {
-		s.save()
-	}
-	return count
-}
 
 // GetLanguage returns the language code for a chat.
 func (s *Store) GetLanguage(chatID int64) string {
@@ -356,7 +388,7 @@ func (s *Store) GetUnitTemp(chatID int64) string {
 	if sub, ok := s.subs[chatID]; ok && sub.UnitTemp != "" {
 		return sub.UnitTemp
 	}
-	return "c"
+	return s.defaultUnitTemp
 }
 
 func (s *Store) SetUnitTemp(chatID int64, unit string) {
@@ -379,7 +411,7 @@ func (s *Store) GetUnitPress(chatID int64) string {
 	if sub, ok := s.subs[chatID]; ok && sub.UnitPress != "" {
 		return sub.UnitPress
 	}
-	return "mmhg"
+	return s.defaultUnitPress
 }
 
 func (s *Store) SetUnitPress(chatID int64, unit string) {
@@ -418,15 +450,7 @@ func (s *Store) SyncLanguage(chatID int64, tgCode string, detected string) bool 
 	return false
 }
 
-// GetTGCode returns the last synced Telegram language code.
-func (s *Store) GetTGCode(chatID int64) string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if sub, ok := s.subs[chatID]; ok {
-		return sub.TGCode
-	}
-	return ""
-}
+
 
 // Subscribe adds deviceID to chatID's subscription list if not already present.
 func (s *Store) Subscribe(chatID int64, deviceID string, defaults *config.Monitor) bool {
@@ -509,13 +533,4 @@ func (s *Store) Subscribers(deviceID string) []int64 {
 	return chats
 }
 
-// AllSubscriptions returns a copy of all subscriptions.
-func (s *Store) AllSubscriptions() map[int64]Subscription {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	res := make(map[int64]Subscription, len(s.subs))
-	for k, v := range s.subs {
-		res[k] = *v
-	}
-	return res
-}
+

@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const AppVersion = "0.8.0a"
+const AppVersion = "0.9.1a"
 
 // Server holds HTTP server binding settings and the URL path used by the
 // application to receive POST requests from sensors.
@@ -170,31 +170,36 @@ func NewSystemConfig() *System {
 }
 
 type Monitor struct {
-	PM10Green  float64  `yaml:"pm10_green" json:"pm10_green"`
-	PM25Green  float64  `yaml:"pm25_green" json:"pm25_green"`
-	PM10Yellow float64  `yaml:"pm10_yellow" json:"pm10_yellow"`
-	PM25Yellow float64  `yaml:"pm25_yellow" json:"pm25_yellow"`
-	PM10Diff   float64  `yaml:"pm10_diff" json:"pm10_diff"`
-	PM25Diff   float64  `yaml:"pm25_diff" json:"pm25_diff"`
-	Warnings   []string `yaml:"warnings" json:"warnings"`
+	PM10Green    float64  `yaml:"pm10_green" json:"pm10_green"`
+	PM25Green    float64  `yaml:"pm25_green" json:"pm25_green"`
+	PM10Yellow   float64  `yaml:"pm10_yellow" json:"pm10_yellow"`
+	PM25Yellow   float64  `yaml:"pm25_yellow" json:"pm25_yellow"`
+	PM10Diff     float64  `yaml:"pm10_diff" json:"pm10_diff"`
+	PM25Diff     float64  `yaml:"pm25_diff" json:"pm25_diff"`
+	Notifications []string `yaml:"notifications" json:"notifications"`
+	Warnings      []string          `yaml:"warnings" json:"warnings"`
+	AQIStandard   string            `yaml:"aqi_standard" json:"aqi_standard"`
+	DeviceNames   map[string]string `yaml:"device_names" json:"device_names"`
 
 	// Migration fields (deprecated)
-	PM10Value float64 `yaml:"-" json:"pm10_value,omitempty"`
-	PM25Value float64 `yaml:"-" json:"pm25_value,omitempty"`
+	PM10Value       float64  `yaml:"-" json:"pm10_value,omitempty"`
+	PM25Value       float64  `yaml:"-" json:"pm25_value,omitempty"`
+	OldLoudWarnings []string `yaml:"-" json:"loud_warnings,omitempty"`
 }
 
 // NewMonitorConfig returns a Monitor pre-populated with default values
-// as requested: PM10 threshold 10.0, PM2.5 threshold 5.0, diff_time 150s,
-// PM10 diff 45.0%, PM2.5 diff 37.5%, and default warnings.
 func NewMonitorConfig() *Monitor {
 	return &Monitor{
-		PM10Green:  10.0,
-		PM25Green:  5.0,
-		PM10Yellow: 20.0,
-		PM25Yellow: 10.0,
-		PM10Diff:   45.0,
-		PM25Diff:   37.5,
-		Warnings:   []string{"vals-ru", "vals-gd"},
+		PM10Green:     54.0,
+		PM25Green:     9.0,
+		PM10Yellow:    154.0,
+		PM25Yellow:    35.0,
+		PM10Diff:      66.0,
+		PM25Diff:      50.0,
+		Notifications: []string{"aqi_z1", "aqi_z2", "aqi_z3", "aqi_z4", "aqi_z5", "aqi_z6", "aqi_z7", "vals-ru", "vals-gd"},
+		Warnings:      []string{"aqi_z1", "aqi_z2", "aqi_z3", "aqi_z4", "aqi_z5", "aqi_z6", "aqi_z7", "val25-yu", "val25-ru", "val25-yd", "val25-gd", "val10-yu", "val10-ru", "val10-yd", "val10-gd", "vals-yu", "vals-ru", "vals-yd", "vals-gd"},
+		AQIStandard:   "EU",
+		DeviceNames:   make(map[string]string),
 	}
 }
 
@@ -217,6 +222,9 @@ type TgBot struct {
 	ChartHeight int `yaml:"chart_height"`
 	// ChartFontSize specifies the font size used in generated charts.
 	ChartFontSize float64 `yaml:"chart_font_size"`
+	// Default units
+	DefaultUnitTemp  string `yaml:"default_unit_temp"`
+	DefaultUnitPress string `yaml:"default_unit_press"`
 }
 
 // NewTgBotConfig returns a TgBot with sensible defaults.
@@ -231,6 +239,8 @@ func NewTgBotConfig() *TgBot {
 		ChartWidth:    1024,
 		ChartHeight:   768,
 		ChartFontSize: 12.0,
+		DefaultUnitTemp:  "c",
+		DefaultUnitPress: "mmhg",
 	}
 }
 
