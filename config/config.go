@@ -9,7 +9,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-const AppVersion = "0.9.1a"
 
 // Server holds HTTP server binding settings and the URL path used by the
 // application to receive POST requests from sensors.

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"golang.org/x/text/language"
@@ -13,6 +14,8 @@ import (
 
 var (
 	i18nBundle *i18n.Bundle
+	iconsMap   map[string]string
+	iconsMu    sync.RWMutex
 )
 
 func init() {
@@ -24,8 +27,11 @@ func init() {
 	enData, _ := json.Marshal(fallbackEN)
 	i18nBundle.MustParseMessageFileBytes(enData, "en.json")
 
+	iconsMap = make(map[string]string)
+
 	// Try to load external files from "lng" directory if it exists
 	loadExternalTranslations("lng")
+	loadIcons("lng")
 }
 
 // loadExternalTranslations walks the given directory and loads all JSON translation files into the bundle.
@@ -35,6 +41,10 @@ func loadExternalTranslations(dir string) {
 			return nil
 		}
 		if !info.IsDir() && filepath.Ext(path) == ".json" {
+			// Skip icons file, it's handled separately
+			if info.Name() == "ico.json" {
+				return nil
+			}
 			_, loadErr := i18nBundle.LoadMessageFile(path)
 			if loadErr != nil {
 				fmt.Printf("i18n: failed to load %s: %v\n", path, loadErr)
@@ -42,6 +52,33 @@ func loadExternalTranslations(dir string) {
 		}
 		return nil
 	})
+}
+
+func loadIcons(dir string) {
+	path := filepath.Join(dir, "ico.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("i18n: failed to read %s: %v\n", path, err)
+		return
+	}
+
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err == nil {
+		iconsMu.Lock()
+		for k, v := range m {
+			iconsMap[k] = v
+		}
+		iconsMu.Unlock()
+		updateIconVars(m)
+	} else {
+		fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
+	}
+}
+
+// ReloadAll reloads translations and icons from the lng/ directory.
+func ReloadAll() {
+	loadExternalTranslations("lng")
+	loadIcons("lng")
 }
 
 // AvailableLanguages returns a sorted list of language codes found in the lng/ directory.
@@ -105,6 +142,16 @@ func (b *Bot) TLang(lang, key string, args ...interface{}) string {
 	return msg
 }
 
+// I returns an icon by its key from ico.json.
+func (b *Bot) I(key string) string {
+	iconsMu.RLock()
+	defer iconsMu.RUnlock()
+	if v, ok := iconsMap[key]; ok {
+		return v
+	}
+	return ""
+}
+
 // fallbackEN contains the hardcoded English localization as a final safety net.
 var fallbackEN = map[string]string{
 	"alert_threshold_full":         "<b>%s</b>\n%+.2f (%+.2f%%) %.2f → %.2f\n%s",
@@ -113,25 +160,19 @@ var fallbackEN = map[string]string{
 	"alert_pm10":                   "PM10",
 	"alert_pm25":                   "PM2.5",
 	"alert_pms":                    "PM2.5 & PM10",
-	"alert_aqi_clean_short":        "Air quality returned to normal: %s",
-	"alert_action_up":              "Growth",
-	"alert_action_down":            "Decrease",
-	"zone_acc_g":                   "into Green zone",
-	"zone_acc_y":                   "into Yellow zone",
-	"zone_acc_r":                   "into Red zone",
-	"zone_pre_g":                   "in Green zone",
-	"zone_pre_y":                   "in Yellow zone",
-	"zone_pre_r":                   "in Red zone",
+	"alert_aqi_clean_short":        "AQI level returned to normal",
+	"alert_action_up":              "Rise",
+	"alert_action_down":            "Fall",
+	"zone_acc_g":                   "Green zone",
+	"zone_acc_y":                   "Yellow zone",
+	"zone_acc_r":                   "Red zone",
+	"zone_pre_g":                   "Green zone",
+	"zone_pre_y":                   "Yellow zone",
+	"zone_pre_r":                   "Red zone",
 	"alert_aqi_full":               "<b>AQI: %s</b> (%s %s)\nAQI: <b>%.1f</b>",
-	"alert_aqi_clean":              "%s <b>Air quality is back to normal</b> (%s %s)\nAQI: <b>%.1f</b>",
+	"alert_aqi_clean":              "%s <b>AQI level returned to normal</b> (%s %s)\nAQI: <b>%.1f</b>",
 	"alert_aqi_short":              "AQI Level: %s %s",
 	"alert_threshold_short":        "%s %s %s %s",
-	"alert_short_zone_g":           "into Green",
-	"alert_short_zone_y":           "into Yellow",
-	"alert_short_zone_r":           "into Red",
-	"alert_short_zone_pre_g":       "in Green",
-	"alert_short_zone_pre_y":       "in Yellow",
-	"alert_short_zone_pre_r":       "in Red",
 	"btn_aqi_settings":             "%s AQI Settings",
 	"btn_aqi_standard":             "Standard: %s %s",
 	"btn_chart_aqi":                "%s AQI Chart",
@@ -141,7 +182,7 @@ var fallbackEN = map[string]string{
 	"btn_chart_temp":               "%s Temperature",
 	"btn_charts":                   "%s Charts 24h",
 	"btn_history":                  "%s History",
-	"btn_list":                     "%s Subscriptions",
+	"btn_list":                     "%s Your Subscriptions",
 	"btn_main_menu":                "%s Main Menu",
 	"btn_pm10_green":               "%s PM10 Green",
 	"btn_pm10_yellow":              "%s PM10 Yellow",
@@ -150,6 +191,7 @@ var fallbackEN = map[string]string{
 	"btn_pm10_diff":                "%s Dynamics PM10",
 	"btn_pm25_diff":                "%s Dynamics PM2.5",
 	"btn_settings":                 "%s Settings",
+	"btn_back":                     "%s Back",
 	"btn_silent_profiles":          "%s PM Dynamics",
 	"btn_sound_profiles":           "%s PM Levels",
 	"btn_status":                   "%s Status",
@@ -203,8 +245,8 @@ var fallbackEN = map[string]string{
 	"msg_help":                     "%[1]s <b>AQI Notifier Bot</b> v%[3]s\n\nThis bot monitors air quality data from your sensors and sends notifications about zone changes or sudden dynamics.\n\n<b>Main commands:</b>\n/list — list your subscriptions and manage them\n/status — current indicators for all your devices\n/history — history of recent measurements\n/help — main menu and help\n/lang — language and units\n\n<b>Management:</b>\n%[4]s Click <b>Settings -> Subscriptions</b> to add or remove a device.\n%[4]s In the settings section (<b>Settings</b>) you can change zone thresholds (Green/Yellow/Red) and notification types.\n%[4]s Notifications about transitions between zones come with sound. Others (dynamic changes within zones) — silently.",
 	"msg_history_empty":            "%s History for device <code>%s</code> is empty.",
 	"msg_history_title":            "%s <b>History:</b> <code>%s</code>",
-	"msg_history_footer":           "%s <b>History of recent %d measurements</b>\n%s Device: <code>%s</code>",
-	"msg_chart_24h_title":          "%s <b>%s chart for the last 24 hours</b>\n%s Device: <code>%s</code>",
+	"msg_history_footer":           "%s <b>History of recent %d measurements</b>\n%s",
+	"msg_chart_24h_title":          "%s <b>%s chart for the last 24 hours</b>\n%s",
 	"msg_hum":                      "Humidity",
 	"msg_invalid_device_id":        "%s Device ID must contain only digits.",
 	"msg_alerts_loud_label":        "%s <b>Loud Notifications:</b>\n",
@@ -220,7 +262,7 @@ var fallbackEN = map[string]string{
 	"msg_select_history":           "%s <b>Select a device to view history:</b>",
 	"msg_select_lang":              "%s Select language / Выберите язык:",
 	"msg_status_header":            "%s <b>Latest received values</b>\n%s %s %s %s\n\n",
-	"msg_status_aqi":               "%s <b>AQI Level: %.1f</b> — %s %s\n\n",
+	"msg_status_aqi":               "%s <b>AQI Level: %.1f</b> — %s %s",
 	"msg_loud_alerts":              "%s <b>PM Level Notification Settings:</b>\n",
 	"msg_silent_alerts":            "%s <b>PM Dynamics Notification Settings:</b>\n",
 	"msg_aqi_settings":             "%s Choose AQI calculation standard and configure notifications.",
@@ -269,7 +311,7 @@ var fallbackEN = map[string]string{
 	"zone_green":                   "Green",
 	"zone_yellow":                  "Yellow",
 	"zone_red":                     "Red",
-	"status_no_data":               "%s No data for device <code>%s</code>",
+	"status_no_data":               "No data for device <code>%s</code>",
 	"unit_c":                       "Celsius (°C)",
 	"unit_f":                       "Fahrenheit (°F)",
 	"unit_hpa":                     "hPa",
@@ -284,13 +326,28 @@ var fallbackEN = map[string]string{
 	"msg_status_device":            "%s %s",
 	"msg_rename_prompt":            "%s Enter new name for device <code>%s</code>\n\nTo cancel, click the button below.",
 	"msg_device_renamed":           "✅ Device renamed: %s (<code>%s</code>)",
-	"msg_rename_cancel":            "Renaming cancelled",
+	"msg_rename_cancel":            "%s Renaming cancelled",
 	"btn_rename":                   "%s Rename",
-	"msg_settings_title":           "%s <b>Settings</b>\n\nSelect a section to change monitoring and notification parameters.",
+	"msg_settings_title":           "%s <b>Monitoring & Notification Settings</b>\n\nSelect a section to change parameters.",
 	"msg_sound_settings":           "Configure notification types for each event.",
 	"alert_v10_short":              "PM10",
 	"alert_v25_short":              "PM2.5",
 	"alert_vs_short":               "PM10+2.5",
 	"alert_short_action_up":        "Growth",
 	"alert_short_action_down":      "Decrease",
+	"msg_info":                     "INFORMATION",
+	"alert_pm_rise_in":             "PM%s level rise in %s",
+	"alert_pm_fall_in":             "PM%s level fall in %s",
+	"alert_pm_rise_to":             "PM%s level rise to %s",
+	"alert_pm_fall_to":             "PM%s level fall to %s",
+	"alert_pm_return":              "PM%s level returned to %s",
+	"alert_aqi_rise":               "AQI level rise to \"%s\" zone",
+	"alert_aqi_fall":               "AQI level fall to \"%s\" zone",
+	"alert_aqi_return":             "AQI level returned to normal",
+	"alert_short_zone_acc_g":       "Green",
+	"alert_short_zone_acc_y":       "Yellow",
+	"alert_short_zone_acc_r":       "Red",
+	"alert_short_zone_pre_g":       "Green",
+	"alert_short_zone_pre_y":       "Yellow",
+	"alert_short_zone_pre_r":       "Red",
 }

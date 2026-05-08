@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/monitor"
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/go-analyze/charts"
@@ -74,7 +75,6 @@ const (
 
 	// Data and aggregation logic
 	chartAggregationWindow = 15 * time.Minute
-	chartTimeLabelStep     = 3 // Hours between labels on X axis
 
 	// Conversion constants
 	celsiusToFahrenheitSlope  = 1.8
@@ -83,6 +83,11 @@ const (
 	// Magnus formula constants (for dew point calculation)
 	magnusB = 17.27
 	magnusC = 237.7
+
+	// Meta info coefficients
+	chartMetaFontSizeCoef = 2.0 / 3.0
+	chartMetaY1Coef       = 0.4
+	chartMetaY2Coef       = 0.8
 )
 
 var (
@@ -98,6 +103,19 @@ func chartFormatter(f float64, isAQI bool) string {
 	return fmt.Sprintf("%.1f", f)
 }
 
+// calcTextWidth estimates the pixel width of a string based on font size and character weights.
+func calcTextWidth(s string, fs float64) float64 {
+	var w float64
+	for _, r := range s {
+		if r == '.' || r == ',' || r == ':' || r == ' ' || r == '(' || r == ')' || r == '-' {
+			w += chartAxisSepWeight
+		} else {
+			w += chartAxisDigitWeight
+		}
+	}
+	return fs * w
+}
+
 // calcYAxisWidth returns the pixel width needed for the Y-axis labels.
 func calcYAxisWidth(fs float64, yMin, yMax float64, isAQI bool) int {
 	s1 := chartFormatter(yMin, isAQI)
@@ -106,15 +124,7 @@ func calcYAxisWidth(fs float64, yMin, yMax float64, isAQI bool) int {
 	if len(s2) > len(s1) {
 		s = s2
 	}
-	var w float64
-	for _, r := range s {
-		if r == '.' || r == ',' || r == ':' {
-			w += chartAxisSepWeight
-		} else {
-			w += chartAxisDigitWeight
-		}
-	}
-	return int(fs * (w + chartAxisBase))
+	return int(calcTextWidth(s, fs) + fs*chartAxisBase)
 }
 
 func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth, chartHeight int, chartFontSize float64) ([][]byte, error) {
@@ -127,17 +137,11 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	var aqiValues []float64
 	var tempValues, humValues, pressValues, dewPointValues []float64
 
-	// Resampling removed to show all history points as is.
-
 	isF := b.store.GetUnitTemp(chatID) == "f"
 	mcfg := b.GetUserSettings(chatID)
-	for i, m := range hist {
+	for _, m := range hist {
 		local := m.Timestamp.Local()
-		label := ""
-		// Show label every 3 points for short history to ensure the X-axis isn't empty
-		if i%3 == 0 {
-			label = local.Format("15:04:05") // Added seconds as points might be close
-		}
+		label := local.Format("15:04")
 		labels = append(labels, label)
 		pm10Values = append(pm10Values, m.PM10)
 		pm25Values = append(pm25Values, m.PM25)
@@ -180,422 +184,39 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 		}
 	}
 
-	pmTitle := b.T(chatID, "chart_pm_title")
-
-	buildChart := func(title, yAxisName string, seriesNames []string, data [][]float64, forceZero bool) ([]byte, error) {
-		isPM := strings.Contains(strings.ToLower(title), "pm")
-		isAQI := strings.Contains(strings.ToLower(title), "aqi")
-		theme := charts.GetDefaultTheme()
-
-		// Calculate Y axis range strictly from data curves
-		var yMin, yMax float64 = math.MaxFloat64, -math.MaxFloat64
-		hasData := false
-		for _, series := range data {
-			for _, v := range series {
-				if v != charts.GetNullValue() {
-					if v > yMax {
-						yMax = v
-					}
-					if v < yMin {
-						yMin = v
-					}
-					hasData = true
-				}
-			}
-		}
-
-		if !hasData {
-			yMin, yMax = chartDefaultMin, chartDefaultMax
-		} else if forceZero {
-			yMin = 0
-			yMax *= (1.0 + chartHeadroomCoef)
-		} else {
-			// Add headroom margin for other charts
-			span := yMax - yMin
-			if span == 0 {
-				yMin -= 1
-				yMax += 1
-			} else {
-				yMin -= span * chartHeadroomCoef
-				yMax += span * chartHeadroomCoef
-			}
-		}
-
-		// Fixed margin from the image edge to the start of labels.
-		pLeft := chartFontSize * chartPadLeft
-		pRight := chartFontSize * chartPadRight
-		pTop := chartFontSize * chartPadTop
-		pBottom := chartFontSize * chartPadBottom
-
-		opt := charts.NewLineChartOptionWithData(data)
-		opt.Padding = charts.Box{
-			Left:   int(pLeft),
-			Right:  int(pRight),
-			Top:    int(pTop),
-			Bottom: int(pBottom),
-		}
-		opt.Title = charts.TitleOption{
-			Text:      fmt.Sprintf("%s (%s)", title, yAxisName),
-			FontStyle: charts.FontStyle{FontSize: chartFontSize * chartTitleFontCoef},
-		}
-		opt.XAxis = charts.XAxisOption{
-			Show:        charts.Ptr(true),
-			BoundaryGap: charts.Ptr(false),
-			Labels:      labels,
-			LabelFontStyle: charts.FontStyle{
-				FontSize:  chartFontSize,
-				FontColor: colorAxisLabel,
-			},
-		}
-		opt.YAxis = []charts.YAxisOption{
-			{
-				Min:            charts.Ptr(yMin),
-				Max:            charts.Ptr(yMax),
-				Show:           charts.Ptr(true),
-				ValueFormatter: func(f float64) string { return chartFormatter(f, isAQI) },
-				LabelFontStyle: charts.FontStyle{FontSize: chartFontSize},
-			},
-		}
-		opt.Legend = charts.LegendOption{
-			FontStyle: charts.FontStyle{FontSize: chartFontSize},
-		}
-		opt.LineStrokeWidth = chartStrokeWidth
-		opt.StrokeSmoothingTension = chartSmoothing
-
-		p := charts.NewPainter(charts.PainterOptions{
-			Width:  chartWidth,
-			Height: chartHeight,
-		})
-		p.FillArea([]charts.Point{
-			{X: 0, Y: 0},
-			{X: chartWidth, Y: 0},
-			{X: chartWidth, Y: chartHeight},
-			{X: 0, Y: chartHeight},
-			{X: 0, Y: 0},
-		}, charts.ColorWhite)
-
-		if isPM {
-			// Main chart styling
-			opt.Theme = charts.GetDefaultTheme().WithSeriesColors([]charts.Color{colorSeriesRed, colorSeriesBlue})
-			opt.Theme = opt.Theme.WithBackgroundColor(charts.ColorTransparent)
-			for i := 0; i < len(opt.SeriesList); i++ {
-				opt.SeriesList[i].Name = seriesNames[i]
-			}
-		} else if isAQI {
-			opt.Theme = theme.WithSeriesColors([]charts.Color{colorSeriesGrey})
-			for i, name := range seriesNames {
-				opt.SeriesList[i].Name = name
-			}
-		} else {
-			colors := []charts.Color{colorSeriesBlue}
-			if title == b.T(chatID, "msg_temp") {
-				colors = []charts.Color{colorSeriesRed, colorSeriesBlue}
-			} else if title == b.T(chatID, "msg_press") {
-				colors = []charts.Color{colorSeriesPurple}
-			}
-			opt.Theme = theme.WithSeriesColors(colors)
-			for i, name := range seriesNames {
-				opt.SeriesList[i].Name = name
-			}
-		}
-
-		if err := p.LineChart(opt); err != nil {
-			return nil, err
-		}
-
-		if isPM {
-			// 1. Get the content painter (excludes outer Padding)
-			cp := p.Child(charts.PainterPaddingOption(opt.Padding))
-
-			yAxisWidth := calcYAxisWidth(chartFontSize, yMin, yMax, isAQI)
-			xAxisHeight := int(chartFontSize * chartXAxisHeightCoef)
-			titleHeight := int(chartFontSize * chartTitleHeightCoef)
-
-			// 3. Create a child painter for the ACTUAL grid area (the "pure" area)
-			pureCp := cp.Child(charts.PainterPaddingOption(charts.Box{
-				Left:   yAxisWidth,
-				Bottom: xAxisHeight,
-				Top:    titleHeight,
-			}))
-
-			gridW := float64(pureCp.Width())
-			gridH := float64(pureCp.Height())
-
-			// 4. Vertical axis labels (rotated and centered)
-			styleLeft := charts.FontStyle{
-				FontSize:  chartFontSize * chartLabelFontCoef,
-				FontColor: colorSeriesRed,
-			}
-			styleRight := charts.FontStyle{
-				FontSize:  chartFontSize * chartLabelFontCoef,
-				FontColor: colorSeriesBlue,
-			}
-
-			barWidth := float64(chartWidth) * chartBarWidthCoef
-			// Center vertically: subtract approx half-length of vertical labels
-			textHalfLen := int(chartFontSize * chartLabelFontCoef * chartTextHalfLenCoef)
-
-			// PM2.5 label: inside the grid, just to the right of the bar (Red, Left)
-			pureCp.Text(b.T(chatID, "chart_scale_pm25"), int(barWidth+chartFontSize*chartLabelXOffsetL), int(gridH/2)-textHalfLen, math.Pi/2, styleLeft)
-
-			// PM10 label: inside the grid, near the right bar (Blue, Right)
-			pureCp.Text(b.T(chatID, "chart_scale_pm10"), int(gridW-barWidth-chartFontSize*chartLabelXOffsetR), int(gridH/2)+textHalfLen, -math.Pi/2, styleRight)
-
-			// Vertical range: exactly from 0 to gridH in pure coordinates
-			yAxisBottom := gridH
-			yAxisTop := 0.0
-			plotHeight := yAxisBottom - yAxisTop
-
-			yFunc := func(val float64) float64 {
-				y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
-				if y < yAxisTop {
-					y = yAxisTop
-				}
-				if y > yAxisBottom {
-					y = yAxisBottom
-				}
-				return y
-			}
-
-			drawBar := func(x1, x2 float64, low, high float64, color charts.Color) {
-				start := math.Max(low, yMin)
-				end := math.Min(high, yMax)
-				if start < end {
-					pyBottom := yFunc(start)
-					pyTop := yFunc(end)
-					pureCp.FillArea([]charts.Point{
-						{X: int(x1), Y: int(pyBottom)},
-						{X: int(x2), Y: int(pyBottom)},
-						{X: int(x2), Y: int(pyTop)},
-						{X: int(x1), Y: int(pyTop)},
-						{X: int(x1), Y: int(pyBottom)},
-					}, color)
-				}
-			}
-
-			// PM10 bar on the left: exactly at the start of the grid (0 in pure coords)
-			drawBar(0, barWidth, 0, mcfg.PM25Green, colorGreenZone)
-			drawBar(0, barWidth, mcfg.PM25Green, mcfg.PM25Yellow, colorYellowZone)
-			drawBar(0, barWidth, mcfg.PM25Yellow, math.MaxFloat64, colorRedZone)
-
-			// PM2.5 bar on the right: exactly at the end of the grid (gridW in pure coords)
-			drawBar(gridW-barWidth, gridW, 0, mcfg.PM10Green, colorGreenZone)
-			drawBar(gridW-barWidth, gridW, mcfg.PM10Green, mcfg.PM10Yellow, colorYellowZone)
-			drawBar(gridW-barWidth, gridW, mcfg.PM10Yellow, math.MaxFloat64, colorRedZone)
-
-			dashWidth := chartStrokeWidth * chartDashWidthCoef
-			dashPattern := chartDashPattern
-
-			drawThreshold := func(val float64, color charts.Color, isLeft bool) {
-				if val < yMin || val > yMax {
-					return
-				}
-				y := yFunc(val)
-				var tx1, tx2 float64
-				if isLeft {
-					tx1 = 0.0
-					tx2 = gridW - barWidth*chartThresholdPaddingCoef
-				} else {
-					tx1 = barWidth * chartThresholdPaddingCoef
-					tx2 = gridW
-				}
-				pureCp.DashedLineStroke([]charts.Point{{X: int(tx1), Y: int(y)}, {X: int(tx2), Y: int(y)}}, color, dashWidth, dashPattern)
-			}
-
-			// 5. Draw intersection dots where data crosses thresholds
-			drawDots := func(seriesData []float64, threshold float64, color charts.Color) {
-				if len(seriesData) < 2 {
-					return
-				}
-				yT := yFunc(threshold)
-				for i := 0; i < len(seriesData)-1; i++ {
-					v1 := seriesData[i]
-					v2 := seriesData[i+1]
-					// Check crossing
-					if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
-						if v1 == v2 {
-							continue
-						}
-						t := (threshold - v1) / (v2 - v1)
-						x1 := float64(i) / float64(len(seriesData)-1) * gridW
-						x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
-						x := x1 + t*(x2-x1)
-						// Draw inner white dot inside a larger colored dot
-						pureCp.Circle(chartStrokeWidth*chartDotLargeCoef, int(x), int(yT), color, color, 0)
-						if !isAQI {
-							pureCp.Circle(chartStrokeWidth*chartDotSmallCoef, int(x), int(yT), charts.ColorWhite, charts.ColorWhite, 0)
-						}
-					}
-				}
-			}
-
-			// Draw PM10 thresholds and dots
-			drawThreshold(mcfg.PM25Green, colorSeriesRed, true)
-			drawDots(data[0], mcfg.PM25Green, colorSeriesRed)
-			drawThreshold(mcfg.PM25Yellow, colorSeriesRed, true)
-			drawDots(data[0], mcfg.PM25Yellow, colorSeriesRed)
-
-			// Draw PM10 thresholds and dots (with small offset if identical to PM10)
-			g10 := mcfg.PM10Green
-			if g10 == mcfg.PM25Green {
-				g10 -= (yMax - yMin) / plotHeight
-			}
-			drawThreshold(g10, colorSeriesBlue, false)
-			drawDots(data[1], g10, colorSeriesBlue)
-
-			y10 := mcfg.PM10Yellow
-			if y10 == mcfg.PM25Yellow {
-				y10 -= (yMax - yMin) / plotHeight
-			}
-			drawThreshold(y10, colorSeriesBlue, false)
-			drawDots(data[1], y10, colorSeriesBlue)
-		}
-
-		if isAQI {
-			cp := p.Child(charts.PainterPaddingOption(opt.Padding))
-			yAxisWidth := calcYAxisWidth(chartFontSize, yMin, yMax, isAQI)
-			xAxisHeight := int(chartFontSize * chartXAxisHeightCoef)
-			titleHeight := int(chartFontSize * chartTitleHeightCoef)
-
-			pureCp := cp.Child(charts.PainterPaddingOption(charts.Box{
-				Left:   yAxisWidth,
-				Bottom: xAxisHeight,
-				Top:    titleHeight,
-			}))
-
-			gridW := float64(pureCp.Width())
-			gridH := float64(pureCp.Height())
-			yAxisBottom := gridH
-			yAxisTop := 0.0
-			plotHeight := yAxisBottom - yAxisTop
-
-			yFunc := func(val float64) float64 {
-				y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
-				if y < yAxisTop {
-					y = yAxisTop
-				}
-				if y > yAxisBottom {
-					y = yAxisBottom
-				}
-				return y
-			}
-
-			mcfg = b.GetUserSettings(chatID)
-			breakpoints := sensor.IndexPointsEU
-			if mcfg.AQIStandard == "US" {
-				breakpoints = sensor.IndexPointsUS
-			}
-
-			colors := []charts.Color{
-				colorAQIGood, colorAQIModerate, colorAQISlightly,
-				colorAQIUnhealthy, colorAQIVery, colorAQIHazardous, colorAQIExtreme,
-			}
-			if mcfg.AQIStandard == "EU" {
-				colors = []charts.Color{
-					colorAQILightBlue, colorAQIGood, colorAQIModerate,
-					colorAQISlightly, colorAQIUnhealthy, colorAQIHazardous,
-				}
-			}
-
-			// Draw background zones
-			for i := 0; i < len(breakpoints)-1; i++ {
-				low := breakpoints[i]
-				high := breakpoints[i+1]
-				if i == len(breakpoints)-2 && mcfg.AQIStandard == "US" {
-					high = sensor.IndexPointsUS[len(sensor.IndexPointsUS)-1]
-				}
-
-				c := colors[i]
-				c.A = 51 // ~20% opacity (255 * 0.2)
-
-				pyBottom := yFunc(math.Max(low, yMin))
-				pyTop := yFunc(math.Min(high, yMax))
-
-				if pyBottom > pyTop {
-					pureCp.FillArea([]charts.Point{
-						{X: 0, Y: int(pyBottom)},
-						{X: int(gridW), Y: int(pyBottom)},
-						{X: int(gridW), Y: int(pyTop)},
-						{X: 0, Y: int(pyTop)},
-						{X: 0, Y: int(pyBottom)},
-					}, c)
-				}
-			}
-
-			// Draw dashed lines
-			// 5. Draw intersection dots where data crosses thresholds
-			drawDots := func(seriesData []float64, threshold float64, color charts.Color) {
-				if len(seriesData) < 2 {
-					return
-				}
-				yT := yFunc(threshold)
-				for i := 0; i < len(seriesData)-1; i++ {
-					v1 := seriesData[i]
-					v2 := seriesData[i+1]
-					if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
-						if v1 == v2 {
-							continue
-						}
-						t := (threshold - v1) / (v2 - v1)
-						x1 := float64(i) / float64(len(seriesData)-1) * gridW
-						x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
-						x := x1 + t*(x2-x1)
-						pureCp.Circle(chartStrokeWidth*2.4, int(x), int(yT), color, color, 0)
-
-					}
-				}
-			}
-
-			dashWidth := chartStrokeWidth * chartDashWidthCoef
-			dashPattern := chartDashPattern
-			for i := 1; i < len(breakpoints); i++ {
-				val := breakpoints[i]
-				if val < yMin || val > yMax {
-					continue
-				}
-				y := yFunc(val)
-				pureCp.DashedLineStroke([]charts.Point{{X: 0, Y: int(y)}, {X: int(gridW), Y: int(y)}}, colors[i-1], dashWidth, dashPattern)
-				drawDots(data[0], val, colorSeriesGrey)
-			}
-		}
-
-		return p.Bytes()
+	deviceID := ""
+	if len(hist) > 0 {
+		deviceID = hist[0].DeviceID
 	}
 
 	var buffers [][]byte
-
-	aqiTitle := b.T(chatID, "btn_chart_aqi", "")
-	aqiBuf, err := buildChart(aqiTitle, mcfg.AQIStandard, []string{"AQI"}, [][]float64{aqiValues}, true)
-	if err == nil {
-		buffers = append(buffers, aqiBuf)
-	}
-
-	pmBuf, err := buildChart(pmTitle, b.T(chatID, "chart_unit_pm"),
+	pmTitle := b.T(chatID, "chart_pm_title")
+	pmBuf, err := b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "chart_unit_pm"), labels,
 		[]string{"PM2.5", "PM10"},
-		[][]float64{pm25Values, pm10Values}, true)
+		[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 	if err != nil {
 		return nil, err
 	}
 	buffers = append(buffers, pmBuf)
 
 	if len(tempValues) > 0 {
-		buf, err := buildChart(b.T(chatID, "msg_temp"), b.unitTempLabel(chatID),
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msg_temp"), b.unitTempLabel(chatID), labels,
 			[]string{b.T(chatID, "msg_temp"), b.T(chatID, "msg_dew_point")},
-			[][]float64{tempValues, dewPointValues}, false)
+			[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
 	}
 
 	if len(humValues) > 0 {
-		buf, err := buildChart(b.T(chatID, "msg_hum"), "%", []string{b.T(chatID, "msg_hum")}, [][]float64{humValues}, false)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msg_hum"), "%", labels, []string{b.T(chatID, "msg_hum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
 	}
 
 	if len(pressValues) > 0 {
-		buf, err := buildChart(b.T(chatID, "msg_press"), b.unitPressLabel(chatID), []string{b.T(chatID, "msg_press")}, [][]float64{pressValues}, false)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msg_press"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msg_press")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
@@ -604,16 +225,11 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	return buffers, nil
 }
 
-// generateSingleChart produces a single PNG buffer containing the requested chart type
-// for the last 24 hours.
 func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chartType string, chartWidth, chartHeight int, chartFontSize float64) ([]byte, error) {
 	if len(hist) == 0 {
 		return nil, nil
 	}
 
-	filteredHist := hist
-
-	// Resample to 15-minute intervals for better chart readability and stable labels
 	window := chartAggregationWindow
 	type bucket struct {
 		pm10, pm25, temp, hum, press float64
@@ -621,7 +237,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 	}
 	buckets := make(map[int64]*bucket)
 	var keys []int64
-	for _, m := range filteredHist {
+	for _, m := range hist {
 		k := m.Timestamp.Truncate(window).Unix()
 		if _, ok := buckets[k]; !ok {
 			keys = append(keys, k)
@@ -649,27 +265,17 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 			Pressure:    b.press / float64(b.count),
 		})
 	}
-	filteredHist = resampled
+	filteredHist := resampled
 
 	var labels []string
-	var pm10Values, pm25Values []float64
-	var aqiValues []float64
-	var tempValues, humValues, pressValues, dewPointValues []float64
-
-	lastHour := -1
+	var pm10Values, pm25Values, aqiValues, tempValues, humValues, pressValues, dewPointValues []float64
 	isF := b.store.GetUnitTemp(chatID) == "f"
 	mcfg := b.GetUserSettings(chatID)
 
 	for _, m := range filteredHist {
 		local := m.Timestamp.Local()
-		label := ""
-		// Add label every 3 hours (0, 3, 6, 9, 12, 15, 18, 21)
-		if local.Hour()%chartTimeLabelStep == 0 && local.Hour() != lastHour {
-			label = local.Format("15:04")
-			lastHour = local.Hour()
-		}
+		label := local.Format("15:04")
 		labels = append(labels, label)
-
 		switch chartType {
 		case "pm":
 			pm10Values = append(pm10Values, m.PM10)
@@ -713,412 +319,396 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 		}
 	}
 
-	pmTitle := b.T(chatID, "chart_pm_title")
-
-	buildChart := func(title, yAxisName string, seriesNames []string, data [][]float64, forceZero bool) ([]byte, error) {
-		isPM := strings.Contains(strings.ToLower(title), "pm")
-		isAQI := strings.Contains(strings.ToLower(title), "aqi")
-		theme := charts.GetDefaultTheme()
-		// Calculate Y axis range strictly from data curves
-		var yMin, yMax float64 = math.MaxFloat64, -math.MaxFloat64
-		hasData := false
-		for _, series := range data {
-			for _, v := range series {
-				if v != charts.GetNullValue() {
-					if v > yMax {
-						yMax = v
-					}
-					if v < yMin {
-						yMin = v
-					}
-					hasData = true
-				}
-			}
-		}
-
-		if !hasData {
-			yMin, yMax = chartDefaultMin, chartDefaultMax
-		} else if forceZero {
-			yMin = 0
-			yMax *= (1.0 + chartHeadroomCoef)
-		} else {
-			// Add headroom margin for other charts
-			span := yMax - yMin
-			if span == 0 {
-				yMin -= 1
-				yMax += 1
-			} else {
-				yMin -= span * chartHeadroomCoef
-				yMax += span * chartHeadroomCoef
-			}
-		}
-
-		// Fixed margin from the image edge to the start of labels.
-		pLeft := chartFontSize * chartPadLeft
-		pRight := chartFontSize * chartPadRight
-		pTop := chartFontSize * chartPadTop
-		pBottom := chartFontSize * chartPadBottom
-
-		opt := charts.NewLineChartOptionWithData(data)
-		opt.Padding = charts.Box{
-			Left:   int(pLeft),
-			Right:  int(pRight),
-			Top:    int(pTop),
-			Bottom: int(pBottom),
-		}
-		opt.Title = charts.TitleOption{
-			Text:      fmt.Sprintf("%s (%s)", title, yAxisName),
-			FontStyle: charts.FontStyle{FontSize: chartFontSize * chartTitleFontCoef},
-		}
-		opt.XAxis = charts.XAxisOption{
-			Show:        charts.Ptr(true),
-			BoundaryGap: charts.Ptr(false),
-			Labels:      labels,
-			LabelFontStyle: charts.FontStyle{
-				FontSize:  chartFontSize,
-				FontColor: colorAxisLabel,
-			},
-		}
-		opt.YAxis = []charts.YAxisOption{
-			{
-				Min:            charts.Ptr(yMin),
-				Max:            charts.Ptr(yMax),
-				Show:           charts.Ptr(true),
-				ValueFormatter: func(f float64) string { return chartFormatter(f, isAQI) },
-				LabelFontStyle: charts.FontStyle{FontSize: chartFontSize},
-			},
-		}
-		opt.Legend = charts.LegendOption{
-			FontStyle: charts.FontStyle{FontSize: chartFontSize},
-		}
-		opt.LineStrokeWidth = chartStrokeWidth
-		opt.StrokeSmoothingTension = chartSmoothing
-
-		p := charts.NewPainter(charts.PainterOptions{
-			Width:  chartWidth,
-			Height: chartHeight,
-		})
-		p.FillArea([]charts.Point{
-			{X: 0, Y: 0},
-			{X: chartWidth, Y: 0},
-			{X: chartWidth, Y: chartHeight},
-			{X: 0, Y: chartHeight},
-			{X: 0, Y: 0},
-		}, charts.ColorWhite)
-
-		if isPM {
-			// Main chart styling
-			opt.Theme = charts.GetDefaultTheme().WithSeriesColors([]charts.Color{colorSeriesRed, colorSeriesBlue})
-			opt.Theme = opt.Theme.WithBackgroundColor(charts.ColorTransparent)
-			for i := 0; i < len(opt.SeriesList); i++ {
-				opt.SeriesList[i].Name = seriesNames[i]
-			}
-		} else if isAQI {
-			opt.Theme = theme.WithSeriesColors([]charts.Color{colorSeriesGrey})
-			for i := 0; i < len(opt.SeriesList); i++ {
-				opt.SeriesList[i].Name = seriesNames[i]
-			}
-		} else {
-			colors := []charts.Color{colorSeriesBlue}
-			if title == b.T(chatID, "msg_temp") {
-				colors = []charts.Color{colorSeriesRed, colorSeriesBlue}
-			} else if title == b.T(chatID, "msg_press") {
-				colors = []charts.Color{colorSeriesPurple}
-			}
-			opt.Theme = theme.WithSeriesColors(colors)
-			for i, name := range seriesNames {
-				opt.SeriesList[i].Name = name
-			}
-		}
-
-		if err := p.LineChart(opt); err != nil {
-			return nil, err
-		}
-
-		if isPM {
-			// 1. Get the content painter (excludes outer Padding)
-			cp := p.Child(charts.PainterPaddingOption(opt.Padding))
-
-			yAxisWidth := calcYAxisWidth(chartFontSize, yMin, yMax, isAQI)
-			xAxisHeight := int(chartFontSize * chartXAxisHeightCoef)
-			titleHeight := int(chartFontSize * chartTitleHeightCoef)
-
-			// 3. Create a child painter for the ACTUAL grid area (the "pure" area)
-			pureCp := cp.Child(charts.PainterPaddingOption(charts.Box{
-				Left:   yAxisWidth,
-				Bottom: xAxisHeight,
-				Top:    titleHeight,
-			}))
-
-			gridW := float64(pureCp.Width())
-			gridH := float64(pureCp.Height())
-
-			// 4. Vertical axis labels (rotated and centered)
-			styleLeft := charts.FontStyle{
-				FontSize:  chartFontSize * chartLabelFontCoef,
-				FontColor: colorSeriesRed,
-			}
-			styleRight := charts.FontStyle{
-				FontSize:  chartFontSize * chartLabelFontCoef,
-				FontColor: colorSeriesBlue,
-			}
-
-			barWidth := float64(chartWidth) * chartBarWidthCoef
-			// Center vertically: subtract approx half-length of vertical labels
-			textHalfLen := int(chartFontSize * chartLabelFontCoef * chartTextHalfLenCoef)
-
-			// PM2.5 label: inside the grid, just to the right of the bar (Red, Left)
-			pureCp.Text(b.T(chatID, "chart_scale_pm25"), int(barWidth+chartFontSize*chartLabelXOffsetL), int(gridH/2)-textHalfLen, math.Pi/2, styleLeft)
-
-			// PM10 label: inside the grid, near the right bar (Blue, Right)
-			pureCp.Text(b.T(chatID, "chart_scale_pm10"), int(gridW-barWidth-chartFontSize*chartLabelXOffsetR), int(gridH/2)+textHalfLen, -math.Pi/2, styleRight)
-
-			// Vertical range: exactly from 0 to gridH in pure coordinates
-			yAxisBottom := gridH
-			yAxisTop := 0.0
-			plotHeight := yAxisBottom - yAxisTop
-
-			yFunc := func(val float64) float64 {
-				y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
-				if y < yAxisTop {
-					y = yAxisTop
-				}
-				if y > yAxisBottom {
-					y = yAxisBottom
-				}
-				return y
-			}
-
-			drawBar := func(x1, x2 float64, low, high float64, color charts.Color) {
-				start := math.Max(low, yMin)
-				end := math.Min(high, yMax)
-				if start < end {
-					pyBottom := yFunc(start)
-					pyTop := yFunc(end)
-					pureCp.FillArea([]charts.Point{
-						{X: int(x1), Y: int(pyBottom)},
-						{X: int(x2), Y: int(pyBottom)},
-						{X: int(x2), Y: int(pyTop)},
-						{X: int(x1), Y: int(pyTop)},
-						{X: int(x1), Y: int(pyBottom)},
-					}, color)
-				}
-			}
-
-			// PM10 bar on the left: exactly at the start of the grid (0 in pure coords)
-			drawBar(0, barWidth, 0, mcfg.PM25Green, colorGreenZone)
-			drawBar(0, barWidth, mcfg.PM25Green, mcfg.PM25Yellow, colorYellowZone)
-			drawBar(0, barWidth, mcfg.PM25Yellow, math.MaxFloat64, colorRedZone)
-
-			// PM2.5 bar on the right: exactly at the end of the grid (gridW in pure coords)
-			drawBar(gridW-barWidth, gridW, 0, mcfg.PM10Green, colorGreenZone)
-			drawBar(gridW-barWidth, gridW, mcfg.PM10Green, mcfg.PM10Yellow, colorYellowZone)
-			drawBar(gridW-barWidth, gridW, mcfg.PM10Yellow, math.MaxFloat64, colorRedZone)
-
-			dashWidth := chartStrokeWidth * chartDashWidthCoef
-			dashPattern := chartDashPattern
-
-			drawThreshold := func(val float64, color charts.Color, isLeft bool) {
-				if val < yMin || val > yMax {
-					return
-				}
-				y := yFunc(val)
-				var tx1, tx2 float64
-				if isLeft {
-					tx1 = 0.0
-					tx2 = gridW - barWidth*chartThresholdPaddingCoef
-			} else {
-				tx1 = barWidth * chartThresholdPaddingCoef
-				tx2 = gridW
-			}
-				pureCp.DashedLineStroke([]charts.Point{{X: int(tx1), Y: int(y)}, {X: int(tx2), Y: int(y)}}, color, dashWidth, dashPattern)
-			}
-
-			// 5. Draw intersection dots where data crosses thresholds
-			drawDots := func(seriesData []float64, threshold float64, color charts.Color) {
-				if len(seriesData) < 2 {
-					return
-				}
-				yT := yFunc(threshold)
-				for i := 0; i < len(seriesData)-1; i++ {
-					v1 := seriesData[i]
-					v2 := seriesData[i+1]
-					// Check crossing
-					if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
-						if v1 == v2 {
-							continue
-						}
-						t := (threshold - v1) / (v2 - v1)
-						x1 := float64(i) / float64(len(seriesData)-1) * gridW
-						x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
-						x := x1 + t*(x2-x1)
-						// Draw inner white dot inside a larger colored dot
-						pureCp.Circle(chartStrokeWidth*chartDotLargeCoef, int(x), int(yT), color, color, 0)
-						if !isAQI {
-							pureCp.Circle(chartStrokeWidth*chartDotSmallCoef, int(x), int(yT), charts.ColorWhite, charts.ColorWhite, 0)
-						}
-					}
-				}
-			}
-
-			// Draw PM10 thresholds and dots
-			drawThreshold(mcfg.PM25Green, colorSeriesRed, true)
-			drawDots(data[0], mcfg.PM25Green, colorSeriesRed)
-			drawThreshold(mcfg.PM25Yellow, colorSeriesRed, true)
-			drawDots(data[0], mcfg.PM25Yellow, colorSeriesRed)
-
-			// Draw PM10 thresholds and dots (with small offset if identical to PM10)
-			g10 := mcfg.PM10Green
-			if g10 == mcfg.PM25Green {
-				g10 -= (yMax - yMin) / plotHeight
-			}
-			drawThreshold(g10, colorSeriesBlue, false)
-			drawDots(data[1], g10, colorSeriesBlue)
-
-			y10 := mcfg.PM10Yellow
-			if y10 == mcfg.PM25Yellow {
-				y10 -= (yMax - yMin) / plotHeight
-			}
-			drawThreshold(y10, colorSeriesBlue, false)
-			drawDots(data[1], y10, colorSeriesBlue)
-		}
-
-		if isAQI {
-			cp := p.Child(charts.PainterPaddingOption(opt.Padding))
-			yAxisWidth := calcYAxisWidth(chartFontSize, yMin, yMax, isAQI)
-			xAxisHeight := int(chartFontSize * chartXAxisHeightCoef)
-			titleHeight := int(chartFontSize * chartTitleHeightCoef)
-
-			pureCp := cp.Child(charts.PainterPaddingOption(charts.Box{
-				Left:   yAxisWidth,
-				Bottom: xAxisHeight,
-				Top:    titleHeight,
-			}))
-
-			gridW := float64(pureCp.Width())
-			gridH := float64(pureCp.Height())
-			yAxisBottom := gridH
-			yAxisTop := 0.0
-			plotHeight := yAxisBottom - yAxisTop
-
-			yFunc := func(val float64) float64 {
-				y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
-				if y < yAxisTop {
-					y = yAxisTop
-				}
-				if y > yAxisBottom {
-					y = yAxisBottom
-				}
-				return y
-			}
-
-			breakpoints := sensor.IndexPointsEU
-			if mcfg.AQIStandard == "US" {
-				breakpoints = sensor.IndexPointsUS
-			}
-
-			colors := []charts.Color{
-				colorAQIGood, colorAQIModerate, colorAQISlightly,
-				colorAQIUnhealthy, colorAQIVery, colorAQIHazardous, colorAQIHazardous,
-			}
-			if mcfg.AQIStandard == "EU" {
-				colors = []charts.Color{
-					colorAQILightBlue, colorAQIGood, colorAQIModerate,
-					colorAQISlightly, colorAQIUnhealthy, colorAQIHazardous,
-				}
-			}
-
-			// Draw background zones
-			for i := 0; i < len(breakpoints)-1; i++ {
-				low := breakpoints[i]
-				high := breakpoints[i+1]
-				if i == len(breakpoints)-2 && mcfg.AQIStandard == "US" {
-					high = 500 // Cap for US
-				}
-
-				c := colors[i]
-				c.A = 51 // ~20% opacity (255 * 0.2)
-
-				pyBottom := yFunc(math.Max(low, yMin))
-				pyTop := yFunc(math.Min(high, yMax))
-
-				if pyBottom > pyTop {
-					pureCp.FillArea([]charts.Point{
-						{X: 0, Y: int(pyBottom)},
-						{X: int(gridW), Y: int(pyBottom)},
-						{X: int(gridW), Y: int(pyTop)},
-						{X: 0, Y: int(pyTop)},
-						{X: 0, Y: int(pyBottom)},
-					}, c)
-				}
-			}
-
-			// Draw dashed lines
-			// 5. Draw intersection dots where data crosses thresholds
-			drawDots := func(seriesData []float64, threshold float64, color charts.Color) {
-				if len(seriesData) < 2 {
-					return
-				}
-				yT := yFunc(threshold)
-				for i := 0; i < len(seriesData)-1; i++ {
-					v1 := seriesData[i]
-					v2 := seriesData[i+1]
-					if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
-						if v1 == v2 {
-							continue
-						}
-						t := (threshold - v1) / (v2 - v1)
-						x1 := float64(i) / float64(len(seriesData)-1) * gridW
-						x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
-						x := x1 + t*(x2-x1)
-						pureCp.Circle(chartStrokeWidth*2.4, int(x), int(yT), color, color, 0)
-
-					}
-				}
-			}
-
-			dashWidth := chartStrokeWidth * chartDashWidthCoef
-			dashPattern := chartDashPattern
-			for i := 1; i < len(breakpoints); i++ {
-				val := breakpoints[i]
-				if val < yMin || val > yMax {
-					continue
-				}
-				y := yFunc(val)
-				pureCp.DashedLineStroke([]charts.Point{{X: 0, Y: int(y)}, {X: int(gridW), Y: int(y)}}, colors[i-1], dashWidth, dashPattern)
-				drawDots(data[0], val, colorSeriesGrey)
-			}
-		}
-
-		return p.Bytes()
+	deviceID := ""
+	if len(hist) > 0 {
+		deviceID = hist[0].DeviceID
 	}
+
+	pmTitle := b.T(chatID, "chart_pm_title")
 
 	switch chartType {
 	case "pm":
-		return buildChart(pmTitle, b.T(chatID, "chart_unit_pm"),
-			[]string{"PM2.5", "PM10"},
-			[][]float64{pm25Values, pm10Values}, true)
+		return b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "chart_unit_pm"),
+			labels, []string{"PM2.5", "PM10"},
+			[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 	case "temp":
 		if len(tempValues) > 0 {
-			return buildChart(b.T(chatID, "msg_temp"), b.unitTempLabel(chatID),
-				[]string{b.T(chatID, "msg_temp"), b.T(chatID, "msg_dew_point")},
-				[][]float64{tempValues, dewPointValues}, false)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msg_temp"), b.unitTempLabel(chatID),
+				labels, []string{b.T(chatID, "msg_temp"), b.T(chatID, "msg_dew_point")},
+				[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	case "hum":
 		if len(humValues) > 0 {
-			return buildChart(b.T(chatID, "msg_hum"), "%", []string{b.T(chatID, "msg_hum")}, [][]float64{humValues}, false)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msg_hum"), "%", labels, []string{b.T(chatID, "msg_hum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	case "press":
 		if len(pressValues) > 0 {
-			return buildChart(b.T(chatID, "msg_press"), b.unitPressLabel(chatID), []string{b.T(chatID, "msg_press")}, [][]float64{pressValues}, false)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msg_press"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msg_press")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	case "aqi":
 		if len(aqiValues) > 0 {
-			return buildChart(b.T(chatID, "btn_chart_aqi", ""), mcfg.AQIStandard, []string{"AQI"}, [][]float64{aqiValues}, true)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "btn_chart_aqi", ""), mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	}
 
 	return nil, nil
+}
+
+func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string, labels []string, seriesNames []string, data [][]float64, forceZero bool, chartWidth, chartHeight int, chartFontSize float64, mcfg *config.Monitor) ([]byte, error) {
+	isPM := strings.Contains(strings.ToLower(title), "pm")
+	isAQI := strings.Contains(strings.ToLower(title), "aqi")
+	theme := charts.GetDefaultTheme()
+
+	var yMin, yMax float64 = math.MaxFloat64, -math.MaxFloat64
+	hasData := false
+	for _, series := range data {
+		for _, v := range series {
+			if v != charts.GetNullValue() {
+				if v > yMax {
+					yMax = v
+				}
+				if v < yMin {
+					yMin = v
+				}
+				hasData = true
+			}
+		}
+	}
+
+	if !hasData {
+		yMin, yMax = chartDefaultMin, chartDefaultMax
+	} else if forceZero {
+		yMin = 0
+		yMax *= (1.0 + chartHeadroomCoef)
+	} else {
+		span := yMax - yMin
+		if span == 0 {
+			yMin -= 1
+			yMax += 1
+		} else {
+			yMin -= span * chartHeadroomCoef
+			yMax += span * chartHeadroomCoef
+		}
+	}
+
+	pLeft := chartFontSize * chartPadLeft
+	pRight := chartFontSize * chartPadRight
+	pTop := chartFontSize * chartPadTop
+	pBottom := chartFontSize * chartPadBottom
+
+	opt := charts.NewLineChartOptionWithData(data)
+	opt.Padding = charts.Box{
+		Left:   int(pLeft),
+		Right:  int(pRight),
+		Top:    int(pTop),
+		Bottom: int(pBottom),
+	}
+	opt.Title = charts.TitleOption{
+		Text:      fmt.Sprintf("%s (%s)", title, yAxisName),
+		FontStyle: charts.FontStyle{FontSize: chartFontSize * chartTitleFontCoef},
+	}
+
+	opt.XAxis = charts.XAxisOption{
+		Show:                 charts.Ptr(true),
+		BoundaryGap:          charts.Ptr(true),
+		Labels:               labels,
+		LabelCount:           8,
+		LabelCountAdjustment: 2,
+		LabelFontStyle: charts.FontStyle{
+			FontSize:  chartFontSize * 0.8,
+			FontColor: colorAxisLabel,
+		},
+	}
+	opt.YAxis = []charts.YAxisOption{
+		{
+			Min:            charts.Ptr(yMin),
+			Max:            charts.Ptr(yMax),
+			Show:           charts.Ptr(true),
+			ValueFormatter: func(f float64) string { return chartFormatter(f, isAQI) },
+			LabelFontStyle: charts.FontStyle{FontSize: chartFontSize},
+		},
+	}
+	opt.Legend = charts.LegendOption{
+		FontStyle: charts.FontStyle{FontSize: chartFontSize},
+	}
+	opt.LineStrokeWidth = chartStrokeWidth
+	opt.StrokeSmoothingTension = chartSmoothing
+
+	p := charts.NewPainter(charts.PainterOptions{
+		Width:  chartWidth,
+		Height: chartHeight,
+	})
+	p.FillArea([]charts.Point{
+		{X: 0, Y: 0},
+		{X: chartWidth, Y: 0},
+		{X: chartWidth, Y: chartHeight},
+		{X: 0, Y: chartHeight},
+		{X: 0, Y: 0},
+	}, charts.ColorWhite)
+
+	if isPM {
+		opt.Theme = charts.GetDefaultTheme().WithSeriesColors([]charts.Color{colorSeriesRed, colorSeriesBlue})
+		opt.Theme = opt.Theme.WithBackgroundColor(charts.ColorTransparent)
+		for i := 0; i < len(opt.SeriesList); i++ {
+			opt.SeriesList[i].Name = seriesNames[i]
+		}
+	} else if isAQI {
+		opt.Theme = theme.WithSeriesColors([]charts.Color{colorSeriesGrey})
+		for i, name := range seriesNames {
+			opt.SeriesList[i].Name = name
+		}
+	} else {
+		colors := []charts.Color{colorSeriesBlue}
+		if title == b.T(chatID, "msg_temp") {
+			colors = []charts.Color{colorSeriesRed, colorSeriesBlue}
+		} else if title == b.T(chatID, "msg_press") {
+			colors = []charts.Color{colorSeriesPurple}
+		}
+		opt.Theme = theme.WithSeriesColors(colors)
+		for i, name := range seriesNames {
+			opt.SeriesList[i].Name = name
+		}
+	}
+
+	if err := p.LineChart(opt); err != nil {
+		return nil, err
+	}
+
+	// 1. Get the content painter (excludes outer Padding)
+	cp := p.Child(charts.PainterPaddingOption(opt.Padding))
+	yAxisWidth := calcYAxisWidth(chartFontSize, yMin, yMax, isAQI)
+	xAxisHeight := int(chartFontSize * chartXAxisHeightCoef)
+	titleHeight := int(chartFontSize * chartTitleHeightCoef)
+
+	// 3. Create a child painter for the ACTUAL grid area (the "pure" area)
+	pureCp := cp.Child(charts.PainterPaddingOption(charts.Box{
+		Left:   yAxisWidth,
+		Bottom: xAxisHeight,
+		Top:    titleHeight,
+	}))
+
+	gridW := float64(pureCp.Width())
+	gridH := float64(pureCp.Height())
+
+	// Draw meta info (device and time) - aligned to the right edge of the grid
+	metaFontSize := chartFontSize * chartMetaFontSizeCoef
+	metaStyle := charts.FontStyle{
+		FontSize:  metaFontSize,
+		FontColor: colorAxisLabel,
+	}
+	deviceStr := b.formatDeviceIDPlain(chatID, deviceID)
+	timeStr := time.Now().Format("02.01.2006 15:04:05")
+
+	// X position in cp coordinates: yAxisWidth + gridW - textLength
+	// We align to the actual grid right edge
+	rightEdge := yAxisWidth + int(gridW)
+	xDevice := rightEdge - int(calcTextWidth(deviceStr, metaFontSize))
+	xTime := rightEdge - int(calcTextWidth(timeStr, metaFontSize))
+
+	// Draw at the level of the title (inside the top padding)
+	// titleHeight is the area reserved for title. Title is usually centered there.
+	cp.Text(deviceStr, xDevice, int(float64(titleHeight)*chartMetaY1Coef), 0, metaStyle)
+	cp.Text(timeStr, xTime, int(float64(titleHeight)*chartMetaY2Coef), 0, metaStyle)
+
+	if isPM {
+
+		styleLeft := charts.FontStyle{
+			FontSize:  chartFontSize * chartLabelFontCoef,
+			FontColor: colorSeriesRed,
+		}
+		styleRight := charts.FontStyle{
+			FontSize:  chartFontSize * chartLabelFontCoef,
+			FontColor: colorSeriesBlue,
+		}
+
+		barWidth := float64(chartWidth) * chartBarWidthCoef
+		textHalfLen := int(chartFontSize * chartLabelFontCoef * chartTextHalfLenCoef)
+		pureCp.Text(b.T(chatID, "chart_scale_pm25"), int(barWidth+chartFontSize*chartLabelXOffsetL), int(gridH/2)-textHalfLen, math.Pi/2, styleLeft)
+		pureCp.Text(b.T(chatID, "chart_scale_pm10"), int(gridW-barWidth-chartFontSize*chartLabelXOffsetR), int(gridH/2)+textHalfLen, -math.Pi/2, styleRight)
+
+		yAxisBottom := gridH
+		yAxisTop := 0.0
+		plotHeight := yAxisBottom - yAxisTop
+
+		yFunc := func(val float64) float64 {
+			y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
+			if y < yAxisTop {
+				y = yAxisTop
+			}
+			if y > yAxisBottom {
+				y = yAxisBottom
+			}
+			return y
+		}
+
+		drawBar := func(x1, x2 float64, low, high float64, color charts.Color) {
+			start := math.Max(low, yMin)
+			end := math.Min(high, yMax)
+			if start < end {
+				pyBottom := yFunc(start)
+				pyTop := yFunc(end)
+				pureCp.FillArea([]charts.Point{
+					{X: int(x1), Y: int(pyBottom)},
+					{X: int(x2), Y: int(pyBottom)},
+					{X: int(x2), Y: int(pyTop)},
+					{X: int(x1), Y: int(pyTop)},
+					{X: int(x1), Y: int(pyBottom)},
+				}, color)
+			}
+		}
+
+		drawBar(0, barWidth, 0, mcfg.PM25Green, colorGreenZone)
+		drawBar(0, barWidth, mcfg.PM25Green, mcfg.PM25Yellow, colorYellowZone)
+		drawBar(0, barWidth, mcfg.PM25Yellow, math.MaxFloat64, colorRedZone)
+		drawBar(gridW-barWidth, gridW, 0, mcfg.PM10Green, colorGreenZone)
+		drawBar(gridW-barWidth, gridW, mcfg.PM10Green, mcfg.PM10Yellow, colorYellowZone)
+		drawBar(gridW-barWidth, gridW, mcfg.PM10Yellow, math.MaxFloat64, colorRedZone)
+
+		dashWidth := chartStrokeWidth * chartDashWidthCoef
+		dashPattern := chartDashPattern
+
+		drawThreshold := func(val float64, color charts.Color, isLeft bool, yOffset float64) {
+			if val < yMin || val > yMax {
+				return
+			}
+			y := yFunc(val) + yOffset
+			var tx1, tx2 float64
+			if isLeft {
+				tx1 = 0.0
+				tx2 = gridW - barWidth*chartThresholdPaddingCoef
+			} else {
+				tx1 = barWidth * chartThresholdPaddingCoef
+				tx2 = gridW
+			}
+			pureCp.DashedLineStroke([]charts.Point{{X: int(tx1), Y: int(y)}, {X: int(tx2), Y: int(y)}}, color, dashWidth, dashPattern)
+		}
+
+		drawDots := func(seriesData []float64, threshold float64, color charts.Color, yOffset float64) {
+			if len(seriesData) < 2 {
+				return
+			}
+			yT := yFunc(threshold) + yOffset
+			for i := 0; i < len(seriesData)-1; i++ {
+				v1 := seriesData[i]
+				v2 := seriesData[i+1]
+				if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
+					if v1 == v2 {
+						continue
+					}
+					t := (threshold - v1) / (v2 - v1)
+					x1 := float64(i) / float64(len(seriesData)-1) * gridW
+					x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
+					x := x1 + t*(x2-x1)
+					pureCp.Circle(chartStrokeWidth*chartDotLargeCoef, int(x), int(yT), color, color, 0)
+					if !isAQI {
+						pureCp.Circle(chartStrokeWidth*chartDotSmallCoef, int(x), int(yT), charts.ColorWhite, charts.ColorWhite, 0)
+					}
+				}
+			}
+		}
+
+		drawThreshold(mcfg.PM25Green, colorSeriesRed, true, 0)
+		drawDots(data[0], mcfg.PM25Green, colorSeriesRed, 0)
+		drawThreshold(mcfg.PM25Yellow, colorSeriesRed, true, 0)
+		drawDots(data[0], mcfg.PM25Yellow, colorSeriesRed, 0)
+
+		var g10Offset float64
+		if mcfg.PM10Green == mcfg.PM25Green || mcfg.PM10Green == mcfg.PM25Yellow {
+			g10Offset = dashWidth * 2
+		}
+		drawThreshold(mcfg.PM10Green, colorSeriesBlue, false, g10Offset)
+		drawDots(data[1], mcfg.PM10Green, colorSeriesBlue, g10Offset)
+
+		var y10Offset float64
+		if mcfg.PM10Yellow == mcfg.PM25Green || mcfg.PM10Yellow == mcfg.PM25Yellow {
+			y10Offset = dashWidth * 2
+		}
+		drawThreshold(mcfg.PM10Yellow, colorSeriesBlue, false, y10Offset)
+		drawDots(data[1], mcfg.PM10Yellow, colorSeriesBlue, y10Offset)
+	}
+
+	if isAQI {
+		yAxisBottom := gridH
+		yAxisTop := 0.0
+		plotHeight := yAxisBottom - yAxisTop
+		yFunc := func(val float64) float64 {
+			y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
+			if y < yAxisTop {
+				y = yAxisTop
+			}
+			if y > yAxisBottom {
+				y = yAxisBottom
+			}
+			return y
+		}
+		breakpoints := sensor.IndexPointsEU
+		if mcfg.AQIStandard == "US" {
+			breakpoints = sensor.IndexPointsUS
+		}
+		colors := []charts.Color{
+			colorAQIGood, colorAQIModerate, colorAQISlightly,
+			colorAQIUnhealthy, colorAQIVery, colorAQIHazardous, colorAQIExtreme,
+		}
+		if mcfg.AQIStandard == "EU" {
+			colors = []charts.Color{
+				colorAQILightBlue, colorAQIGood, colorAQIModerate,
+				colorAQISlightly, colorAQIUnhealthy, colorAQIHazardous,
+			}
+		}
+		for i := 0; i < len(breakpoints)-1; i++ {
+			low := breakpoints[i]
+			high := breakpoints[i+1]
+			if i == len(breakpoints)-2 && mcfg.AQIStandard == "US" {
+				high = sensor.IndexPointsUS[len(sensor.IndexPointsUS)-1]
+			}
+			c := colors[i]
+			c.A = 51
+			pyBottom := yFunc(math.Max(low, yMin))
+			pyTop := yFunc(math.Min(high, yMax))
+			if pyBottom > pyTop {
+				pureCp.FillArea([]charts.Point{
+					{X: 0, Y: int(pyBottom)},
+					{X: int(gridW), Y: int(pyBottom)},
+					{X: int(gridW), Y: int(pyTop)},
+					{X: 0, Y: int(pyTop)},
+					{X: 0, Y: int(pyBottom)},
+				}, c)
+			}
+		}
+		drawDots := func(seriesData []float64, threshold float64, color charts.Color) {
+			if len(seriesData) < 2 {
+				return
+			}
+			yT := yFunc(threshold)
+			for i := 0; i < len(seriesData)-1; i++ {
+				v1 := seriesData[i]
+				v2 := seriesData[i+1]
+				if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
+					if v1 == v2 {
+						continue
+					}
+					t := (threshold - v1) / (v2 - v1)
+					x1 := float64(i) / float64(len(seriesData)-1) * gridW
+					x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
+					x := x1 + t*(x2-x1)
+					pureCp.Circle(chartStrokeWidth*2.4, int(x), int(yT), color, color, 0)
+				}
+			}
+		}
+		dashWidth := chartStrokeWidth * chartDashWidthCoef
+		dashPattern := chartDashPattern
+		for i := 1; i < len(breakpoints); i++ {
+			val := breakpoints[i]
+			if val < yMin || val > yMax {
+				continue
+			}
+			y := yFunc(val)
+			pureCp.DashedLineStroke([]charts.Point{{X: 0, Y: int(y)}, {X: int(gridW), Y: int(y)}}, colors[i-1], dashWidth, dashPattern)
+			drawDots(data[0], val, colorSeriesGrey)
+		}
+	}
+
+	return p.Bytes()
 }
 
 func CalcDewPoint(t, rh float64) float64 {
