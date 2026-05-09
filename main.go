@@ -77,11 +77,6 @@ func main() {
 			for range ticker.C {
 				if err := db.Ping(); err != nil {
 					log.Warn().Err(err).Msg("db: connection lost, background ping failed")
-				} else {
-					ms.SyncDB()
-					if bot != nil {
-						bot.SyncDB()
-					}
 				}
 			}
 		}()

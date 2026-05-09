@@ -124,101 +124,11 @@ func (s *MonitorService) SetDB(db *sql.DB) {
 		return
 	}
 
-	// Always attempt incremental migration from JSON to Postgres
-	s.migrateFromJSON()
-
 	// Load last N values into RAM for each device
 	s.loadHistoryFromSQL()
 }
 
-// SyncDB attempts to reconcile JSON data with Postgres.
-func (s *MonitorService) SyncDB() {
-	s.mu.RLock()
-	db := s.db
-	s.mu.RUnlock()
 
-	if db == nil {
-		return
-	}
-	if err := db.Ping(); err != nil {
-		return
-	}
-	s.migrateFromJSON()
-}
-
-func (s *MonitorService) migrateFromJSON() {
-	if s.cfg.Database.JsonFile == "" {
-		return
-	}
-	data, err := os.ReadFile(s.cfg.Database.JsonFile)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Error().Err(err).Msg("monitor: migration failed to read json")
-		}
-		return
-	}
-
-	var all []Measurement
-	if err := json.Unmarshal(data, &all); err != nil {
-		log.Error().Err(err).Msg("monitor: migration failed to unmarshal json")
-		return
-	}
-
-	if len(all) == 0 {
-		return
-	}
-
-	log.Info().Str("file", s.cfg.Database.JsonFile).Int("total_records", len(all)).Msg("monitor: ensuring json data is synced to postgres...")
-
-	countMigrated := 0
-	batchSize := 100
-	for i := 0; i < len(all); i += batchSize {
-		end := i + batchSize
-		if end > len(all) {
-			end = len(all)
-		}
-		batch := all[i:end]
-
-		err := func() error {
-			tx, err := s.db.Begin()
-			if err != nil {
-				return err
-			}
-			defer tx.Rollback()
-
-			stmt, err := tx.Prepare(`
-				INSERT INTO measurements (device_id, timestamp, pm10, pm25, temperature, humidity, pressure)
-				VALUES ($1, $2, $3, $4, $5, $6, $7)
-				ON CONFLICT (device_id, timestamp) DO NOTHING
-			`)
-			if err != nil {
-				return err
-			}
-			defer stmt.Close()
-
-			for _, m := range batch {
-				res, err := stmt.Exec(m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.Temperature, m.Humidity, m.Pressure)
-				if err == nil {
-					n, _ := res.RowsAffected()
-					if n > 0 {
-						countMigrated++
-					}
-				}
-			}
-			return tx.Commit()
-		}()
-
-		if err != nil {
-			log.Error().Err(err).Int("start", i).Msg("monitor: migration batch failed")
-		}
-	}
-
-	if countMigrated > 0 {
-		log.Info().Int("count", countMigrated).Msg("monitor: sync from json successful")
-	} else {
-		log.Debug().Msg("monitor: postgres is already up to date with json")
-	}
-}
 
 func (s *MonitorService) loadHistory() {
 	if s.cfg.Database.Type != "json" || s.cfg.Database.JsonFile == "" {

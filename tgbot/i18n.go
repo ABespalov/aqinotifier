@@ -5,49 +5,58 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
-
-	"github.com/nicksnyder/go-i18n/v2/i18n"
-	"golang.org/x/text/language"
+	"time"
 )
 
 var (
-	i18nBundle *i18n.Bundle
-	iconsMap   map[string]string
-	iconsMu    sync.RWMutex
+	langDicts        map[string]map[string]string
+	iconsMap         map[string]string
+	i18nMu           sync.RWMutex
+	placeholderRegex = regexp.MustCompile(`@([a-zA-Z0-9_]+)(?:%([^@]+))?@`)
 )
 
 func init() {
-	// Initialize bundle with English as default
-	i18nBundle = i18n.NewBundle(language.English)
-	i18nBundle.RegisterUnmarshalFunc("json", json.Unmarshal)
-
-	// Register hardcoded English as a baseline fallback
-	enData, _ := json.Marshal(fallbackEN)
-	i18nBundle.MustParseMessageFileBytes(enData, "en.json")
-
+	langDicts = make(map[string]map[string]string)
 	iconsMap = make(map[string]string)
 
-	// Try to load external files from "lng" directory if it exists
+	langDicts["en"] = make(map[string]string)
+	for k, v := range fallbackEN {
+		langDicts["en"][k] = v
+	}
+
 	loadExternalTranslations("lng")
 	loadIcons("lng")
 }
 
-// loadExternalTranslations walks the given directory and loads all JSON translation files into the bundle.
 func loadExternalTranslations(dir string) {
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
+		if err != nil || info.IsDir() {
 			return nil
 		}
-		if !info.IsDir() && filepath.Ext(path) == ".json" {
-			// Skip icons file, it's handled separately
+		if filepath.Ext(path) == ".json" {
 			if info.Name() == "ico.json" {
 				return nil
 			}
-			_, loadErr := i18nBundle.LoadMessageFile(path)
-			if loadErr != nil {
-				fmt.Printf("i18n: failed to load %s: %v\n", path, loadErr)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			var dict map[string]string
+			if err := json.Unmarshal(data, &dict); err == nil {
+				lang := strings.TrimSuffix(info.Name(), ".json")
+				i18nMu.Lock()
+				if langDicts[lang] == nil {
+					langDicts[lang] = make(map[string]string)
+				}
+				for k, v := range dict {
+					langDicts[lang][k] = v
+				}
+				i18nMu.Unlock()
+			} else {
+				fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
 			}
 		}
 		return nil
@@ -64,11 +73,11 @@ func loadIcons(dir string) {
 
 	var m map[string]string
 	if err := json.Unmarshal(data, &m); err == nil {
-		iconsMu.Lock()
+		i18nMu.Lock()
 		for k, v := range m {
 			iconsMap[k] = v
 		}
-		iconsMu.Unlock()
+		i18nMu.Unlock()
 		updateIconVars(m)
 	} else {
 		fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
@@ -82,7 +91,6 @@ func ReloadAll() {
 }
 
 // AvailableLanguages returns a sorted list of language codes found in the lng/ directory.
-// "en" is always included as the default.
 func AvailableLanguages() []string {
 	seen := map[string]bool{"en": true}
 	langs := []string{"en"}
@@ -90,7 +98,7 @@ func AvailableLanguages() []string {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		if filepath.Ext(path) == ".json" {
+		if filepath.Ext(path) == ".json" && info.Name() != "ico.json" {
 			code := strings.TrimSuffix(filepath.Base(path), ".json")
 			if !seen[code] {
 				seen[code] = true
@@ -102,14 +110,85 @@ func AvailableLanguages() []string {
 	return langs
 }
 
-// T returns a localized string for the given key and chat ID, using the user's preferred language.
-// It supports positional arguments for formatting (fmt.Sprintf style).
+func resolveTemplate(lang string, text string, argsMap map[string]interface{}, depth int) string {
+	if depth > 10 {
+		return text // Prevent infinite recursion
+	}
+
+	text = strings.ReplaceAll(text, "%%", "%")
+	return placeholderRegex.ReplaceAllStringFunc(text, func(match string) string {
+		submatch := placeholderRegex.FindStringSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+		key := submatch[1]
+		format := ""
+		if len(submatch) > 2 {
+			format = submatch[2]
+		}
+
+		// 1. Try argsMap
+		if argsMap != nil {
+			if val, ok := argsMap[key]; ok {
+				var valStr string
+				if t, okT := val.(time.Time); okT {
+					f := format
+					if f == "" {
+						i18nMu.RLock()
+						if dict, okD := langDicts[lang]; okD {
+							if defF, okF := dict["format_"+key]; okF {
+								f = defF
+							} else if defF, okF := dict["format_datetime"]; okF {
+								f = defF
+							}
+						}
+						i18nMu.RUnlock()
+					}
+					if f == "" {
+						f = "2006-01-02 15:04:05"
+					}
+					valStr = t.Format(f)
+				} else if format != "" {
+					valStr = fmt.Sprintf("%"+format, val)
+				} else {
+					valStr = fmt.Sprintf("%v", val)
+				}
+				return resolveTemplate(lang, valStr, argsMap, depth+1)
+			}
+		}
+
+		// 2. Try langDicts and iconsMap
+		i18nMu.RLock()
+		dict, ok := langDicts[lang]
+		var tmpl string
+		found := false
+		if ok {
+			tmpl, found = dict[key]
+		}
+		if !found {
+			if enDict, okEN := langDicts["en"]; okEN {
+				tmpl, found = enDict[key]
+			}
+		}
+		if !found {
+			tmpl, found = iconsMap[key]
+		}
+		i18nMu.RUnlock()
+
+		if found {
+			return resolveTemplate(lang, tmpl, argsMap, depth+1)
+		}
+
+		return match // Keep unresolved
+	})
+}
+
+// T returns a localized string for the given key and chat ID.
 func (b *Bot) T(chatID int64, key string, args ...interface{}) string {
 	lang := b.store.GetLanguage(chatID)
 	return b.TLang(lang, key, args...)
 }
 
-// detectLang maps a Telegram language code to a supported application language.
 func (b *Bot) detectLang(langCode string) string {
 	if strings.HasPrefix(langCode, "ru") {
 		return "ru"
@@ -123,29 +202,43 @@ func (b *Bot) TLang(lang, key string, args ...interface{}) string {
 		lang = "en"
 	}
 
-	localizer := i18n.NewLocalizer(i18nBundle, lang, "en")
-	msg, err := localizer.Localize(&i18n.LocalizeConfig{
-		MessageID: key,
-	})
+	i18nMu.RLock()
+	dict, ok := langDicts[lang]
+	var tmpl string
+	found := false
+	if ok {
+		tmpl, found = dict[key]
+	}
+	if !found {
+		if enDict, okEN := langDicts["en"]; okEN {
+			tmpl, found = enDict[key]
+		}
+	}
+	i18nMu.RUnlock()
 
-	if err != nil {
-		if val, ok := fallbackEN[key]; ok {
-			msg = val
-		} else {
-			return fmt.Sprintf("!!%s!!", key)
+	if !found {
+		return fmt.Sprintf("!!%s!!", key)
+	}
+
+	var argsMap map[string]interface{}
+	if len(args) == 1 {
+		if m, okMap := args[0].(map[string]interface{}); okMap {
+			argsMap = m
 		}
 	}
 
-	if len(args) > 0 {
-		return fmt.Sprintf(msg, args...)
+	resolved := resolveTemplate(lang, tmpl, argsMap, 0)
+
+	if len(args) > 0 && argsMap == nil {
+		return fmt.Sprintf(resolved, args...)
 	}
-	return msg
+	return resolved
 }
 
 // I returns an icon by its key from ico.json.
 func (b *Bot) I(key string) string {
-	iconsMu.RLock()
-	defer iconsMu.RUnlock()
+	i18nMu.RLock()
+	defer i18nMu.RUnlock()
 	if v, ok := iconsMap[key]; ok {
 		return v
 	}
@@ -154,25 +247,17 @@ func (b *Bot) I(key string) string {
 
 // fallbackEN contains the hardcoded English localization as a final safety net.
 var fallbackEN = map[string]string{
-	"alert_threshold_full":         "<b>%s</b>\n%+.2f (%+.2f%%) %.2f → %.2f\n%s",
-	"alert_threshold_dual":         "<b>%s</b>\n%s\n%s",
-	"alert_threshold_title":        "%s %s %s %s",
+
 	"alert_pm10":                   "PM10",
 	"alert_pm25":                   "PM2.5",
 	"alert_pms":                    "PM2.5 & PM10",
 	"alert_aqi_clean_short":        "AQI level returned to normal",
 	"alert_action_up":              "Rise",
 	"alert_action_down":            "Fall",
-	"zone_acc_g":                   "Green zone",
-	"zone_acc_y":                   "Yellow zone",
-	"zone_acc_r":                   "Red zone",
-	"zone_pre_g":                   "Green zone",
-	"zone_pre_y":                   "Yellow zone",
-	"zone_pre_r":                   "Red zone",
 	"alert_aqi_full":               "<b>AQI: %s</b> (%s %s)\nAQI: <b>%.1f</b>",
 	"alert_aqi_clean":              "%s <b>AQI level returned to normal</b> (%s %s)\nAQI: <b>%.1f</b>",
 	"alert_aqi_short":              "AQI Level: %s %s",
-	"alert_threshold_short":        "%s %s %s %s",
+
 	"btn_aqi_settings":             "%s AQI Settings",
 	"btn_aqi_standard":             "Standard: %s %s",
 	"btn_chart_aqi":                "%s AQI Chart",
@@ -220,8 +305,8 @@ var fallbackEN = map[string]string{
 	"lang_ru":                      "Russian",
 	"label_pm10":                   "PM10",
 	"label_pm25":                   "PM2.5",
-	"label_zone_g":                 "Green",
-	"label_zone_y":                 "Yellow",
+	"label_zone_1":                 "Green",
+	"label_zone_2":                 "Yellow",
 	"label_zone_suffix":            "zone",
 	"label_dynamics":               "Dynamics",
 	"msg_alert":                    "WARNING",
@@ -285,12 +370,11 @@ var fallbackEN = map[string]string{
 	"aqi_name_z6_eu":               "Extreme",
 	"standard_eu":                  "EU",
 	"standard_us":                  "US",
-	"flag_eu":                      "%s",
-	"flag_us":                      "%s",
+
 	"msg_subscribed":               "%s You subscribed to device <code>%s</code>",
 	"msg_temp":                     "Temperature",
 	"msg_dew_point":                "Dew point",
-	"msg_threshold":                "%s %s %s %.1f / %.1f",
+
 	"msg_boundary":                 "Boundary",
 	"msg_threshold_label":          "Threshold",
 	"msg_threshold_diff_label":     "Dynamics (%)",
@@ -308,9 +392,6 @@ var fallbackEN = map[string]string{
 	"msg_your_subs":                "%s <b>Your subscriptions:</b>\nClick on a device for data or use the buttons below for management.",
 	"msg_threshold_desc":           "Changing %s threshold between %s and %s zones",
 	"msg_threshold_diff_desc":      "Changing %s dynamics threshold (%%)",
-	"zone_green":                   "Green",
-	"zone_yellow":                  "Yellow",
-	"zone_red":                     "Red",
 	"status_no_data":               "No data for device <code>%s</code>",
 	"unit_c":                       "Celsius (°C)",
 	"unit_f":                       "Fahrenheit (°F)",
@@ -344,10 +425,10 @@ var fallbackEN = map[string]string{
 	"alert_aqi_rise":               "AQI level rise to \"%s\" zone",
 	"alert_aqi_fall":               "AQI level fall to \"%s\" zone",
 	"alert_aqi_return":             "AQI level returned to normal",
-	"alert_short_zone_acc_g":       "Green",
-	"alert_short_zone_acc_y":       "Yellow",
-	"alert_short_zone_acc_r":       "Red",
-	"alert_short_zone_pre_g":       "Green",
-	"alert_short_zone_pre_y":       "Yellow",
-	"alert_short_zone_pre_r":       "Red",
+	"alert_short_zone_acc_1":       "Green",
+	"alert_short_zone_acc_2":       "Yellow",
+	"alert_short_zone_acc_3":       "Red",
+	"alert_short_zone_pre_1":       "Green",
+	"alert_short_zone_pre_2":       "Yellow",
+	"alert_short_zone_pre_3":       "Red",
 }

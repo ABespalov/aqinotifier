@@ -14,16 +14,15 @@ import (
 )
 
 var (
-	colorGreenZone  = charts.Color{R: 0, G: 255, B: 0, A: 85}   // 33% opacity
-	colorYellowZone = charts.Color{R: 255, G: 255, B: 0, A: 85} // 33% opacity
-	colorRedZone    = charts.Color{R: 255, G: 0, B: 0, A: 85}   // 33% opacity
+	colorGreenZone  = charts.Color{R: 0, G: 255, B: 0, A: 85}
+	colorYellowZone = charts.Color{R: 255, G: 255, B: 0, A: 85}
+	colorRedZone    = charts.Color{R: 255, G: 0, B: 0, A: 85}
 
-	colorSeriesRed    = charts.ParseColor("#80090799") // Red
-	colorSeriesBlue   = charts.ParseColor("#0c4c8084") // Blue
-	colorSeriesPurple = charts.ParseColor("#6d197c8c") // Purple
-	colorSeriesGrey   = charts.ParseColor("#505050")   // Wet asphalt
+	colorSeriesRed    = charts.ParseColor("#80090799")
+	colorSeriesBlue   = charts.ParseColor("#0c4c8084")
+	colorSeriesPurple = charts.ParseColor("#6d197c8c")
+	colorSeriesGrey   = charts.ParseColor("#505050")
 
-	// AQI Colors
 	colorAQIGood      = charts.ParseColor("#00E400")
 	colorAQILightBlue = charts.ParseColor("#52B6E6")
 	colorAQIModerate  = charts.ParseColor("#FFFF00")
@@ -34,57 +33,46 @@ var (
 	colorAQIExtreme   = charts.ParseColor("#505050")
 )
 
-// generateCharts produces a slice of PNG buffers containing PM, Temperature,
-// Humidity, and Pressure charts based on the provided measurement history.
 const (
 	chartStrokeWidth = 3.0
 	chartSmoothing   = 0.4
 
-	// Padding coefficients (relative to fontSize)
 	chartPadLeft   = 3.5
 	chartPadRight  = 6.0
 	chartPadTop    = 4.0
 	chartPadBottom = 5.5
 
-	// Axis width coefficients (additive model)
 	chartAxisDigitWeight = 0.9
 	chartAxisSepWeight   = 0.3
 	chartAxisBase        = 0.85
 
-	// Geometric coefficients (relative to fontSize or chartWidth)
 	chartXAxisHeightCoef = 2.0
 	chartTitleHeightCoef = 3.0
 	chartLabelFontCoef   = 0.8
-	chartBarWidthCoef    = 0.01 // relative to chartWidth
-	chartTextHalfLenCoef = 5.0  // for centering vertical labels
+	chartBarWidthCoef    = 0.01
+	chartTextHalfLenCoef = 5.0
 	chartLabelXOffsetL   = 0.6
 	chartLabelXOffsetR   = 0.4
 
-	// Scaling and margin coefficients
-	chartHeadroomCoef    = 0.1 // 10% margin
+	chartHeadroomCoef    = 0.1
 	chartTitleFontCoef   = 1.2
 	chartDefaultMin      = 0.0
 	chartDefaultMax      = 10.0
 	chartLabelColorAlpha = 255
 
-	// Drawing coefficients
 	chartThresholdPaddingCoef = 3.0
 	chartDotLargeCoef         = 2.4
 	chartDotSmallCoef         = 0.8
 	chartDashWidthCoef        = 0.35
 
-	// Data and aggregation logic
 	chartAggregationWindow = 15 * time.Minute
 
-	// Conversion constants
 	celsiusToFahrenheitSlope  = 1.8
 	celsiusToFahrenheitOffset = 32.0
 
-	// Magnus formula constants (for dew point calculation)
 	magnusB = 17.27
 	magnusC = 237.7
 
-	// Meta info coefficients
 	chartMetaFontSizeCoef = 2.0 / 3.0
 	chartMetaY1Coef       = 0.4
 	chartMetaY2Coef       = 0.8
@@ -95,7 +83,6 @@ var (
 	chartDashPattern = []float64{4, 4}
 )
 
-// chartFormatter standardizes value labels across all charts.
 func chartFormatter(f float64, isAQI bool) string {
 	if isAQI {
 		return fmt.Sprintf("%d", int(math.Round(f)))
@@ -103,7 +90,6 @@ func chartFormatter(f float64, isAQI bool) string {
 	return fmt.Sprintf("%.1f", f)
 }
 
-// calcTextWidth estimates the pixel width of a string based on font size and character weights.
 func calcTextWidth(s string, fs float64) float64 {
 	var w float64
 	for _, r := range s {
@@ -116,7 +102,6 @@ func calcTextWidth(s string, fs float64) float64 {
 	return fs * w
 }
 
-// calcYAxisWidth returns the pixel width needed for the Y-axis labels.
 func calcYAxisWidth(fs float64, yMin, yMax float64, isAQI bool) int {
 	s1 := chartFormatter(yMin, isAQI)
 	s2 := chartFormatter(yMax, isAQI)
@@ -141,7 +126,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	mcfg := b.GetUserSettings(chatID)
 	for _, m := range hist {
 		local := m.Timestamp.Local()
-		label := local.Format("15:04")
+		label := local.Format(b.T(chatID, "format_chart_label"))
 		labels = append(labels, label)
 		pm10Values = append(pm10Values, m.PM10)
 		pm25Values = append(pm25Values, m.PM25)
@@ -274,7 +259,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 
 	for _, m := range filteredHist {
 		local := m.Timestamp.Local()
-		label := local.Format("15:04")
+		label := local.Format(b.T(chatID, "format_chart_label"))
 		labels = append(labels, label)
 		switch chartType {
 		case "pm":
@@ -347,7 +332,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 		}
 	case "aqi":
 		if len(aqiValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "btn_chart_aqi", ""), mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "btn_chart_aqi"), mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	}
 
@@ -474,13 +459,11 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		return nil, err
 	}
 
-	// 1. Get the content painter (excludes outer Padding)
 	cp := p.Child(charts.PainterPaddingOption(opt.Padding))
 	yAxisWidth := calcYAxisWidth(chartFontSize, yMin, yMax, isAQI)
 	xAxisHeight := int(chartFontSize * chartXAxisHeightCoef)
 	titleHeight := int(chartFontSize * chartTitleHeightCoef)
 
-	// 3. Create a child painter for the ACTUAL grid area (the "pure" area)
 	pureCp := cp.Child(charts.PainterPaddingOption(charts.Box{
 		Left:   yAxisWidth,
 		Bottom: xAxisHeight,
@@ -490,23 +473,18 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 	gridW := float64(pureCp.Width())
 	gridH := float64(pureCp.Height())
 
-	// Draw meta info (device and time) - aligned to the right edge of the grid
 	metaFontSize := chartFontSize * chartMetaFontSizeCoef
 	metaStyle := charts.FontStyle{
 		FontSize:  metaFontSize,
 		FontColor: colorAxisLabel,
 	}
 	deviceStr := b.formatDeviceIDPlain(chatID, deviceID)
-	timeStr := time.Now().Format("02.01.2006 15:04:05")
+	timeStr := b.T(chatID, "msg_chart_timestamp", map[string]interface{}{"date": time.Now(), "time": time.Now()})
 
-	// X position in cp coordinates: yAxisWidth + gridW - textLength
-	// We align to the actual grid right edge
 	rightEdge := yAxisWidth + int(gridW)
 	xDevice := rightEdge - int(calcTextWidth(deviceStr, metaFontSize))
 	xTime := rightEdge - int(calcTextWidth(timeStr, metaFontSize))
 
-	// Draw at the level of the title (inside the top padding)
-	// titleHeight is the area reserved for title. Title is usually centered there.
 	cp.Text(deviceStr, xDevice, int(float64(titleHeight)*chartMetaY1Coef), 0, metaStyle)
 	cp.Text(timeStr, xTime, int(float64(titleHeight)*chartMetaY2Coef), 0, metaStyle)
 

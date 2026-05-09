@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/ABespalov/aqinotifier/config"
@@ -25,11 +24,11 @@ type Subscription struct {
 
 // Store manages Telegram bot state persisted to a JSON file or Postgres.
 type Store struct {
-	mu     sync.RWMutex
-	file   string
-	db     *sql.DB
-	subs   map[int64]*Subscription // keyed by chat_id
-	fileMu sync.RWMutex           // protects JSON file from concurrent writes
+	mu               sync.RWMutex
+	file             string
+	db               *sql.DB
+	subs             map[int64]*Subscription // keyed by chat_id
+	fileMu           sync.RWMutex            // protects JSON file from concurrent writes
 	defaultUnitTemp  string
 	defaultUnitPress string
 }
@@ -65,22 +64,6 @@ func (s *Store) SetDB(db *sql.DB) {
 			s.saveToSQL()
 		}
 	}
-}
-
-// SyncDB attempts to reconcile RAM/JSON data with Postgres.
-func (s *Store) SyncDB() {
-	s.mu.RLock()
-	db := s.db
-	s.mu.RUnlock()
-	if db == nil {
-		return
-	}
-	if err := db.Ping(); err != nil {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.saveToSQL()
 }
 
 func (s *Store) loadFromSQL() {
@@ -135,7 +118,7 @@ func (s *Store) save() {
 		log.Error().Err(err).Msg("tgbot: failed to marshal store")
 		return
 	}
-	
+
 	// Always sync to SQL if available
 	s.saveToSQL()
 
@@ -190,10 +173,6 @@ func (s *Store) GetSettings(chatID int64, defaults *config.Monitor) *config.Moni
 	if sub.Settings == nil {
 		sub.Settings = s.cloneMonitor(defaults)
 		s.save()
-	} else {
-		if s.migrateSettings(sub.Settings, defaults) {
-			s.save()
-		}
 	}
 	return sub.Settings
 }
@@ -210,122 +189,6 @@ func (s *Store) ResetSettings(chatID int64, defaults *config.Monitor) {
 		sub.Version = 1
 		s.save()
 	}
-}
-
-func (s *Store) migrateSettings(m *config.Monitor, defaults *config.Monitor) bool {
-	changed := false
-
-	// 1. Thresholds migration
-	if m.PM10Green == 0 && m.PM10Value > 0 {
-		m.PM10Green = m.PM10Value
-		m.PM10Value = 0
-		changed = true
-	}
-	if m.PM25Green == 0 && m.PM25Value > 0 {
-		m.PM25Green = m.PM25Value
-		m.PM25Value = 0
-		changed = true
-	}
-	if m.PM10Yellow == 0 {
-		m.PM10Yellow = defaults.PM10Yellow
-		changed = true
-	}
-	if m.PM25Yellow == 0 {
-		m.PM25Yellow = defaults.PM25Yellow
-		changed = true
-	}
-
-	// 2. Notifications/Warnings migration (Old Schema to New Schema)
-	// We detect old schema if Notifications is empty but we have data in Warnings (which was 'active list')
-	// or OldLoudWarnings is populated.
-	if len(m.Notifications) == 0 && (len(m.Warnings) > 0 || len(m.OldLoudWarnings) > 0) {
-		log.Info().Msg("tgbot: migrating user to new notification schema")
-		
-		mapAQI := func(id string) string {
-			switch id {
-			case "aqi_g": return "aqi_z1"
-			case "aqi_y": return "aqi_z2"
-			case "aqi_o": return "aqi_z3"
-			case "aqi_r": return "aqi_z4"
-			case "aqi_v": return "aqi_z5"
-			case "aqi_b": return "aqi_z6"
-			default: return id
-			}
-		}
-
-		// New Notifications list: all transitions (val10, val25, vals) 
-		// and AQI that were loud in old schema.
-		newNotes := []string{
-			"val10-yu", "val10-ru", "val10-yd", "val10-gd",
-			"val25-yu", "val25-ru", "val25-yd", "val25-gd",
-			"vals-yu", "vals-ru", "vals-yd", "vals-gd",
-		}
-		
-		// Add previously loud AQI alerts (with mapping)
-		for _, lw := range m.OldLoudWarnings {
-			if strings.HasPrefix(lw, "aqi_") {
-				newNotes = append(newNotes, mapAQI(lw))
-			}
-		}
-		m.Notifications = newNotes
-
-		// New Warnings list: default to "everything loud" as per user request
-		m.Warnings = []string{
-			"val10-yu", "val10-ru", "val10-yd", "val10-gd",
-			"val25-yu", "val25-ru", "val25-yd", "val25-gd",
-			"vals-yu", "vals-ru", "vals-yd", "vals-gd",
-			"aqi_z1", "aqi_z2", "aqi_z3", "aqi_z4", "aqi_z5", "aqi_z6", "aqi_z7",
-		}
-		
-		m.OldLoudWarnings = nil // Clear migration field
-		changed = true
-	}
-
-	// 2b. Map remaining old AQI IDs if any (for intermediate versions)
-	for i, n := range m.Notifications {
-		if strings.HasPrefix(n, "aqi_") && !strings.Contains(n, "_z") {
-			switch n {
-			case "aqi_g": m.Notifications[i] = "aqi_z1"
-			case "aqi_y": m.Notifications[i] = "aqi_z2"
-			case "aqi_o": m.Notifications[i] = "aqi_z3"
-			case "aqi_r": m.Notifications[i] = "aqi_z4"
-			case "aqi_v": m.Notifications[i] = "aqi_z5"
-			case "aqi_b": m.Notifications[i] = "aqi_z6"
-			}
-			changed = true
-		}
-	}
-	for i, w := range m.Warnings {
-		if strings.HasPrefix(w, "aqi_") && !strings.Contains(w, "_z") {
-			switch w {
-			case "aqi_g": m.Warnings[i] = "aqi_z1"
-			case "aqi_y": m.Warnings[i] = "aqi_z2"
-			case "aqi_o": m.Warnings[i] = "aqi_z3"
-			case "aqi_r": m.Warnings[i] = "aqi_z4"
-			case "aqi_v": m.Warnings[i] = "aqi_z5"
-			case "aqi_b": m.Warnings[i] = "aqi_z6"
-			}
-			changed = true
-		}
-	}
-
-	// 3. AQI settings migration
-	if m.AQIStandard == "" {
-		m.AQIStandard = defaults.AQIStandard
-		changed = true
-	}
-	if len(m.Notifications) == 0 {
-		m.Notifications = make([]string, len(defaults.Notifications))
-		copy(m.Notifications, defaults.Notifications)
-		changed = true
-	}
-	if len(m.Warnings) == 0 {
-		m.Warnings = make([]string, len(defaults.Warnings))
-		copy(m.Warnings, defaults.Warnings)
-		changed = true
-	}
-
-	return changed
 }
 
 func (s *Store) cloneMonitor(m *config.Monitor) *config.Monitor {
@@ -353,8 +216,6 @@ func (s *Store) UpdateSettings(chatID int64, settings *config.Monitor) {
 	sub.Settings = settings
 	s.save()
 }
-
-
 
 // GetLanguage returns the language code for a chat.
 func (s *Store) GetLanguage(chatID int64) string {
@@ -429,7 +290,7 @@ func (s *Store) SetUnitPress(chatID int64, unit string) {
 }
 
 // SyncLanguage updates the language only if the Telegram language code has changed.
-func (s *Store) SyncLanguage(chatID int64, tgCode string, detected string) bool {
+func (s *Store) SyncLanguage(chatID int64, tgCode string, detected string) (changed bool, isNew bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sub, ok := s.subs[chatID]
@@ -438,19 +299,17 @@ func (s *Store) SyncLanguage(chatID int64, tgCode string, detected string) bool 
 		s.subs[chatID] = sub
 		log.Info().Int64("chat_id", chatID).Msg("tgbot: new user registered")
 		s.save()
-		return false
+		return false, true
 	}
 	if sub.TGCode != tgCode {
 		oldLang := sub.Language
 		sub.TGCode = tgCode
 		sub.Language = detected
 		s.save()
-		return oldLang != "" && oldLang != detected
+		return oldLang != "" && oldLang != detected, false
 	}
-	return false
+	return false, false
 }
-
-
 
 // Subscribe adds deviceID to chatID's subscription list if not already present.
 func (s *Store) Subscribe(chatID int64, deviceID string, defaults *config.Monitor) bool {
@@ -532,5 +391,3 @@ func (s *Store) Subscribers(deviceID string) []int64 {
 	}
 	return chats
 }
-
-

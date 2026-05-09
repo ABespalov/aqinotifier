@@ -179,11 +179,6 @@ type Monitor struct {
 	Warnings      []string          `yaml:"warnings" json:"warnings"`
 	AQIStandard   string            `yaml:"aqi_standard" json:"aqi_standard"`
 	DeviceNames   map[string]string `yaml:"device_names" json:"device_names"`
-
-	// Migration fields (deprecated)
-	PM10Value       float64  `yaml:"-" json:"pm10_value,omitempty"`
-	PM25Value       float64  `yaml:"-" json:"pm25_value,omitempty"`
-	OldLoudWarnings []string `yaml:"-" json:"loud_warnings,omitempty"`
 }
 
 // NewMonitorConfig returns a Monitor pre-populated with default values
