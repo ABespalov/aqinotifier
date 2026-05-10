@@ -253,75 +253,60 @@ func (b *Bot) unitPressLabel(chatID int64) string {
 		return b.T(chatID, "msgUnitMmhg")
 	}
 	return b.T(chatID, "unitHpa")
-}
 func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[string]interface{} {
 	mcfg := b.GetUserSettings(chatID)
 	std := strings.ToLower(mcfg.AQIStandard)
-	var aqi float64
-	var level sensor.AQILevel
-	if mcfg.AQIStandard == "US" {
-		aqi, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
-	} else {
-		aqi, level = sensor.CalculateEU_AQI(m.PM25, m.PM10)
-	}
-
-	levelChar := fmt.Sprintf("z%d", level)
-	aqiName := b.T(chatID, "aqi_name_"+levelChar+"_"+std)
 
 	args := map[string]interface{}{
-		"date": m.Timestamp.Local(),
-		"time": m.Timestamp.Local(),
-
-		"valAqi":      aqi,
-		"valAqiLevel": aqiName,
-		"icoAqiLevel": b.getAQIIcon(level, mcfg.AQIStandard),
-		"icoAqiFlag":  "@flag_" + std + "@",
-
-		"txtPm25Name": b.T(chatID, "txtLabelPm25"),
-		"valPm25":     m.PM25,
-		"valPm25Prev": m.PM25Prev,
-		"valPm25Diff": m.PM25 - m.PM25Prev,
-		"unitPm":      b.T(chatID, "txtChartUnitPm"),
-
-		"txtPm10Name": b.T(chatID, "txtLabelPm10"),
-		"valPm10":     m.PM10,
-		"valPm10Prev": m.PM10Prev,
-		"valPm10Diff": m.PM10 - m.PM10Prev,
+		"date": m.Timestamp,
+		"time": m.Timestamp,
 
 		"deviceId": m.DeviceID,
+
+		"val25":      m.PM25,
+		"prev25":     m.PM25Prev,
+		"curr25":     m.PM25,
+		"unitPm":     b.T(chatID, "msgUnitPm"),
+		"val10":      m.PM10,
+		"prev10":     m.PM10Prev,
+		"curr10":     m.PM10,
+		"labelPm25":  b.T(chatID, "txtLabelPm25"),
+		"labelPm10":  b.T(chatID, "txtLabelPm10"),
 	}
 
 	if name, ok := mcfg.DeviceNames[m.DeviceID]; ok && name != "" {
 		args["deviceName"] = name
+	} else {
+		args["deviceName"] = b.T(chatID, "msgDevice") + " " + m.DeviceID
 	}
 
 	if m.PM25Diff != nil {
-		args["valPm25DiffPrc"] = *m.PM25Diff
+		args["diff25Percent"] = *m.PM25Diff
 	} else {
-		args["valPm25DiffPrc"] = 0.0
+		args["diff25Percent"] = 0.0
 	}
 	if m.PM10Diff != nil {
-		args["valPm10DiffPrc"] = *m.PM10Diff
+		args["diff10Percent"] = *m.PM10Diff
 	} else {
-		args["valPm10DiffPrc"] = 0.0
+		args["diff10Percent"] = 0.0
 	}
 
 	diff25 := m.PM25 - m.PM25Prev
 	if diff25 > 0 {
-		args["picPm25Trend"] = icoTrendUp
+		args["trend25Icon"] = icoTrendUp
 	} else if diff25 < 0 {
-		args["picPm25Trend"] = icoTrendDown
+		args["trend25Icon"] = icoTrendDown
 	} else {
-		args["picPm25Trend"] = icoTrendFlat
+		args["trend25Icon"] = icoTrendFlat
 	}
 
 	diff10 := m.PM10 - m.PM10Prev
 	if diff10 > 0 {
-		args["picPm10Trend"] = icoTrendUp
+		args["trend10Icon"] = icoTrendUp
 	} else if diff10 < 0 {
-		args["picPm10Trend"] = icoTrendDown
+		args["trend10Icon"] = icoTrendDown
 	} else {
-		args["picPm10Trend"] = icoTrendFlat
+		args["trend10Icon"] = icoTrendFlat
 	}
 
 	getZoneIcon := func(v, g, y float64) string {
@@ -333,26 +318,48 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 		}
 		return icoRedSq
 	}
-	args["picPm25Zone"] = getZoneIcon(m.PM25, mcfg.PM25Green, mcfg.PM25Yellow)
-	args["picPm10Zone"] = getZoneIcon(m.PM10, mcfg.PM10Green, mcfg.PM10Yellow)
+	args["zone25Icon"] = getZoneIcon(m.PM25, mcfg.PM25Green, mcfg.PM25Yellow)
+	args["zone10Icon"] = getZoneIcon(m.PM10, mcfg.PM10Green, mcfg.PM10Yellow)
+
+	var aqi float64
+	var level sensor.AQILevel
+	if mcfg.AQIStandard == "US" {
+		aqi, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
+	} else {
+		aqi, level = sensor.CalculateEU_AQI(m.PM25, m.PM10)
+	}
+
+	levelChar := fmt.Sprintf("z%d", level)
+	args["aqiVal"] = aqi
+	// Manual title case for std and levelChar
+	stdTitle := strings.ToUpper(std[:1]) + std[1:]
+	levelTitle := strings.ToUpper(levelChar[:1]) + levelChar[1:]
+	args["aqiName"] = b.T(chatID, "aqiName"+levelTitle+stdTitle)
+	args["aqiStandardFlag"] = "@flag" + stdTitle + "@"
+	args["icon"] = b.getAQIIcon(level, mcfg.AQIStandard)
 
 	if m.Temperature != 0 {
-		args["valTemp"] = b.convertTemp(m.Temperature, chatID)
-		args["unitTemp"] = b.unitTempLabel(chatID)
+		args["labelT"] = b.T(chatID, "msgTemp")
+		args["valT"] = b.convertTemp(m.Temperature, chatID)
+		args["unitT"] = b.unitTempLabel(chatID)
 	}
 	if m.Humidity != 0 {
-		args["valHumid"] = m.Humidity
+		args["labelH"] = b.T(chatID, "msgHum")
+		args["valH"] = m.Humidity
 		if m.Temperature != 0 {
 			dp := CalcDewPoint(m.Temperature, m.Humidity)
-			args["valDew"] = b.convertTemp(dp, chatID)
+			args["labelDp"] = b.T(chatID, "msgDewPoint")
+			args["valDp"] = b.convertTemp(dp, chatID)
 		}
 	}
 	if m.Pressure != 0 {
-		args["valPressure"] = b.convertPress(m.Pressure, chatID)
-		args["unitPressure"] = b.unitPressLabel(chatID)
+		args["labelP"] = b.T(chatID, "msgPress")
+		args["valP"] = b.convertPress(m.Pressure, chatID)
+		args["unitP"] = b.unitPressLabel(chatID)
 	}
 
 	return args
+}
 }
 
 func (b *Bot) formatMeasurement(chatID int64, m *monitor.Measurement) string {
