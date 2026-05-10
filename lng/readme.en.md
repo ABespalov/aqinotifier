@@ -1,37 +1,109 @@
-# Localization System Documentation (v2.2)
+# AQI Notifier Localization Documentation (v2.2)
 
-The localization system is based on a powerful **recursive block template engine**, allowing all display logic (icons, conditions, inflections) to be moved from Go code to JSON files.
+The bot's localization system is based on a **recursive block template engine** with logic support. This architecture completely decouples the UI representation (icons, texts, message structures) from the Go source code.
 
 ---
 
-## 1. Template Syntax
+## 1. Basic Syntax
 
-Basic placeholder format: `@key%format@`
+### 1.1. Placeholders
+Format: `@key%format@`
+- `key`: Key name in JSON or variable name from Go.
+- `format`: Optional modifier (formatting for numbers, dates, or case).
 
-### 1.1. Case Formatters
-- `%toUpper`: CONVERTS TO UPPER CASE
-- `%toLower`: converts to lower case
-- `%toTitle`: Capitalizes The First Letter
-
-### 1.2. Recursive Blocks (Block Architecture)
-You can nest keys within other keys for consistency.
-
+### 1.2. Recursive Resolution
+If a key value contains other placeholders, they are resolved recursively.
 **Example:**
-- `actionRise`: `Rise`
-- `evtVal10Yu`: `@actionRise@ of @labelPm10@ to @labelZoneYellow@ zone`
-
-### 1.3. Numeric and Time Formatting
-- Standard Go formats: `%.1f`, `%d`, `%02.01.2006` etc.
+`"txtDevice": "@icoDevice@ @deviceName@"`
+The engine first finds `icoDevice` in the dictionary, then resolves the `deviceName` variable.
 
 ---
 
-## 2. Conditional Logic (Logic)
+## 2. Conditionals (Logic)
 
 Syntax: `@?condition%true_text%false_text@`
 
 ### 2.1. Comparison Operators
-- `==`, `eq`, `!=`, `ne`, `>`, `gt`, `<`, `lt`, `>=`, `le`, `isEmpty`, `isNotEmpty`.
+| Operator | Aliases | Description |
+| :--- | :--- | :--- |
+| `==` | `eq` | Equals |
+| `!=` | `ne` | Not equals |
+| `>` | `gt` | Greater than |
+| `<` | `lt` | Less than |
+| `>=` | `ge` | Greater or equal |
+| `<=` | `le` | Less or equal |
+| `isEmpty` | - | True if value is empty or 0 |
+| `isNotEmpty` | - | True if value is not empty |
 
 ### 2.2. Nested Conditionals (Switch)
-If the third part (else) starts with `?`, it is treated as a nested condition.
-**Example:** `@?isAlert%A%?isNorma%B%C@@`
+If `false_text` starts with `?`, it's processed as a next condition level.
+**Example:**
+`"txtHeader": "@?isAlert%WARNING%?isNorma%NORMAL%INFO@@"`
+*(If isAlert=true -> WARNING, else if isNorma=true -> NORMAL, else INFO)*
+
+---
+
+## 3. Formatting Modifiers
+
+### 3.1. Case Formatters
+- `%toUpper`: CONVERTS TO UPPER CASE
+- `%toLower`: converts to lower case
+- `%toTitle`: Capitalizes Each Word
+
+### 3.2. Numbers (printf)
+Uses standard Go syntax:
+- `%.1f`: 12.3
+- `%d`: 123
+
+### 3.3. Date and Time
+- `%02.01.2006`: 02.05.2024
+- `%15:04:05`: 14:30:05
+
+---
+
+## 4. Placeholder Reference (Go -> JSON)
+
+Below are the primary keys called from the code and the variables available to them.
+
+### 4.1. `msgStatus` and `msgAlertNotify`
+These templates receive the full sensor state data.
+
+**Data Variables:**
+- `@date@`, `@time@`: Time object (requires format).
+- `@deviceId@`, `@deviceName@`: Device ID and Name.
+- `@aqiVal@`: Numeric AQI value.
+- `@aqiLevel@`: Level (1-7). Used for icon building: `@icoLevel@aqiLevel@@`.
+- `@aqiName@`: Localized level name.
+- `@aqiStandardFlag@`: Reference to standard flag (`@flagUs@`/`@flagEu@`).
+- `@val25@`, `@val10@`: Current PM values.
+- `@diff25Percent@`, `@diff10Percent@`: Change in %.
+- `@trend25Icon@`, `@trend10Icon@`: Trend icons (arrows).
+- `@zone25Icon@`, `@zone10Icon@`: Current zone icons (squares).
+- `@valT@`, `@valH@`, `@valP@`, `@valDp@`: Weather data.
+
+**State Variables (Alerts only):**
+- `@isAlert@`: `true` if air quality worsened.
+- `@isNorma@`: `true` if air quality returned to normal.
+- `@evt<EventName>@`: Specific event flags (e.g., `@evtVal10Yu@`, `@evtPm25Rise@`). Used in `txtAlertsList`.
+
+### 4.2. `msgHelp`
+- `@bot_version@`: Current bot version.
+
+### 4.3. `msgAqiCycleMenu`
+- `@vg1@`, `@vy1@`: Green/Yellow zone boundaries for PM2.5.
+- `@vg2@`, `@vy2@`: Boundaries for PM10.
+
+---
+
+## 5. Development Rules
+
+1. **No Logic in Go**: It is forbidden to build lists or choose icons in code. Use `evt*` flags and conditionals in JSON.
+2. **Naming**: Always use `camelCase`.
+3. **HTML**: Use native tags like `<b>`, `<i>`, `<code>`.
+4. **Unicode**: Prohibit Unicode escaping (`\u003c`).
+5. **Sorting**: JSON keys must be sorted topically:
+   - Master templates (`msg*`)
+   - Component texts (`txt*`)
+   - Events (`evt*`)
+   - Buttons (`btn*`)
+   - Icons (`ico*`)
