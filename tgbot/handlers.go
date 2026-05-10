@@ -152,7 +152,7 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 		b.setState(chatID, stateIdle)
 
 		if isMenuButton {
-			params := tu.Message(tu.ID(chatID), icoAQI+" AQI Notifier").
+			params := tu.Message(tu.ID(chatID), icoAqi+" AQI Notifier").
 				WithReplyMarkup(tu.ReplyKeyboardRemove())
 			_, _ = b.api.SendMessage(context.Background(), params)
 		}
@@ -411,7 +411,7 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 		oldVal = mcfg.PM10Diff
 		mcfg.PM10Diff = val
 		title = b.T(chatID, "msgThresholdDiffTitleFmt", map[string]interface {
-		}{"pm": b.T(chatID, "txtLabelPm10"), "label": b.T(chatID, "txtLabelDynamics"), "icon": icoPM10})
+		}{"pm": b.T(chatID, "txtLabelPm10"), "label": b.T(chatID, "txtLabelDynamics"), "icon": icoPm10})
 	case stateAwaitPM25Green:
 		oldVal = mcfg.PM25Green
 		mcfg.PM25Green = val
@@ -430,7 +430,7 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 		oldVal = mcfg.PM25Diff
 		mcfg.PM25Diff = val
 		title = b.T(chatID, "msgThresholdDiffTitleFmt", map[string]interface {
-		}{"pm": b.T(chatID, "txtLabelPm25"), "label": b.T(chatID, "txtLabelDynamics"), "icon": icoPM25})
+		}{"pm": b.T(chatID, "txtLabelPm25"), "label": b.T(chatID, "txtLabelDynamics"), "icon": icoPm25})
 	default:
 		return
 	}

@@ -1,7 +1,7 @@
 package tgbot
 
 var (
-	icoAQI          = "🌬️"
+	icoAqi          = "🌬️"
 	icoStatus       = "📊"
 	icoSettings     = "⚙️"
 	icoHistory      = "📜"
@@ -26,8 +26,8 @@ var (
 	icoHum          = "💧"
 	icoPress        = "⏲️"
 	icoDewPoint     = "💦"
-	icoPM10         = "💨"
-	icoPM25         = "░"
+	icoPm10         = "💨"
+	icoPm25         = "░"
 	icoTrendUp      = "📈"
 	icoTrendDown    = "📉"
 	icoTrendFlat    = "➖"
@@ -61,8 +61,8 @@ var (
 )
 
 func updateicoVars(m map[string]string) {
-	if v, ok := m["icoAQI"]; ok {
-		icoAQI = v
+	if v, ok := m["icoAqi"]; ok {
+		icoAqi = v
 	}
 	if v, ok := m["icoStatus"]; ok {
 		icoStatus = v
@@ -136,11 +136,11 @@ func updateicoVars(m map[string]string) {
 	if v, ok := m["icoDewPoint"]; ok {
 		icoDewPoint = v
 	}
-	if v, ok := m["icoPM10"]; ok {
-		icoPM10 = v
+	if v, ok := m["icoPm10"]; ok {
+		icoPm10 = v
 	}
-	if v, ok := m["icoPM25"]; ok {
-		icoPM25 = v
+	if v, ok := m["icoPm25"]; ok {
+		icoPm25 = v
 	}
 	if v, ok := m["icoTrendUp"]; ok {
 		icoTrendUp = v
