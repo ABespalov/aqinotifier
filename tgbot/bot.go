@@ -234,7 +234,6 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		}
 	}
 
-	icon, title := b.getEventHeader(chatID, winnerID)
 
 	var alertsSB strings.Builder
 	winnerDesc := b.getEventDescription(chatID, winnerID)
@@ -256,8 +255,9 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 	}
 
 	argsMap := b.buildMeasurementArgs(chatID, m)
-	argsMap["icon"] = icon
-	argsMap["title"] = title
+	argsMap["winnerID"] = winnerID
+	argsMap["isAlert"] = strings.HasPrefix(winnerID, "alert") && !strings.Contains(winnerID, "clean") && !strings.Contains(winnerID, "return")
+	argsMap["isNorma"] = strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
 	argsMap["alerts"] = alertsSB.String()
 
 	text := b.TDevice(chatID, "msgAlertNotify", m.DeviceID, argsMap)

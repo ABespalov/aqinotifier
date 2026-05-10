@@ -253,6 +253,8 @@ func (b *Bot) unitPressLabel(chatID int64) string {
 		return b.T(chatID, "msgUnitMmhg")
 	}
 	return b.T(chatID, "unitHpa")
+}
+
 func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[string]interface{} {
 	mcfg := b.GetUserSettings(chatID)
 	std := strings.ToLower(mcfg.AQIStandard)
@@ -331,6 +333,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 
 	levelChar := fmt.Sprintf("z%d", level)
 	args["aqiVal"] = aqi
+	args["aqiLevel"] = int(level)
 	// Manual title case for std and levelChar
 	stdTitle := strings.ToUpper(std[:1]) + std[1:]
 	levelTitle := strings.ToUpper(levelChar[:1]) + levelChar[1:]
@@ -359,7 +362,6 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	}
 
 	return args
-}
 }
 
 func (b *Bot) formatMeasurement(chatID int64, m *monitor.Measurement) string {

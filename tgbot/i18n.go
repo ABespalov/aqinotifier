@@ -16,7 +16,7 @@ var (
 	iconsMap         map[string]string
 	i18nMu           sync.RWMutex
 	placeholderRegex = regexp.MustCompile(`@([a-zA-Z0-9_]+)(?:%([^@]+))?@`)
-	conditionalRegex = regexp.MustCompile(`@\?([a-zA-Z0-9_]+)(?:\s+([a-zA-Z]+))?%([^@%]*)?(?:%([^@]*))?@`)
+	conditionalRegex = regexp.MustCompile(`@\?([^%@]+)%([^%@]*)(?:%([^%@]*))?@`)
 )
 
 func init() {
@@ -195,60 +195,125 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 		return match // Keep unresolved
 	})
 
-	// Process conditionals
+	// Process conditionals: @?var op val%true%false@
 	text = conditionalRegex.ReplaceAllStringFunc(text, func(match string) string {
 		submatch := conditionalRegex.FindStringSubmatch(match)
-		if len(submatch) < 2 {
+		if len(submatch) < 3 {
 			return match
 		}
-		varName := submatch[1]
-		operator := submatch[2]
-		trueText := submatch[3]
-		falseText := submatch[4]
-
-		isTrue := evaluateCondition(argsMap, varName, operator)
-		if isTrue {
-			return trueText
+		condition := strings.TrimSpace(submatch[1])
+		trueText := submatch[2]
+		falseText := ""
+		if len(submatch) > 3 {
+			falseText = submatch[3]
 		}
-		return falseText
+
+		isTrue := evaluateCondition(argsMap, condition)
+		if isTrue {
+			return resolveTemplate(lang, trueText, argsMap, depth+1)
+		}
+		return resolveTemplate(lang, falseText, argsMap, depth+1)
 	})
 
 	text = strings.ReplaceAll(text, "%%%%", "%")
 	return text
 }
 
-func evaluateCondition(argsMap map[string]interface{}, varName, operator string) bool {
+func evaluateCondition(argsMap map[string]interface{}, condition string) bool {
 	if argsMap == nil {
-		return operator == "isEmpty"
+		return false
 	}
+
+	parts := strings.Fields(condition)
+	if len(parts) == 0 {
+		return false
+	}
+
+	varName := parts[0]
 	val, ok := argsMap[varName]
 
-	if str, isStr := val.(string); isStr {
-		if operator == "isNotEmpty" {
-			return ok && str != ""
+	if len(parts) == 1 {
+		if !ok || val == nil {
+			return false
 		}
-		if operator == "isEmpty" {
-			return !ok || str == ""
-		}
-	}
-
-	if b, isBool := val.(bool); isBool {
-		if operator == "isEmpty" {
-			return !b
-		}
-		if operator == "isNotEmpty" {
+		if b, isBool := val.(bool); isBool {
 			return b
 		}
-		return b
+		if s, isStr := val.(string); isStr {
+			return s != ""
+		}
+		return true
 	}
 
-	if operator == "isNotEmpty" {
-		return ok && val != nil
-	}
+	operator := parts[1]
+
 	if operator == "isEmpty" {
-		return !ok || val == nil
+		if !ok || val == nil {
+			return true
+		}
+		if s, isStr := val.(string); isStr {
+			return s == ""
+		}
+		return false
 	}
-	return ok && val != nil
+	if operator == "isNotEmpty" {
+		if !ok || val == nil {
+			return false
+		}
+		if s, isStr := val.(string); isStr {
+			return s != ""
+		}
+		return true
+	}
+
+	if len(parts) < 3 {
+		return false
+	}
+
+	target := strings.Join(parts[2:], " ")
+	valStr := fmt.Sprintf("%v", val)
+
+	switch operator {
+	case "==", "eq":
+		return valStr == target
+	case "!=", "ne":
+		return valStr != target
+	case ">", "gt":
+		return compareNumeric(val, target) > 0
+	case "<", "lt":
+		return compareNumeric(val, target) < 0
+	case ">=", "ge":
+		return compareNumeric(val, target) >= 0
+	case "<=", "le":
+		return compareNumeric(val, target) <= 0
+	}
+
+	return false
+}
+
+func compareNumeric(val interface{}, target string) int {
+	var f1 float64
+	switch v := val.(type) {
+	case float64:
+		f1 = v
+	case int:
+		f1 = float64(v)
+	case int64:
+		f1 = float64(v)
+	default:
+		fmt.Sscanf(fmt.Sprintf("%v", val), "%f", &f1)
+	}
+
+	var f2 float64
+	fmt.Sscanf(target, "%f", &f2)
+
+	if f1 > f2 {
+		return 1
+	}
+	if f1 < f2 {
+		return -1
+	}
+	return 0
 }
 
 // T returns a localized string for the given key and chat ID.
