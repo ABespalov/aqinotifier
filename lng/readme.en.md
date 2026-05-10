@@ -13,17 +13,25 @@ Basic placeholder format: `@key%format@`
 - `%toLower`: converts to lower case
 - `%toTitle`: Capitalizes The First Letter
 
-### 1.2. Sub-templates with Arguments (Components)
-You can call one key inside another and pass parameters to it. This allows for message "constructors" and avoids duplication.
-
-**Syntax:** `@SubTemplate%arg1=value1%arg2=value2@`
+### 1.2. Recursive Blocks (Block Architecture)
+You can nest keys within other keys for consistency.
 
 **Example:**
-- `txtEvtRiseTo`: `@actionRise@ @pm@ to @zone@ zone`
-- `evtVal10Yu`: `@txtEvtRiseTo%pm=@labelPm10@%zone=Yellow@@`
-*Here `txtEvtRiseTo` is called with injected values for `pm` and `zone`.*
+- `actionRise`: `Rise`
+- `evtVal10Yu`: `@actionRise@ of @labelPm10@ to @labelZoneYellow@ zone`
+
+### 1.3. Numeric and Time Formatting
+- Standard Go formats: `%.1f`, `%d`, `%02.01.2006` etc.
 
 ---
 
 ## 2. Conditional Logic (Logic)
-... (standard logic docs)
+
+Syntax: `@?condition%true_text%false_text@`
+
+### 2.1. Comparison Operators
+- `==`, `eq`, `!=`, `ne`, `>`, `gt`, `<`, `lt`, `>=`, `le`, `isEmpty`, `isNotEmpty`.
+
+### 2.2. Nested Conditionals (Switch)
+If the third part (else) starts with `?`, it is treated as a nested condition.
+**Example:** `@?isAlert%A%?isNorma%B%C@@`
