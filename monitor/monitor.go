@@ -298,6 +298,7 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 		Timestamp: data.DateTime,
 	}
 
+	hasPM10, hasPM25 := false, false
 	for _, v := range data.Values {
 		val, err := strconv.ParseFloat(v.Value, 64)
 		if err != nil {
@@ -307,8 +308,10 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 		switch v.Type {
 		case "SDS_P1":
 			m.PM10 = val
+			hasPM10 = true
 		case "SDS_P2":
 			m.PM25 = val
+			hasPM25 = true
 		case "BME280_temperature":
 			m.Temperature = val
 		case "BME280_humidity":
@@ -316,6 +319,20 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 		case "BME280_pressure":
 			m.Pressure = val / 100.0
 		}
+	}
+
+	// Safety: don't process measurements without any PM data
+	if !hasPM10 && !hasPM25 {
+		log.Debug().Str("device", data.ParentID).Msg("skipping measurement with no PM data")
+		return
+	}
+
+	// Safety: Glitch filter for phantom zeros
+	// If both PM values are exactly 0.0 but previous ones were > 0.5, it's likely a sensor error/warming up
+	last := s.LastMeasurement(m.DeviceID)
+	if last != nil && m.PM10 == 0 && m.PM25 == 0 && (last.PM10 > 0.5 || last.PM25 > 0.5) {
+		log.Warn().Str("device", data.ParentID).Float64("prev10", last.PM10).Float64("prev25", last.PM25).Msg("ignoring phantom zero measurement")
+		return
 	}
 
 	// Calculate diff BEFORE adding to history

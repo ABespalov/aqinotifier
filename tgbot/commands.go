@@ -488,7 +488,7 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 	text := b.T(chatID, "msgResetConfirm", map[string]interface{}{
 		"pm25_g": d.PM25Green, "pm25_y": d.PM25Yellow, "pm25_dyn": d.PM25Diff,
 		"pm10_g": d.PM10Green, "pm10_y": d.PM10Yellow, "pm10_dyn": d.PM10Diff,
-		"std_name": stdLabel, "aqi_standard_flag": "@flag_"+strings.ToLower(std)+"@",
+		"std_name": stdLabel, "aqi_standard_flag": "{icoFlag"+strings.ToUpper(std)+"}",
 		"unit_t": unitT, "unit_p": unitP,
 		"alerts_list": alertsSB.String(),
 	})

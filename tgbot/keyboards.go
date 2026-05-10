@@ -7,6 +7,8 @@ import (
 
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
+
+	"github.com/ABespalov/aqinotifier/sensor"
 )
 
 func (b *Bot) mainKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
@@ -82,7 +84,7 @@ func (b *Bot) thresholdsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 			tu.InlineKeyboardButton(b.T(chatID, btnSetByAQI)).WithCallbackData("menu_aqi_cycle"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, btnSettings)).WithCallbackData(cmdSettings),
+			tu.InlineKeyboardButton(b.T(chatID, btnThresholdsBack)).WithCallbackData(cmdSettings),
 		),
 	)
 }
@@ -119,7 +121,7 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 
 	rows = append(rows, []telego.InlineKeyboardButton{
 		tu.InlineKeyboardButton(b.T(chatID, "btnAqiStandard", map[string]interface{}{
-			"std": stdLabel, "aqi_standard_flag": "@flag_" + strings.ToLower(std) + "@",
+			"std": stdLabel, "aqi_standard_flag": "{icoFlag" + strings.ToUpper(std) + "}",
 		})).WithCallbackData("aqi_std_toggle"),
 	})
 
@@ -139,14 +141,9 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 		levelChar := strings.TrimPrefix(id, "aqi_")
 		name := b.T(chatID, "aqi_name_"+levelChar+"_"+stdLower)
 
-		var zoneIcon string
-		if std == "US" {
-			icons := map[string]string{"z1": icoGreen, "z2": icoYellow, "z3": icoOrange, "z4": icoRed, "z5": icoPurple, "z6": icoMaroon, "z7": icoBlack}
-			zoneIcon = icons[levelChar]
-		} else {
-			icons := map[string]string{"z1": icoBlue, "z2": icoGreen, "z3": icoYellow, "z4": icoOrange, "z5": icoRed, "z6": icoMaroon}
-			zoneIcon = icons[levelChar]
-		}
+		levelInt := sensor.AQILevel(0)
+		fmt.Sscanf(levelChar, "z%d", &levelInt)
+		zoneIcon := b.getAQIIcon(levelInt, std)
 
 		btnText := b.T(chatID, "alertAqiBtn", map[string]interface {
 		}{"icon": name, "label": zoneIcon})

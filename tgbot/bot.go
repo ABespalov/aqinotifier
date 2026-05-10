@@ -17,7 +17,7 @@ import (
 	"github.com/ABespalov/aqinotifier/monitor"
 )
 
-const BotVersion = "0.9.7a"
+const BotVersion = "0.10.0a"
 
 type chatState int
 
@@ -35,9 +35,9 @@ const (
 
 const (
 	btnList           = "btnList"
-	btnStatus         = "btnMenuMainStatus"
-	btnSettings       = "btnMenuMainSettings"
-	btnHistory        = "btnMenuMainHistory"
+	btnStatus         = "btnStatus"
+	btnSettings       = "btnSettings"
+	btnHistory        = "btnHistory"
 	btnSubscribe      = "btnSubscribe"
 	btnUnsubscribe    = "btnUnsubscribe"
 	btnMainMenu       = "btnMainMenu"
@@ -48,14 +48,14 @@ const (
 	btnPM25Yellow     = "btnPm25Yellow"
 	btnPM10Diff       = "btnPm10Diff"
 	btnPM25Diff       = "btnPm25Diff"
-	btnCharts         = "btnMenuMainCharts"
+	btnCharts         = "btnCharts"
 	btnSetByAQI       = "btnSetPmByAqi"
 	btnChartPM        = "btnChartPm"
 	btnChartTemp      = "btnChartTemp"
 	btnChartHum       = "btnChartHum"
 	btnChartPress     = "btnChartPress"
 	btnResetDefaults  = "btnResetDefaults"
-	btnInfo           = "btn_info"
+	btnInfo           = "btnInfo"
 	btnMonSettings    = "btnMonSettings"
 	btnAQISettings    = "btnAqiSettings"
 	btnChartAQI       = "btnChartAqi"
@@ -64,6 +64,7 @@ const (
 	btnYes            = "btnYes"
 	btnNo             = "btnNo"
 	btnBack           = "btnBack"
+	btnThresholdsBack = "btnThresholdsBack"
 )
 
 const (
@@ -234,13 +235,30 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		}
 	}
 
-
 	argsMap := b.buildMeasurementArgs(chatID, m)
 	argsMap["winnerID"] = winnerID
 	argsMap["isAlert"] = strings.HasPrefix(winnerID, "alert") && !strings.Contains(winnerID, "clean") && !strings.Contains(winnerID, "return")
 	argsMap["isNorma"] = strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
+
+	// Atomic alert components for the primary event
+	if winnerID != "" {
+		argsMap["isRise"] = strings.Contains(winnerID, "-yu") || strings.Contains(winnerID, "-ru") || strings.Contains(winnerID, "-gu") || strings.Contains(winnerID, "-rise")
+		argsMap["isFall"] = strings.Contains(winnerID, "-yd") || strings.Contains(winnerID, "-rd") || strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "-fall")
+		argsMap["isReturn"] = strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
+		argsMap["isSharp"] = strings.Contains(winnerID, "-rise") || strings.Contains(winnerID, "-fall")
+
+		argsMap["isPm10"] = strings.Contains(winnerID, "val10") || strings.Contains(winnerID, "pm10")
+		argsMap["isPm25"] = strings.Contains(winnerID, "val25") || strings.Contains(winnerID, "pm25")
+		argsMap["isAqi"] = strings.Contains(winnerID, "aqi")
+		argsMap["isBoth"] = strings.Contains(winnerID, "vals")
+
+		argsMap["isRed"] = strings.Contains(winnerID, "-ru") || strings.Contains(winnerID, "-rd")
+		argsMap["isYellow"] = strings.Contains(winnerID, "-yu") || strings.Contains(winnerID, "-yd")
+		argsMap["isGreen"] = strings.Contains(winnerID, "-gu") || strings.Contains(winnerID, "-gd")
+	}
+
 	for _, e := range allEvents {
-		// Convert snake-case or kebab-case to camelCase: val10-yu -> evtVal10Yu
+		// Keep individual event flags for secondary alerts if template needs them
 		parts := strings.FieldsFunc(e.ID, func(r rune) bool { return r == '-' || r == '_' })
 		key := "evt"
 		for _, p := range parts {

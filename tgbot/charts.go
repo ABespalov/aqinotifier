@@ -35,7 +35,7 @@ var (
 
 const (
 	chartStrokeWidth = 3.0
-	chartSmoothing   = 0.4
+	chartSmoothing   = 0.2
 
 	chartPadLeft   = 3.5
 	chartPadRight  = 6.0
@@ -310,10 +310,11 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 	}
 
 	pmTitle := b.T(chatID, "txtChartPmTitle")
-
+	aqiTitle := b.T(chatID, "btnChartAqi")
+	pmUnit := b.T(chatID, "txtChartUnitPm")
 	switch chartType {
 	case "pm":
-		return b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "txtChartUnitPm"),
+		return b.buildChart(chatID, deviceID, pmTitle, pmUnit,
 			labels, []string{"PM2.5", "PM10"},
 			[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 	case "temp":
@@ -332,7 +333,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 		}
 	case "aqi":
 		if len(aqiValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "btnChartAqi"), mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg)
+			return b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	}
 
@@ -395,7 +396,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 
 	opt.XAxis = charts.XAxisOption{
 		Show:                 charts.Ptr(true),
-		BoundaryGap:          charts.Ptr(true),
+		BoundaryGap:          charts.Ptr(false),
 		Labels:               labels,
 		LabelCount:           8,
 		LabelCountAdjustment: 2,

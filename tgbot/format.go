@@ -32,34 +32,34 @@ func (b *Bot) getAQIIcon(level sensor.AQILevel, standard string) string {
 	if strings.ToUpper(standard) == "US" {
 		switch level {
 		case sensor.LevelGood:
-			return icoGreen
+			return icoAqiUSLevel1
 		case sensor.LevelModerate:
-			return icoYellow
+			return icoAqiUSLevel2
 		case sensor.LevelSlightlyUnhealthy:
-			return icoOrange
+			return icoAqiUSLevel3
 		case sensor.LevelUnhealthy:
-			return icoRed
+			return icoAqiUSLevel4
 		case sensor.LevelVeryUnhealthy:
-			return icoPurple
+			return icoAqiUSLevel5
 		case sensor.LevelHazardous:
-			return icoMaroon
+			return icoAqiUSLevel6
 		case sensor.LevelExtremelyHazardous:
-			return icoBlack
+			return icoAqiUSLevel7
 		}
 	} else {
 		switch level {
 		case sensor.LevelGood:
-			return icoBlue
+			return icoAqiEULevel1
 		case sensor.LevelModerate:
-			return icoGreen
+			return icoAqiEULevel2
 		case sensor.LevelSlightlyUnhealthy:
-			return icoYellow
+			return icoAqiEULevel3
 		case sensor.LevelUnhealthy:
-			return icoOrange
+			return icoAqiEULevel4
 		case sensor.LevelVeryUnhealthy:
-			return icoRed
+			return icoAqiEULevel5
 		case sensor.LevelHazardous, sensor.LevelExtremelyHazardous:
-			return icoMaroon
+			return icoAqiEULevel6
 		}
 	}
 	return icoUnknown
@@ -163,6 +163,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	} else {
 		args["trend25Icon"] = icoTrendFlat
 	}
+	args["diff25"] = diff25
 
 	diff10 := m.PM10 - m.PM10Prev
 	if diff10 > 0 {
@@ -172,6 +173,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	} else {
 		args["trend10Icon"] = icoTrendFlat
 	}
+	args["diff10"] = diff10
 
 	getZoneIcon := func(v, g, y float64) string {
 		if v <= g {
@@ -194,14 +196,14 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	}
 
 	levelChar := fmt.Sprintf("z%d", level)
+	args["aqiIcon"] = b.getAQIIcon(level, mcfg.AQIStandard)
 	args["aqiVal"] = aqi
 	args["aqiLevel"] = int(level)
 	// Manual title case for std and levelChar
 	stdTitle := strings.ToUpper(std[:1]) + std[1:]
 	levelTitle := strings.ToUpper(levelChar[:1]) + levelChar[1:]
 	args["aqiName"] = b.T(chatID, "aqiName"+levelTitle+stdTitle)
-	args["aqiStandardFlag"] = "@flag" + stdTitle + "@"
-	args["icon"] = b.getAQIIcon(level, mcfg.AQIStandard)
+	args["aqiStandardFlag"] = "{icoFlag" + strings.ToUpper(std) + "}"
 
 	if m.Temperature != 0 {
 		args["labelT"] = b.T(chatID, "msgTemp")

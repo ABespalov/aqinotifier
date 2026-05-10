@@ -58,6 +58,21 @@ var (
 	icoFlagUS       = "🇺🇸"
 	icoDynamics     = "↗️"
 	icoLevels       = "📶"
+
+	icoAqiUSLevel1 = "🟢"
+	icoAqiUSLevel2 = "🟡"
+	icoAqiUSLevel3 = "🟠"
+	icoAqiUSLevel4 = "🔴"
+	icoAqiUSLevel5 = "🟣"
+	icoAqiUSLevel6 = "🟤"
+	icoAqiUSLevel7 = "⚫"
+
+	icoAqiEULevel1 = "🔵"
+	icoAqiEULevel2 = "🟢"
+	icoAqiEULevel3 = "🟡"
+	icoAqiEULevel4 = "🟠"
+	icoAqiEULevel5 = "🔴"
+	icoAqiEULevel6 = "🟣"
 )
 
 func updateicoVars(m map[string]string) {
@@ -232,4 +247,19 @@ func updateicoVars(m map[string]string) {
 	if v, ok := m["icoLevels"]; ok {
 		icoLevels = v
 	}
+
+	if v, ok := m["icoAqiUSLevel1"]; ok { icoAqiUSLevel1 = v }
+	if v, ok := m["icoAqiUSLevel2"]; ok { icoAqiUSLevel2 = v }
+	if v, ok := m["icoAqiUSLevel3"]; ok { icoAqiUSLevel3 = v }
+	if v, ok := m["icoAqiUSLevel4"]; ok { icoAqiUSLevel4 = v }
+	if v, ok := m["icoAqiUSLevel5"]; ok { icoAqiUSLevel5 = v }
+	if v, ok := m["icoAqiUSLevel6"]; ok { icoAqiUSLevel6 = v }
+	if v, ok := m["icoAqiUSLevel7"]; ok { icoAqiUSLevel7 = v }
+
+	if v, ok := m["icoAqiEULevel1"]; ok { icoAqiEULevel1 = v }
+	if v, ok := m["icoAqiEULevel2"]; ok { icoAqiEULevel2 = v }
+	if v, ok := m["icoAqiEULevel3"]; ok { icoAqiEULevel3 = v }
+	if v, ok := m["icoAqiEULevel4"]; ok { icoAqiEULevel4 = v }
+	if v, ok := m["icoAqiEULevel5"]; ok { icoAqiEULevel5 = v }
+	if v, ok := m["icoAqiEULevel6"]; ok { icoAqiEULevel6 = v }
 }
