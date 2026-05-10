@@ -16,7 +16,6 @@ var (
 	iconsMap         map[string]string
 	i18nMu           sync.RWMutex
 	placeholderRegex = regexp.MustCompile(`@([a-zA-Z0-9_]+)(?:%([^@]+))?@`)
-	conditionalRegex = regexp.MustCompile(`@\?([^%@]+)%([^%@]*)(?:%([^%@]*))?@`)
 )
 
 func init() {
@@ -195,25 +194,66 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 		return match // Keep unresolved
 	})
 
-	// Process conditionals: @?var op val%true%false@
-	text = conditionalRegex.ReplaceAllStringFunc(text, func(match string) string {
-		submatch := conditionalRegex.FindStringSubmatch(match)
-		if len(submatch) < 3 {
-			return match
+	// 3. Process conditionals manually to support nesting: @?var op val%true%false@
+	for {
+		start := strings.Index(text, "@?")
+		if start == -1 {
+			break
 		}
-		condition := strings.TrimSpace(submatch[1])
-		trueText := submatch[2]
+
+		// Find matching @ accounting for nested @? ... @
+		end := -1
+		stack := 0
+		for i := start; i < len(text); i++ {
+			if i+1 < len(text) && text[i:i+2] == "@?" {
+				stack++
+				i++
+			} else if text[i] == '@' {
+				stack--
+				if stack == 0 {
+					end = i
+					break
+				}
+			}
+		}
+
+		if end == -1 {
+			// Unbalanced @?, just remove it to prevent infinite loop
+			text = text[:start] + text[start+2:]
+			continue
+		}
+
+		content := text[start+2 : end]
+		parts := splitByTopLevelPercent(content)
+
+		if len(parts) < 1 {
+			text = text[:start] + text[end+1:]
+			continue
+		}
+
+		condition := strings.TrimSpace(parts[0])
+		trueText := ""
+		if len(parts) > 1 {
+			trueText = parts[1]
+		}
 		falseText := ""
-		if len(submatch) > 3 {
-			falseText = submatch[3]
+		if len(parts) > 2 {
+			falseText = parts[2]
 		}
 
 		isTrue := evaluateCondition(argsMap, condition)
+		result := ""
 		if isTrue {
-			return resolveTemplate(lang, trueText, argsMap, depth+1)
+			result = resolveTemplate(lang, trueText, argsMap, depth+1)
+		} else {
+			if strings.HasPrefix(falseText, "?") {
+				falseText = "@" + falseText + "@"
+			}
+			result = resolveTemplate(lang, falseText, argsMap, depth+1)
 		}
-		return resolveTemplate(lang, falseText, argsMap, depth+1)
-	})
+
+		text = text[:start] + result + text[end+1:]
+	}
 
 	text = strings.ReplaceAll(text, "%%%%", "%")
 	return text
@@ -240,7 +280,7 @@ func evaluateCondition(argsMap map[string]interface{}, condition string) bool {
 			return b
 		}
 		if s, isStr := val.(string); isStr {
-			return s != ""
+			return s != "" && s != "false"
 		}
 		return true
 	}
@@ -314,6 +354,29 @@ func compareNumeric(val interface{}, target string) int {
 		return -1
 	}
 	return 0
+}
+
+func splitByTopLevelPercent(s string) []string {
+	var parts []string
+	var current strings.Builder
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		if i+1 < len(s) && s[i:i+2] == "@?" {
+			depth++
+			current.WriteString("@?")
+			i++
+		} else if s[i] == '@' {
+			depth--
+			current.WriteByte('@')
+		} else if s[i] == '%' && depth == 0 {
+			parts = append(parts, current.String())
+			current.Reset()
+		} else {
+			current.WriteByte(s[i])
+		}
+	}
+	parts = append(parts, current.String())
+	return parts
 }
 
 // T returns a localized string for the given key and chat ID.

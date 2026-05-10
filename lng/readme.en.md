@@ -1,47 +1,44 @@
-# Localization System Documentation (v2.0)
+# Localization System Documentation (v2.1)
 
-The system is based on a **recursive block-based template engine**. The UI construction logic has been moved from Go code to JSON files.
+The system uses a **recursive block-based template engine** with logic support within templates.
 
 ---
 
-## 1. Core Principle: Block Structure
-Instead of assembling messages in code, we use "master templates" that reference other sub-templates (placeholders).
+## 1. Core Principle: Logic in Templates
+UI construction (icons, titles, lists) has been moved from Go code to JSON files.
 
-**Example (msgStatus):**
+### 1.1. Nested Conditionals (Switch)
+If the third part of a condition starts with `?`, it's treated as a nested conditional, enabling `switch` behavior.
+
+**Example:**
 ```json
-"msgStatus": "@icoStatus@ <b>Latest values</b>\n@txtDateTime@\n\n@txtAqi@\n\n@txtPm25@\n\n@txtDevice@"
+"txtAlertHeader": "@?isAlert%@icoAlert@ WARNING%?isNorma%@icoSuccess@ NORMAL%@icoInfo@ INFO@@"
 ```
-When calling `T("msgStatus")`, the engine automatically resolves `txtDateTime`, `txtAqi`, etc., from the same file.
 
 ---
 
 ## 2. Atomic Data (from Go)
-Primary values provided by the bot. They serve as the foundation for all blocks.
+The bot provides only raw data and state flags.
 
 | Placeholder | Description |
 | :--- | :--- |
-| @aqiVal@ | AQI Index (number). |
-| @val25@ / @val10@ | Current PM values (µg/m³). |
-| @diff25Percent@ | Change in % (e.g., +15.2). |
-| @trend25Icon@ | Trend icon (icoTrendUp/Down). |
-| @zone25Icon@ | Zone icon (icoGreenSq/YellowSq/RedSq). |
-| @deviceId@ | Device ID. |
-| @deviceName@ | Device name. |
-| @date@ / @time@ | Time objects (require format, e.g., @date%02.01.2006@). |
+| @aqiLevel@ | AQI Level (1-7). Used for recursive key building: `@icoLevel@aqiLevel@@`. |
+| @isAlert@ | Critical alert flag (bool). |
+| @isNorma@ | Normalization flag (bool). |
+| @evt_name_id@ | Active event flags (e.g., @evt_val10_yu@). |
+| @aqiVal@, @val25@... | Numeric indicators. |
 
 ---
 
-## 3. File Organization (Sorting)
-For maintainability, keys in `ru.json` / `en.json` are sorted **topically**:
-1. **Main Templates (msg...)**: Key messages (Status, Notify).
-2. **Sub-templates (txt...)**: Blocks used within messages (Date, AQI, PM).
-3. **Buttons (btn...)**: Keyboard buttons.
-4. **Icons (ico...)**: Icon reference list.
-5. **System**: Units, formats, zone names.
+## 3. No Virtual Placeholders
+Placeholders like `@icon@`, `@title@`, and `@alerts@` are prohibited as they imply code-side formatting.
+Use JSON logic instead:
+- Icons: `@icoLevel@aqiLevel@@`.
+- Headers: conditionals based on `isAlert` / `isNorma`.
+- Lists: chains of conditionals based on `evt_...` flags.
 
 ---
 
 ## 4. Formatting Rules
-1. **HTML Tags**: Use native `<b>`, `<i>`, `<code>`.
-2. **Unicode**: Unicode escaping (like `\u003cb\u003e`) is forbidden. Use raw text and tags only.
-3. **Icons**: All icons use the `ico` prefix (e.g., `@icoAqi@`).
+1. **No Unicode Escaping**: Use native HTML and plain text only.
+2. **Topical Sorting**: Keys are grouped by context (Master templates -> Components -> Buttons -> System).

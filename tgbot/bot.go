@@ -235,30 +235,14 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 	}
 
 
-	var alertsSB strings.Builder
-	winnerDesc := b.getEventDescription(chatID, winnerID)
-	if winnerDesc != "" {
-		alertsSB.WriteString(winnerDesc + "\n")
-	}
-
-	for _, e := range allEvents {
-		if e.ID == winnerID {
-			continue
-		}
-		evtText := b.getEventDescription(chatID, e.ID)
-		if evtText != "" {
-			alertsSB.WriteString(evtText + "\n")
-		}
-	}
-	if alertsSB.Len() > 0 {
-		alertsSB.WriteString("\n")
-	}
-
 	argsMap := b.buildMeasurementArgs(chatID, m)
 	argsMap["winnerID"] = winnerID
 	argsMap["isAlert"] = strings.HasPrefix(winnerID, "alert") && !strings.Contains(winnerID, "clean") && !strings.Contains(winnerID, "return")
 	argsMap["isNorma"] = strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
-	argsMap["alerts"] = alertsSB.String()
+
+	for _, e := range allEvents {
+		argsMap["evt_"+e.ID] = true
+	}
 
 	text := b.TDevice(chatID, "msgAlertNotify", m.DeviceID, argsMap)
 
