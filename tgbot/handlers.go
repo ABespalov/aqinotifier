@@ -133,15 +133,15 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 	}
 
 	isCommand := strings.HasPrefix(text, "/")
-	isMenuButton := match(btnList, IconList) ||
-		match(btnCharts, IconChart) ||
-		match(btnStatus, IconStatus) ||
-		match(btnSettings, IconSettings) ||
-		match(btnHistory, IconHistory) ||
-		match(btnSubscribe, IconSubscribe) ||
-		match(btnUnsubscribe, IconUnsubscribe) ||
-		match(btnMainMenu, IconBack) ||
-		match(btnInfo, IconInfo) ||
+	isMenuButton := match(btnList, icoList) ||
+		match(btnCharts, icoChart) ||
+		match(btnStatus, icoStatus) ||
+		match(btnSettings, icoSettings) ||
+		match(btnHistory, icoHistory) ||
+		match(btnSubscribe, icoSubscribe) ||
+		match(btnUnsubscribe, icoUnsubscribe) ||
+		match(btnMainMenu, icoBack) ||
+		match(btnInfo, icoInfo) ||
 		strings.Contains(text, "Настройки") || strings.Contains(text, "Статус") ||
 		strings.Contains(text, "Графики") || strings.Contains(text, "История") ||
 		strings.Contains(text, "Settings") || strings.Contains(text, "Status") ||
@@ -152,7 +152,7 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 		b.setState(chatID, stateIdle)
 
 		if isMenuButton {
-			params := tu.Message(tu.ID(chatID), IconAQI+" AQI Notifier").
+			params := tu.Message(tu.ID(chatID), icoAQI+" AQI Notifier").
 				WithReplyMarkup(tu.ReplyKeyboardRemove())
 			_, _ = b.api.SendMessage(context.Background(), params)
 		}
@@ -160,21 +160,21 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 		switch {
 		case text == "/start" || text == "/help":
 			b.sendHelp(chatID)
-		case match(btnList, IconList):
+		case match(btnList, icoList):
 			b.cmdList(chatID)
-		case match(btnCharts, IconChart):
+		case match(btnCharts, icoChart):
 			b.cmdChartsMenu(chatID)
-		case match(btnStatus, IconStatus):
+		case match(btnStatus, icoStatus):
 			b.cmdStatusMenu(chatID)
-		case match(btnSettings, IconSettings):
+		case match(btnSettings, icoSettings):
 			b.cmdSettings(chatID)
-		case match(btnHistory, IconHistory):
+		case match(btnHistory, icoHistory):
 			b.cmdHistoryMenu(chatID)
-		case match(btnSubscribe, IconSubscribe):
+		case match(btnSubscribe, icoSubscribe):
 			b.promptDeviceID(chatID)
-		case match(btnUnsubscribe, IconUnsubscribe):
+		case match(btnUnsubscribe, icoUnsubscribe):
 			b.cmdUnsubscribeMenu(chatID)
-		case match(btnMainMenu, IconBack):
+		case match(btnMainMenu, icoBack):
 			b.sendHelp(chatID)
 		}
 		return
@@ -397,7 +397,7 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 		oldVal = mcfg.PM10Green
 		mcfg.PM10Green = val
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm10"), "zone_str": b.T(chatID, "txtLabelZone1"), "zone_icon": IconGreenSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm10"), "zone_str": b.T(chatID, "txtLabelZone1"), "zone_icon": icoGreenSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
 	case stateAwaitPM10Yellow:
 		if val < mcfg.PM10Green {
 			b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorYellow"), b.thresholdsKeyboard(chatID))
@@ -406,17 +406,17 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 		oldVal = mcfg.PM10Yellow
 		mcfg.PM10Yellow = val
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm10"), "zone_str": b.T(chatID, "txtLabelZone2"), "zone_icon": IconYellowSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm10"), "zone_str": b.T(chatID, "txtLabelZone2"), "zone_icon": icoYellowSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
 	case stateAwaitDiff10:
 		oldVal = mcfg.PM10Diff
 		mcfg.PM10Diff = val
 		title = b.T(chatID, "msgThresholdDiffTitleFmt", map[string]interface {
-		}{"pm": b.T(chatID, "txtLabelPm10"), "label": b.T(chatID, "txtLabelDynamics"), "icon": IconPM10})
+		}{"pm": b.T(chatID, "txtLabelPm10"), "label": b.T(chatID, "txtLabelDynamics"), "icon": icoPM10})
 	case stateAwaitPM25Green:
 		oldVal = mcfg.PM25Green
 		mcfg.PM25Green = val
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm25"), "zone_str": b.T(chatID, "txtLabelZone1"), "zone_icon": IconGreenSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm25"), "zone_str": b.T(chatID, "txtLabelZone1"), "zone_icon": icoGreenSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
 	case stateAwaitPM25Yellow:
 		if val < mcfg.PM25Green {
 			b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorYellow"), b.thresholdsKeyboard(chatID))
@@ -425,12 +425,12 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 		oldVal = mcfg.PM25Yellow
 		mcfg.PM25Yellow = val
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm25"), "zone_str": b.T(chatID, "txtLabelZone2"), "zone_icon": IconYellowSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm25"), "zone_str": b.T(chatID, "txtLabelZone2"), "zone_icon": icoYellowSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
 	case stateAwaitDiff25:
 		oldVal = mcfg.PM25Diff
 		mcfg.PM25Diff = val
 		title = b.T(chatID, "msgThresholdDiffTitleFmt", map[string]interface {
-		}{"pm": b.T(chatID, "txtLabelPm25"), "label": b.T(chatID, "txtLabelDynamics"), "icon": IconPM25})
+		}{"pm": b.T(chatID, "txtLabelPm25"), "label": b.T(chatID, "txtLabelDynamics"), "icon": icoPM25})
 	default:
 		return
 	}
@@ -473,17 +473,17 @@ func (b *Bot) promptThreshold(chatID int64, param, zone string) {
 		case "green":
 			b.setState(chatID, stateAwaitPM10Green)
 			zoneLabel = b.T(chatID, "txtLabelZone1")
-			zoneIcon = IconGreenSq
+			zoneIcon = icoGreenSq
 			currentVal = mcfg.PM10Green
 		case "yellow":
 			b.setState(chatID, stateAwaitPM10Yellow)
 			zoneLabel = b.T(chatID, "txtLabelZone2")
-			zoneIcon = IconYellowSq
+			zoneIcon = icoYellowSq
 			currentVal = mcfg.PM10Yellow
 		case "diff":
 			b.setState(chatID, stateAwaitDiff10)
 			zoneLabel = b.T(chatID, "msgThresholdDiffTitle")
-			zoneIcon = IconTrendUp
+			zoneIcon = icoTrendUp
 			currentVal = mcfg.PM10Diff
 		}
 	case "PM2.5":
@@ -492,17 +492,17 @@ func (b *Bot) promptThreshold(chatID int64, param, zone string) {
 		case "green":
 			b.setState(chatID, stateAwaitPM25Green)
 			zoneLabel = b.T(chatID, "txtLabelZone1")
-			zoneIcon = IconGreenSq
+			zoneIcon = icoGreenSq
 			currentVal = mcfg.PM25Green
 		case "yellow":
 			b.setState(chatID, stateAwaitPM25Yellow)
 			zoneLabel = b.T(chatID, "txtLabelZone2")
-			zoneIcon = IconYellowSq
+			zoneIcon = icoYellowSq
 			currentVal = mcfg.PM25Yellow
 		case "diff":
 			b.setState(chatID, stateAwaitDiff25)
 			zoneLabel = b.T(chatID, "msgThresholdDiffTitle")
-			zoneIcon = IconTrendUp
+			zoneIcon = icoTrendUp
 			currentVal = mcfg.PM25Diff
 		}
 	}

@@ -31,14 +31,14 @@ func (b *Bot) getEventPriority(id string) int {
 func (b *Bot) getEventHeader(chatID int64, id string) (string, string) {
 
 	if id == "aqi_z1" || strings.HasSuffix(id, "-gd") {
-		return IconPlant, b.T(chatID, "msgNorma")
+		return icoPlant, b.T(chatID, "msgNorma")
 	}
 
 	if strings.HasSuffix(id, "-yd") || strings.HasSuffix(id, "-rd") {
-		return IconInfo, b.T(chatID, "msgInfo")
+		return icoInfo, b.T(chatID, "msgInfo")
 	}
 
-	return IconAlert, b.T(chatID, "msgAlert")
+	return icoAlert, b.T(chatID, "msgAlert")
 }
 func (b *Bot) getEventDescription(chatID int64, id string) string {
 	pm10 := "@alert_pm10@"
@@ -162,37 +162,37 @@ func (b *Bot) getAQIIcon(level sensor.AQILevel, standard string) string {
 	if strings.ToUpper(standard) == "US" {
 		switch level {
 		case sensor.LevelGood:
-			return IconGreen
+			return icoGreen
 		case sensor.LevelModerate:
-			return IconYellow
+			return icoYellow
 		case sensor.LevelSlightlyUnhealthy:
-			return IconOrange
+			return icoOrange
 		case sensor.LevelUnhealthy:
-			return IconRed
+			return icoRed
 		case sensor.LevelVeryUnhealthy:
-			return IconPurple
+			return icoPurple
 		case sensor.LevelHazardous:
-			return IconMaroon
+			return icoMaroon
 		case sensor.LevelExtremelyHazardous:
-			return IconBlack
+			return icoBlack
 		}
 	} else {
 		switch level {
 		case sensor.LevelGood:
-			return IconBlue
+			return icoBlue
 		case sensor.LevelModerate:
-			return IconGreen
+			return icoGreen
 		case sensor.LevelSlightlyUnhealthy:
-			return IconYellow
+			return icoYellow
 		case sensor.LevelUnhealthy:
-			return IconOrange
+			return icoOrange
 		case sensor.LevelVeryUnhealthy:
-			return IconRed
+			return icoRed
 		case sensor.LevelHazardous, sensor.LevelExtremelyHazardous:
-			return IconMaroon
+			return icoMaroon
 		}
 	}
-	return IconUnknown
+	return icoUnknown
 }
 func (b *Bot) formatDeviceStatus(chatID int64, deviceID string) string {
 	m := b.monitor.LastMeasurement(deviceID)
@@ -214,9 +214,9 @@ func (b *Bot) formatDeviceID(chatID int64, deviceID string) string {
 	mcfg := b.GetUserSettings(chatID)
 	name, ok := mcfg.DeviceNames[deviceID]
 	if ok && name != "" {
-		return fmt.Sprintf("%s %s (<code>%s</code>)", IconDevice, name, deviceID)
+		return fmt.Sprintf("%s %s (<code>%s</code>)", icoDevice, name, deviceID)
 	}
-	return fmt.Sprintf("%s %s <code>%s</code>", IconDevice, b.T(chatID, "msgDevice"), deviceID)
+	return fmt.Sprintf("%s %s <code>%s</code>", icoDevice, b.T(chatID, "msgDevice"), deviceID)
 }
 func (b *Bot) formatDeviceIDPlain(chatID int64, deviceID string) string {
 	mcfg := b.GetUserSettings(chatID)
@@ -308,30 +308,30 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 
 	diff25 := m.PM25 - m.PM25Prev
 	if diff25 > 0 {
-		args["picPm25Trend"] = IconTrendUp
+		args["picPm25Trend"] = icoTrendUp
 	} else if diff25 < 0 {
-		args["picPm25Trend"] = IconTrendDown
+		args["picPm25Trend"] = icoTrendDown
 	} else {
-		args["picPm25Trend"] = IconTrendFlat
+		args["picPm25Trend"] = icoTrendFlat
 	}
 
 	diff10 := m.PM10 - m.PM10Prev
 	if diff10 > 0 {
-		args["picPm10Trend"] = IconTrendUp
+		args["picPm10Trend"] = icoTrendUp
 	} else if diff10 < 0 {
-		args["picPm10Trend"] = IconTrendDown
+		args["picPm10Trend"] = icoTrendDown
 	} else {
-		args["picPm10Trend"] = IconTrendFlat
+		args["picPm10Trend"] = icoTrendFlat
 	}
 
 	getZoneIcon := func(v, g, y float64) string {
 		if v <= g {
-			return IconGreenSq
+			return icoGreenSq
 		}
 		if v <= y {
-			return IconYellowSq
+			return icoYellowSq
 		}
-		return IconRedSq
+		return icoRedSq
 	}
 	args["picPm25Zone"] = getZoneIcon(m.PM25, mcfg.PM25Green, mcfg.PM25Yellow)
 	args["picPm10Zone"] = getZoneIcon(m.PM10, mcfg.PM10Green, mcfg.PM10Yellow)

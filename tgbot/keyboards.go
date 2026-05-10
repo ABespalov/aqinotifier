@@ -125,14 +125,14 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 
 	stdLower := strings.ToLower(std)
 	for _, id := range aqiAlerts {
-		statusIcon := IconUnchecked
+		statusIcon := icoUnchecked
 		if activeNotifications[id] {
-			statusIcon = IconChecked
+			statusIcon = icoChecked
 		}
-		soundIcon := IconSilent
+		soundIcon := icoSilent
 		soundLabel := "btnWithoutSound"
 		if loudWarnings[id] {
-			soundIcon = IconLoud
+			soundIcon = icoLoud
 			soundLabel = "btnWithSound"
 		}
 
@@ -141,10 +141,10 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 
 		var zoneIcon string
 		if std == "US" {
-			icons := map[string]string{"z1": IconGreen, "z2": IconYellow, "z3": IconOrange, "z4": IconRed, "z5": IconPurple, "z6": IconMaroon, "z7": IconBlack}
+			icons := map[string]string{"z1": icoGreen, "z2": icoYellow, "z3": icoOrange, "z4": icoRed, "z5": icoPurple, "z6": icoMaroon, "z7": icoBlack}
 			zoneIcon = icons[levelChar]
 		} else {
-			icons := map[string]string{"z1": IconBlue, "z2": IconGreen, "z3": IconYellow, "z4": IconOrange, "z5": IconRed, "z6": IconMaroon}
+			icons := map[string]string{"z1": icoBlue, "z2": icoGreen, "z3": icoYellow, "z4": icoOrange, "z5": icoRed, "z6": icoMaroon}
 			zoneIcon = icons[levelChar]
 		}
 
@@ -193,15 +193,15 @@ func (b *Bot) notificationSettingsKeyboard(chatID int64, silent bool) *telego.In
 			continue
 		}
 
-		statusIcon := IconUnchecked
+		statusIcon := icoUnchecked
 		if activeNotifications[a.id] {
-			statusIcon = IconChecked
+			statusIcon = icoChecked
 		}
 
-		soundIcon := IconSilent
+		soundIcon := icoSilent
 		soundLabel := "btnWithoutSound"
 		if activeWarnings[a.id] {
-			soundIcon = IconLoud
+			soundIcon = icoLoud
 			soundLabel = "btnWithSound"
 		}
 

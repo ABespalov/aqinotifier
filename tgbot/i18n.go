@@ -79,7 +79,7 @@ func loadIcons(dir string) {
 			iconsMap[k] = v
 		}
 		i18nMu.Unlock()
-		updateIconVars(m)
+		updateicoVars(m)
 	} else {
 		fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
 	}

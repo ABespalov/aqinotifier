@@ -23,7 +23,7 @@ func (b *Bot) cmdLangMenu(chatID int64) {
 	for _, lang := range langs {
 		label := b.TLang(lang, "lang_"+lang)
 		if lang == currentLang || (currentLang == "" && lang == "en") {
-			label = IconSuccess + " " + label
+			label = icoSuccess + " " + label
 		}
 		langBtns = append(langBtns, tu.InlineKeyboardButton(label).WithCallbackData("lang_set:"+lang))
 	}
@@ -31,17 +31,17 @@ func (b *Bot) cmdLangMenu(chatID int64) {
 	btnC := b.T(chatID, "unitC")
 	btnF := b.T(chatID, "unitF")
 	if currentTemp == "c" {
-		btnC = IconSuccess + " " + btnC
+		btnC = icoSuccess + " " + btnC
 	} else {
-		btnF = IconSuccess + " " + btnF
+		btnF = icoSuccess + " " + btnF
 	}
 
 	btnMMHG := b.T(chatID, "unitMmhg")
 	btnHPA := b.T(chatID, "unitHpa")
 	if currentPress == "mmhg" {
-		btnMMHG = IconSuccess + " " + btnMMHG
+		btnMMHG = icoSuccess + " " + btnMMHG
 	} else {
-		btnHPA = IconSuccess + " " + btnHPA
+		btnHPA = icoSuccess + " " + btnHPA
 	}
 
 	inlineKeyboard := tu.InlineKeyboard(
@@ -114,7 +114,7 @@ func (b *Bot) cmdList(chatID int64) {
 			label = fmt.Sprintf("%s (%s)", name, id)
 		}
 		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", IconStatus, label)).WithCallbackData(fmt.Sprintf("status:%s", id)),
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", icoStatus, label)).WithCallbackData(fmt.Sprintf("status:%s", id)),
 		})
 	}
 
@@ -139,7 +139,7 @@ func (b *Bot) cmdUnsubscribeMenu(chatID int64) {
 	var rows [][]telego.InlineKeyboardButton
 	for _, id := range devices {
 		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s  %s", IconUnsubscribe, id)).WithCallbackData(fmt.Sprintf("unsub:%s", id)),
+			tu.InlineKeyboardButton(fmt.Sprintf("%s  %s", icoUnsubscribe, id)).WithCallbackData(fmt.Sprintf("unsub:%s", id)),
 		})
 	}
 
@@ -148,7 +148,7 @@ func (b *Bot) cmdUnsubscribeMenu(chatID int64) {
 	})
 
 	params := tu.Message(tu.ID(chatID), b.T(chatID, "msgSelectUnsub",
-		IconDelete)).
+		icoDelete)).
 		WithParseMode(telego.ModeHTML).
 		WithReplyMarkup(tu.InlineKeyboard(rows...))
 	_, _ = b.api.SendMessage(context.Background(), params)
@@ -168,7 +168,7 @@ func (b *Bot) cmdStatusMenu(chatID int64) {
 	var rows [][]telego.InlineKeyboardButton
 	for _, id := range devices {
 		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", IconStatus, id)).WithCallbackData(fmt.Sprintf("status:%s", id)),
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", icoStatus, id)).WithCallbackData(fmt.Sprintf("status:%s", id)),
 		})
 	}
 
@@ -197,7 +197,7 @@ func (b *Bot) cmdChartsMenu(chatID int64) {
 	var rows [][]telego.InlineKeyboardButton
 	for _, id := range devices {
 		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", IconStatus, id)).WithCallbackData(fmt.Sprintf("charts_dev:%s", id)),
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", icoStatus, id)).WithCallbackData(fmt.Sprintf("charts_dev:%s", id)),
 		})
 	}
 
@@ -300,7 +300,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 			_, level := sensor.CalculateValueAQI(val, pmType, std)
 			return flag, b.getAQIIcon(level, std)
 		}
-		return IconWrite, ""
+		return icoWrite, ""
 	}
 
 	btnText := func(pmType, zoneIcon string, val float64) string {
@@ -313,12 +313,12 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 
 	kb := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnText("PM2.5", IconGreenSq, mcfg.PM25Green)).WithCallbackData("aqi_cycle:PM2.5:green"),
-			tu.InlineKeyboardButton(btnText("PM10", IconGreenSq, mcfg.PM10Green)).WithCallbackData("aqi_cycle:PM10:green"),
+			tu.InlineKeyboardButton(btnText("PM2.5", icoGreenSq, mcfg.PM25Green)).WithCallbackData("aqi_cycle:PM2.5:green"),
+			tu.InlineKeyboardButton(btnText("PM10", icoGreenSq, mcfg.PM10Green)).WithCallbackData("aqi_cycle:PM10:green"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnText("PM2.5", IconYellowSq, mcfg.PM25Yellow)).WithCallbackData("aqi_cycle:PM2.5:yellow"),
-			tu.InlineKeyboardButton(btnText("PM10", IconYellowSq, mcfg.PM10Yellow)).WithCallbackData("aqi_cycle:PM10:yellow"),
+			tu.InlineKeyboardButton(btnText("PM2.5", icoYellowSq, mcfg.PM25Yellow)).WithCallbackData("aqi_cycle:PM2.5:yellow"),
+			tu.InlineKeyboardButton(btnText("PM10", icoYellowSq, mcfg.PM10Yellow)).WithCallbackData("aqi_cycle:PM10:yellow"),
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(b.T(chatID, btnThresholds)).WithCallbackData(cmdThresholdsMenu),
@@ -349,7 +349,7 @@ func (b *Bot) cmdHistoryMenu(chatID int64) {
 	var rows [][]telego.InlineKeyboardButton
 	for _, id := range devices {
 		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", IconHistory, id)).WithCallbackData(fmt.Sprintf("history:%s", id)),
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", icoHistory, id)).WithCallbackData(fmt.Sprintf("history:%s", id)),
 		})
 	}
 
@@ -477,9 +477,9 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 		if defNotifications[a.id] {
 			icon := "•"
 			if defWarnings[a.id] {
-				icon = IconLoud
+				icon = icoLoud
 			} else {
-				icon = IconSilent
+				icon = icoSilent
 			}
 			alertsSB.WriteString(fmt.Sprintf("%s %s\n", icon, a.name))
 		}

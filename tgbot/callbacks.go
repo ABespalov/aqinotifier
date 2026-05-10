@@ -74,19 +74,19 @@ func (b *Bot) getAllAlerts(chatID int64) []struct {
 					pmLabel = b.T(chatID, "alertVsShort")
 				}
 
-				actIcon := IconTrendUp
+				actIcon := icoTrendUp
 				if act == "d" {
-					actIcon = IconTrendDown
+					actIcon = icoTrendDown
 				}
 
 				var zoneIcon string
 				switch zone {
 				case "g":
-					zoneIcon = IconGreenSq
+					zoneIcon = icoGreenSq
 				case "y":
-					zoneIcon = IconYellowSq
+					zoneIcon = icoYellowSq
 				default:
-					zoneIcon = IconRedSq
+					zoneIcon = icoRedSq
 				}
 
 				res = append(res, struct {
@@ -118,19 +118,19 @@ func (b *Bot) getAllAlerts(chatID int64) []struct {
 					pmLabel = b.T(chatID, "alertVsShort")
 				}
 
-				actIcon := IconTrendUp
+				actIcon := icoTrendUp
 				if act == "d" {
-					actIcon = IconTrendDown
+					actIcon = icoTrendDown
 				}
 
 				var zoneIcon string
 				switch zone {
 				case "g":
-					zoneIcon = IconGreenSq
+					zoneIcon = icoGreenSq
 				case "y":
-					zoneIcon = IconYellowSq
+					zoneIcon = icoYellowSq
 				default:
-					zoneIcon = IconRedSq
+					zoneIcon = icoRedSq
 				}
 
 				res = append(res, struct {
@@ -264,8 +264,8 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		text := b.TDevice(chatID, "msgUnsubConfirm", deviceID)
 		kb := tu.InlineKeyboard(
 			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton(b.T(chatID, btnYes, IconSuccess)).WithCallbackData(fmt.Sprintf("unsub_yes:%s", deviceID)),
-				tu.InlineKeyboardButton(b.T(chatID, btnNo, IconError)).WithCallbackData(fmt.Sprintf("unsub_no:%s", deviceID)),
+				tu.InlineKeyboardButton(b.T(chatID, btnYes, icoSuccess)).WithCallbackData(fmt.Sprintf("unsub_yes:%s", deviceID)),
+				tu.InlineKeyboardButton(b.T(chatID, btnNo, icoError)).WithCallbackData(fmt.Sprintf("unsub_no:%s", deviceID)),
 			),
 		)
 		params := tu.EditMessageText(tu.ID(chatID), cq.Message.GetMessageID(), text).
