@@ -266,12 +266,12 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 		"val25":      m.PM25,
 		"prev25":     m.PM25Prev,
 		"curr25":     m.PM25,
-		"unitPm":     b.T(chatID, "msgUnitPm"),
+		"unitPm":     b.T(chatID, "unitPm"),
 		"val10":      m.PM10,
 		"prev10":     m.PM10Prev,
 		"curr10":     m.PM10,
-		"labelPm25":  b.T(chatID, "txtLabelPm25"),
-		"labelPm10":  b.T(chatID, "txtLabelPm10"),
+		"labelPm25":  b.T(chatID, "labelPm25"),
+		"labelPm10":  b.T(chatID, "labelPm10"),
 	}
 
 	if name, ok := mcfg.DeviceNames[m.DeviceID]; ok && name != "" {
