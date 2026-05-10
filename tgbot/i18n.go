@@ -197,7 +197,24 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 		i18nMu.RUnlock()
 
 		if found {
-			return resolveTemplate(lang, tmpl, argsMap, depth+1)
+			// If we have arguments like @tmpl%arg1=val1%arg2=val2@, inject them into argsMap
+			nextArgs := argsMap
+			if format != "" && strings.Contains(format, "=") {
+				// Clone argsMap to avoid side effects
+				nextArgs = make(map[string]interface{})
+				for k, v := range argsMap {
+					nextArgs[k] = v
+				}
+				pairs := strings.Split(format, "%")
+				for _, p := range pairs {
+					kv := strings.SplitN(p, "=", 2)
+					if len(kv) == 2 {
+						// Resolve the value first (it might be another placeholder)
+						nextArgs[kv[0]] = resolveTemplate(lang, kv[1], argsMap, depth+1)
+					}
+				}
+			}
+			return resolveTemplate(lang, tmpl, nextArgs, depth+1)
 		}
 
 		return match // Keep unresolved
