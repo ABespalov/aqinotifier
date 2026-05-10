@@ -16,6 +16,7 @@ var (
 	iconsMap         map[string]string
 	i18nMu           sync.RWMutex
 	placeholderRegex = regexp.MustCompile(`@([a-zA-Z0-9_]+)(?:%([^@]+))?@`)
+	conditionalRegex = regexp.MustCompile(`@\?([a-zA-Z0-9_]+)(?:\s+([a-zA-Z]+))?%([^@%]*)?(?:%([^@]*))?@`)
 )
 
 func init() {
@@ -111,17 +112,29 @@ func AvailableLanguages() []string {
 }
 
 func resolveTemplate(lang string, text string, argsMap map[string]interface{}, depth int) string {
-	if depth > 10 {
+	if depth > 15 {
 		return text // Prevent infinite recursion
 	}
 
-	text = strings.ReplaceAll(text, "%%", "%")
-	return placeholderRegex.ReplaceAllStringFunc(text, func(match string) string {
+	text = strings.ReplaceAll(text, "%%", "%%%%") // Protect double percent signs (though not strictly needed if we process conditional first)
+
+	// Evaluate conditionals first or after? 
+	// If we do placeholders first, they might break the conditional regex if they insert @ or %.
+	// It's safer to resolve placeholders first, because conditionals might depend on the replaced values,
+	// BUT conditionals might wrap placeholders. 
+	// Wait! If placeholders are resolved first, `@?deviceName isNotEmpty%@deviceName@ (%` 
+	// becomes `@?deviceName isNotEmpty%MySensor (%`. This is PERFECT.
+	
+	text = placeholderRegex.ReplaceAllStringFunc(text, func(match string) string {
 		submatch := placeholderRegex.FindStringSubmatch(match)
 		if len(submatch) < 2 {
 			return match
 		}
 		key := submatch[1]
+		// Ignore if it's a conditional start
+		if strings.HasPrefix(match, "@?") {
+			return match
+		}
 		format := ""
 		if len(submatch) > 2 {
 			format = submatch[2]
@@ -138,7 +151,7 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 						if dict, okD := langDicts[lang]; okD {
 							if defF, okF := dict["format_"+key]; okF {
 								f = defF
-							} else if defF, okF := dict["format_datetime"]; okF {
+							} else if defF, okF := dict["formatDatetime"]; okF {
 								f = defF
 							}
 						}
@@ -181,12 +194,83 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 
 		return match // Keep unresolved
 	})
+
+	// Process conditionals
+	text = conditionalRegex.ReplaceAllStringFunc(text, func(match string) string {
+		submatch := conditionalRegex.FindStringSubmatch(match)
+		if len(submatch) < 2 {
+			return match
+		}
+		varName := submatch[1]
+		operator := submatch[2]
+		trueText := submatch[3]
+		falseText := submatch[4]
+
+		isTrue := evaluateCondition(argsMap, varName, operator)
+		if isTrue {
+			return trueText
+		}
+		return falseText
+	})
+
+	text = strings.ReplaceAll(text, "%%%%", "%")
+	return text
+}
+
+func evaluateCondition(argsMap map[string]interface{}, varName, operator string) bool {
+	if argsMap == nil {
+		return operator == "isEmpty"
+	}
+	val, ok := argsMap[varName]
+
+	if str, isStr := val.(string); isStr {
+		if operator == "isNotEmpty" {
+			return ok && str != ""
+		}
+		if operator == "isEmpty" {
+			return !ok || str == ""
+		}
+	}
+
+	if b, isBool := val.(bool); isBool {
+		if operator == "isEmpty" {
+			return !b
+		}
+		if operator == "isNotEmpty" {
+			return b
+		}
+		return b
+	}
+
+	if operator == "isNotEmpty" {
+		return ok && val != nil
+	}
+	if operator == "isEmpty" {
+		return !ok || val == nil
+	}
+	return ok && val != nil
 }
 
 // T returns a localized string for the given key and chat ID.
 func (b *Bot) T(chatID int64, key string, args ...interface{}) string {
 	lang := b.store.GetLanguage(chatID)
 	return b.TLang(lang, key, args...)
+}
+
+// TDevice is a helper that automatically injects deviceId and deviceName into the template arguments.
+func (b *Bot) TDevice(chatID int64, key string, deviceID string, args ...map[string]interface{}) string {
+	m := make(map[string]interface{})
+	if len(args) > 0 {
+		for k, v := range args[0] {
+			m[k] = v
+		}
+	}
+	mcfg := b.GetUserSettings(chatID)
+	m["deviceId"] = deviceID
+	if name, ok := mcfg.DeviceNames[deviceID]; ok {
+		m["deviceName"] = name
+	}
+	return b.T(chatID, key, m)
 }
 
 func (b *Bot) detectLang(langCode string) string {
@@ -248,187 +332,187 @@ func (b *Bot) I(key string) string {
 // fallbackEN contains the hardcoded English localization as a final safety net.
 var fallbackEN = map[string]string{
 
-	"alert_pm10":                   "PM10",
-	"alert_pm25":                   "PM2.5",
-	"alert_pms":                    "PM2.5 & PM10",
-	"alert_aqi_clean_short":        "AQI level returned to normal",
-	"alert_action_up":              "Rise",
-	"alert_action_down":            "Fall",
-	"alert_aqi_full":               "<b>AQI: %s</b> (%s %s)\nAQI: <b>%.1f</b>",
-	"alert_aqi_clean":              "%s <b>AQI level returned to normal</b> (%s %s)\nAQI: <b>%.1f</b>",
-	"alert_aqi_short":              "AQI Level: %s %s",
+	"alertPm10":                   "PM10",
+	"alertPm25":                   "PM2.5",
+	"alertPms":                    "PM2.5 & PM10",
+	"alertAqiCleanShort":        "AQI level returned to normal",
+	"alertActionUp":              "Rise",
+	"alertActionDown":            "Fall",
+	"alertAqiFull":               "<b>AQI: %s</b> (%s %s)\nAQI: <b>%.1f</b>",
+	"alertAqiClean":              "%s <b>AQI level returned to normal</b> (%s %s)\nAQI: <b>%.1f</b>",
+	"alertAqiShort":              "AQI Level: %s %s",
 
-	"btn_aqi_settings":             "%s AQI Settings",
-	"btn_aqi_standard":             "Standard: %s %s",
-	"btn_chart_aqi":                "%s AQI Chart",
-	"btn_chart_hum":                "%s Humidity",
-	"btn_chart_pm":                 "%s PM2.5 + PM10",
-	"btn_chart_press":              "%s Pressure",
-	"btn_chart_temp":               "%s Temperature",
-	"btn_charts":                   "%s Charts 24h",
-	"btn_history":                  "%s History",
-	"btn_list":                     "%s Your Subscriptions",
-	"btn_main_menu":                "%s Main Menu",
-	"btn_pm10_green":               "%s PM10 Green",
-	"btn_pm10_yellow":              "%s PM10 Yellow",
-	"btn_pm25_green":               "%s PM2.5 Green",
-	"btn_pm25_yellow":              "%s PM2.5 Yellow",
-	"btn_pm10_diff":                "%s Dynamics PM10",
-	"btn_pm25_diff":                "%s Dynamics PM2.5",
-	"btn_settings":                 "%s Settings",
-	"btn_back":                     "%s Back",
-	"btn_silent_profiles":          "%s PM Dynamics",
-	"btn_sound_profiles":           "%s PM Levels",
-	"btn_status":                   "%s Status",
-	"btn_subscribe":                "%s Subscribe",
-	"btn_mon_settings":             "%s Monitoring Settings",
-	"btn_thresholds":               "%s Pollution Zones",
-	"btn_unsubscribe":              "%s Unsubscribe",
-	"btn_set_by_aqi":               "%s Set by AQI",
-	"btn_reset_defaults":           "%s Default Values",
-	"chart_pm_title":               "PM2.5 and PM10",
-	"chart_unit_pm":                "µg/m³",
-	"chart_subject_pm":             "PM2.5 & PM10",
-	"chart_subject_aqi":            "AQI",
-	"chart_subject_temp":           "temperature and dew point",
-	"chart_subject_hum":            "humidity",
-	"chart_subject_press":          "pressure",
-	"chart_scale_pm10":             "PM10 Scale",
-	"chart_scale_pm25":             "PM2.5 Scale",
-	"cmd_help_desc":                "Main menu and help",
-	"cmd_lang_desc":                "Language and units",
-	"cmd_menu_desc":                "Main menu",
-	"cmd_list_desc":                "My subscriptions / Management",
-	"cmd_start_desc":               "Start bot / Help",
-	"cmd_status_desc":              "Current device status",
-	"lang_en":                      "English",
-	"lang_ru":                      "Russian",
-	"label_pm10":                   "PM10",
-	"label_pm25":                   "PM2.5",
-	"label_zone_1":                 "Green",
-	"label_zone_2":                 "Yellow",
-	"label_zone_suffix":            "zone",
-	"label_dynamics":               "Dynamics",
-	"msg_alert":                    "WARNING",
-	"msg_already_sub":              "%s You are already subscribed to device <code>%s</code>",
-	"btn_yes":                      "%s Yes",
-	"btn_no":                       "%s No",
-	"btn_cancel":                   "%s Cancel",
-	"msg_reset_confirm":            "%s <b>Are you sure you want to reset all settings to defaults?</b>\n\n",
-	"msg_reset_confirm_details":    "The following values will be set:\n\n%s <b>%s %s:</b> %.1f / %.1f (%s %.1f%%)\n%s <b>%s %s:</b> %.1f / %.1f (%s %.1f%%)\n\n%s <b>AQI Standard:</b> %s %s\n\n%s <b>Units:</b> %s, %s\n\n%s <b>Notifications:</b>\n%s",
-	"msg_reset_done":               "%s <b>Settings reset!</b>\n\nCurrent parameters:\n%s %s: %s <b>%.1f</b>, %s <b>%.1f</b>, %s <b>%.1f%%</b>\n%s %s: %s <b>%.1f</b>, %s <b>%.1f</b>, %s <b>%.1f%%</b>",
-	"msg_charts_menu":              "%s <b>Charts for the last 24 hours</b>\n\nSelect a chart to display.",
-	"msg_decrease":                 "LEVEL DECREASE",
-	"msg_device":                   "Device",
-	"msg_disabled":                 "disabled",
-	"msg_enabled":                  "enabled",
-	"msg_error_charts":             "%s Error generating charts: %v",
-	"msg_error_number":             "%s Error: please enter a numeric value.",
-	"msg_error_positive":           "%s Error: please enter a positive integer.",
-	"msg_error_yellow":             "%s Error: yellow zone value must be greater than or equal to green.",
-	"msg_error_send_ch":            "%s Failed to send charts.",
-	"msg_help":                     "%[1]s <b>AQI Notifier Bot</b> v%[3]s\n\nThis bot monitors air quality data from your sensors and sends notifications about zone changes or sudden dynamics.\n\n<b>Main commands:</b>\n/list — list your subscriptions and manage them\n/status — current indicators for all your devices\n/history — history of recent measurements\n/help — main menu and help\n/lang — language and units\n\n<b>Management:</b>\n%[4]s Click <b>Settings -> Subscriptions</b> to add or remove a device.\n%[4]s In the settings section (<b>Settings</b>) you can change zone thresholds (Green/Yellow/Red) and notification types.\n%[4]s Notifications about transitions between zones come with sound. Others (dynamic changes within zones) — silently.",
-	"msg_history_empty":            "%s History for device <code>%s</code> is empty.",
-	"msg_history_title":            "%s <b>History:</b> <code>%s</code>",
-	"msg_history_footer":           "%s <b>History of recent %d measurements</b>\n%s",
-	"msg_chart_24h_title":          "%s <b>%s chart for the last 24 hours</b>\n%s",
-	"msg_hum":                      "Humidity",
-	"msg_invalid_device_id":        "%s Device ID must contain only digits.",
-	"msg_alerts_loud_label":        "%s <b>Loud Notifications:</b>\n",
-	"msg_alerts_silent_label":      "%s <b>Silent Notifications:</b>\n",
-	"msg_manage_subs":              "Subscription management:",
-	"msg_mon_settings":             "%s <b>Monitoring Settings:</b>\n",
-	"msg_no_subs":                  "%s You have no active subscriptions.\nClick %s <b>Subscribe</b> to add a device.",
-	"msg_norma":                    "NORMAL RESTORED",
-	"msg_pm_info_fmt":              "%s %s: %s <b>%.1f</b>, %s <b>%.1f</b>, %s <b>%.1f%%</b>\n",
-	"msg_press":                    "Pressure",
-	"msg_prompt_device":            "%s Enter <b>device ID</b> to subscribe:",
-	"msg_select_device":            "%s <b>Select a device:</b>",
-	"msg_select_history":           "%s <b>Select a device to view history:</b>",
-	"msg_select_lang":              "%s Select language / Выберите язык:",
-	"msg_status_header":            "%s <b>Latest received values</b>\n%s %s %s %s\n\n",
-	"msg_status_aqi":               "%s <b>AQI Level: %.1f</b> — %s %s",
-	"msg_loud_alerts":              "%s <b>PM Level Notification Settings:</b>\n",
-	"msg_silent_alerts":            "%s <b>PM Dynamics Notification Settings:</b>\n",
-	"msg_aqi_settings":             "%s Choose AQI calculation standard and configure notifications.",
-	"btn_with_sound":               "With sound",
-	"btn_without_sound":            "Without sound",
-	"btn_inactive":                 "Inactive",
-	"btn_set_pm_by_aqi":            "%s Set PM zones by AQI",
-	"aqi_name_z1_us":               "Good",
-	"aqi_name_z2_us":               "Moderate",
-	"aqi_name_z3_us":               "Unhealthy (sensitive groups)",
-	"aqi_name_z4_us":               "Unhealthy",
-	"aqi_name_z5_us":               "Very Unhealthy",
-	"aqi_name_z6_us":               "Hazardous",
-	"aqi_name_z7_us":               "Extremely Hazardous",
-	"aqi_name_z1_eu":               "Good",
-	"aqi_name_z2_eu":               "Fair",
-	"aqi_name_z3_eu":               "Moderate",
-	"aqi_name_z4_eu":               "Poor",
-	"aqi_name_z5_eu":               "Very Poor",
-	"aqi_name_z6_eu":               "Extreme",
-	"standard_eu":                  "EU",
-	"standard_us":                  "US",
+	"btnAqiSettings":             "%s AQI Settings",
+	"btnAqiStandard":             "Standard: %s %s",
+	"btnChartAqi":                "%s AQI Chart",
+	"btnChartHum":                "%s Humidity",
+	"btnChartPm":                 "%s PM2.5 + PM10",
+	"btnChartPress":              "%s Pressure",
+	"btnChartTemp":               "%s Temperature",
+	"btnCharts":                   "%s Charts 24h",
+	"btnHistory":                  "%s History",
+	"btnList":                     "%s Your Subscriptions",
+	"btnMainMenu":                "%s Main Menu",
+	"btnPm10Green":               "%s PM10 Green",
+	"btnPm10Yellow":              "%s PM10 Yellow",
+	"btnPm25Green":               "%s PM2.5 Green",
+	"btnPm25Yellow":              "%s PM2.5 Yellow",
+	"btnPm10Diff":                "%s Dynamics PM10",
+	"btnPm25Diff":                "%s Dynamics PM2.5",
+	"btnSettings":                 "%s Settings",
+	"btnBack":                     "%s Back",
+	"btnSilentProfiles":          "%s PM Dynamics",
+	"btnSoundProfiles":           "%s PM Levels",
+	"btnStatus":                   "%s Status",
+	"btnSubscribe":                "%s Subscribe",
+	"btnMonSettings":             "%s Monitoring Settings",
+	"btnThresholds":               "%s Pollution Zones",
+	"btnUnsubscribe":              "%s Unsubscribe",
+	"btnSetByAqi":               "%s Set by AQI",
+	"btnResetDefaults":           "%s Default Values",
+	"txtChartPmTitle":               "PM2.5 and PM10",
+	"txtChartUnitPm":                "µg/m³",
+	"txtChartSubjectPm":             "PM2.5 & PM10",
+	"txtChartSubjectAqi":            "AQI",
+	"txtChartSubjectTemp":           "temperature and dew point",
+	"txtChartSubjectHum":            "humidity",
+	"txtChartSubjectPress":          "pressure",
+	"txtChartScalePm10":             "PM10 Scale",
+	"txtChartScalePm25":             "PM2.5 Scale",
+	"txtCmdHelpDesc":                "Main menu and help",
+	"txtCmdLangDesc":                "Language and units",
+	"txtCmdMenuDesc":                "Main menu",
+	"txtCmdListDesc":                "My subscriptions / Management",
+	"txtCmdStartDesc":               "Start bot / Help",
+	"txtCmdStatusDesc":              "Current device status",
+	"langEn":                      "English",
+	"langRu":                      "Russian",
+	"txtLabelPm10":                   "PM10",
+	"txtLabelPm25":                   "PM2.5",
+	"txtLabelZone1":                 "Green",
+	"txtLabelZone2":                 "Yellow",
+	"txtLabelZoneSuffix":            "zone",
+	"txtLabelDynamics":               "Dynamics",
+	"msgAlert":                    "WARNING",
+	"msgAlreadySub":              "%s You are already subscribed to device <code>%s</code>",
+	"btnYes":                      "%s Yes",
+	"btnNo":                       "%s No",
+	"btnCancel":                   "%s Cancel",
+	"msgResetConfirm":            "%s <b>Are you sure you want to reset all settings to defaults?</b>\n\n",
+	"msgResetConfirmDetails":    "The following values will be set:\n\n%s <b>%s %s:</b> %.1f / %.1f (%s %.1f%%)\n%s <b>%s %s:</b> %.1f / %.1f (%s %.1f%%)\n\n%s <b>AQI Standard:</b> %s %s\n\n%s <b>Units:</b> %s, %s\n\n%s <b>Notifications:</b>\n%s",
+	"msgResetDone":               "%s <b>Settings reset!</b>\n\nCurrent parameters:\n%s %s: %s <b>%.1f</b>, %s <b>%.1f</b>, %s <b>%.1f%%</b>\n%s %s: %s <b>%.1f</b>, %s <b>%.1f</b>, %s <b>%.1f%%</b>",
+	"msgChartsMenu":              "%s <b>Charts for the last 24 hours</b>\n\nSelect a chart to display.",
+	"msgDecrease":                 "LEVEL DECREASE",
+	"msgDevice":                   "Device",
+	"msgDisabled":                 "disabled",
+	"msgEnabled":                  "enabled",
+	"msgErrorCharts":             "%s Error generating charts: %v",
+	"msgErrorNumber":             "%s Error: please enter a numeric value.",
+	"msgErrorPositive":           "%s Error: please enter a positive integer.",
+	"msgErrorYellow":             "%s Error: yellow zone value must be greater than or equal to green.",
+	"msgErrorSendCh":            "%s Failed to send charts.",
+	"msgHelp":                     "%[1]s <b>AQI Notifier Bot</b> v%[3]s\n\nThis bot monitors air quality data from your sensors and sends notifications about zone changes or sudden dynamics.\n\n<b>Main commands:</b>\n/list — list your subscriptions and manage them\n/status — current indicators for all your devices\n/history — history of recent measurements\n/help — main menu and help\n/lang — language and units\n\n<b>Management:</b>\n%[4]s Click <b>Settings -> Subscriptions</b> to add or remove a device.\n%[4]s In the settings section (<b>Settings</b>) you can change zone thresholds (Green/Yellow/Red) and notification types.\n%[4]s Notifications about transitions between zones come with sound. Others (dynamic changes within zones) — silently.",
+	"msgHistoryEmpty":            "%s History for device <code>%s</code> is empty.",
+	"msgHistoryTitle":            "%s <b>History:</b> <code>%s</code>",
+	"msgHistoryFooter":           "%s <b>History of recent %d measurements</b>\n%s",
+	"msgChart24hTitle":          "%s <b>%s chart for the last 24 hours</b>\n%s",
+	"msgHum":                      "Humidity",
+	"msgInvalidDeviceId":        "%s Device ID must contain only digits.",
+	"msgAlertsLoudLabel":        "%s <b>Loud Notifications:</b>\n",
+	"msgAlertsSilentLabel":      "%s <b>Silent Notifications:</b>\n",
+	"msgManageSubs":              "Subscription management:",
+	"msgMonSettings":             "%s <b>Monitoring Settings:</b>\n",
+	"msgNoSubs":                  "%s You have no active subscriptions.\nClick %s <b>Subscribe</b> to add a device.",
+	"msgNorma":                    "NORMAL RESTORED",
+	"msgPmInfoFmt":              "%s %s: %s <b>%.1f</b>, %s <b>%.1f</b>, %s <b>%.1f%%</b>\n",
+	"msgPress":                    "Pressure",
+	"msgPromptDevice":            "%s Enter <b>device ID</b> to subscribe:",
+	"msgSelectDevice":            "%s <b>Select a device:</b>",
+	"msgSelectHistory":           "%s <b>Select a device to view history:</b>",
+	"msgSelectLang":              "%s Select language / Выберите язык:",
+	"msgStatusHeader":            "%s <b>Latest received values</b>\n%s %s %s %s\n\n",
+	"msgStatusAqi":               "%s <b>AQI Level: %.1f</b> — %s %s",
+	"msgLoudAlerts":              "%s <b>PM Level Notification Settings:</b>\n",
+	"msgSilentAlerts":            "%s <b>PM Dynamics Notification Settings:</b>\n",
+	"msgAqiSettings":             "%s Choose AQI calculation standard and configure notifications.",
+	"btnWithSound":               "With sound",
+	"btnWithoutSound":            "Without sound",
+	"btnInactive":                 "Inactive",
+	"btnSetPmByAqi":            "%s Set PM zones by AQI",
+	"txtAqiNameZ1Us":               "Good",
+	"txtAqiNameZ2Us":               "Moderate",
+	"txtAqiNameZ3Us":               "Unhealthy (sensitive groups)",
+	"txtAqiNameZ4Us":               "Unhealthy",
+	"txtAqiNameZ5Us":               "Very Unhealthy",
+	"txtAqiNameZ6Us":               "Hazardous",
+	"txtAqiNameZ7Us":               "Extremely Hazardous",
+	"txtAqiNameZ1Eu":               "Good",
+	"txtAqiNameZ2Eu":               "Fair",
+	"txtAqiNameZ3Eu":               "Moderate",
+	"txtAqiNameZ4Eu":               "Poor",
+	"txtAqiNameZ5Eu":               "Very Poor",
+	"txtAqiNameZ6Eu":               "Extreme",
+	"txtStandardEu":                  "EU",
+	"txtStandardUs":                  "US",
 
-	"msg_subscribed":               "%s You subscribed to device <code>%s</code>",
-	"msg_temp":                     "Temperature",
-	"msg_dew_point":                "Dew point",
+	"msgSubscribed":               "%s You subscribed to device <code>%s</code>",
+	"msgTemp":                     "Temperature",
+	"msgDewPoint":                "Dew point",
 
-	"msg_boundary":                 "Boundary",
-	"msg_threshold_label":          "Threshold",
-	"msg_threshold_diff_label":     "Dynamics (%)",
-	"msg_threshold_title_fmt":      "%[4]s %[1]s %[2]s: %[3]s %[5]s",
-	"msg_threshold_diff_title_fmt": "%[3]s %[2]s %[1]s",
-	"msg_threshold_diff_title":     "Tracked dynamic change of",
-	"msg_threshold_prompt":         "<b>%s</b>\n\nCurrent value: <b>%.1f</b>\nEnter new numeric value:",
-	"msg_threshold_upd":            "%s %s updated from <b>%.1f</b> to <b>%.1f</b>",
-	"msg_thresholds_menu":          "%s <b>Pollution Zones</b>\n\n%s <b>%s</b>\n      %s %s %.1f\n      %s %s %.1f\n\n%s <b>%s</b>\n      %s %s %.1f\n      %s %s %.1f\n\nSelect a parameter to change.",
-	"msg_aqi_cycle_menu":           "%s <b>Set zone boundaries by AQI standard</b>\n\n%s <b>%s</b>\n      %s %s %.1f\n      %s %s %.1f\n\n%s <b>%s</b>\n      %s %s %.1f\n      %s %s %.1f",
-	"msg_toggle_success":           "%s %s is now <b>%s</b>",
-	"msg_unit_mmhg":                "mmHg",
-	"msg_unsubscribed":             "%s You unsubscribed from device <code>%s</code>",
-	"msg_no_changes":               "No changes",
-	"msg_your_subs":                "%s <b>Your subscriptions:</b>\nClick on a device for data or use the buttons below for management.",
+	"msgBoundary":                 "Boundary",
+	"msgThresholdLabel":          "Threshold",
+	"msgThresholdDiffLabel":     "Dynamics (%)",
+	"msgThresholdTitleFmt":      "%[4]s %[1]s %[2]s: %[3]s %[5]s",
+	"msgThresholdDiffTitleFmt": "%[3]s %[2]s %[1]s",
+	"msgThresholdDiffTitle":     "Tracked dynamic change of",
+	"msgThresholdPrompt":         "<b>%s</b>\n\nCurrent value: <b>%.1f</b>\nEnter new numeric value:",
+	"msgThresholdUpd":            "%s %s updated from <b>%.1f</b> to <b>%.1f</b>",
+	"msgThresholdsMenu":          "%s <b>Pollution Zones</b>\n\n%s <b>%s</b>\n      %s %s %.1f\n      %s %s %.1f\n\n%s <b>%s</b>\n      %s %s %.1f\n      %s %s %.1f\n\nSelect a parameter to change.",
+	"msgAqiCycleMenu":           "%s <b>Set zone boundaries by AQI standard</b>\n\n%s <b>%s</b>\n      %s %s %.1f\n      %s %s %.1f\n\n%s <b>%s</b>\n      %s %s %.1f\n      %s %s %.1f",
+	"msgToggleSuccess":           "%s %s is now <b>%s</b>",
+	"msgUnitMmhg":                "mmHg",
+	"msgUnsubscribed":             "%s You unsubscribed from device <code>%s</code>",
+	"msgNoChanges":               "No changes",
+	"msgYourSubs":                "%s <b>Your subscriptions:</b>\nClick on a device for data or use the buttons below for management.",
 	"msg_threshold_desc":           "Changing %s threshold between %s and %s zones",
 	"msg_threshold_diff_desc":      "Changing %s dynamics threshold (%%)",
-	"status_no_data":               "No data for device <code>%s</code>",
-	"unit_c":                       "Celsius (°C)",
-	"unit_f":                       "Fahrenheit (°F)",
-	"unit_hpa":                     "hPa",
-	"unit_mmhg":                    "mmHg",
-	"msg_status_time":              "%s %s %s %s",
-	"msg_status_pm":                "%s <b>%s: %.2f %s</b> %s\n",
-	"msg_status_diff":              "    %s<b>%+.1f%%</b> (%.2f → %.2f)\n\n",
-	"msg_status_temp":              "%s %s: %.1f %s\n",
-	"msg_status_hum":               "%s %s: %.1f%%\n",
-	"msg_status_press":             "%s %s: %.1f %s\n",
-	"msg_status_dew_point":         "%s %s: %.1f %s\n",
-	"msg_status_device":            "%s %s",
-	"msg_rename_prompt":            "%s Enter new name for device <code>%s</code>\n\nTo cancel, click the button below.",
-	"msg_device_renamed":           "✅ Device renamed: %s (<code>%s</code>)",
-	"msg_rename_cancel":            "%s Renaming cancelled",
-	"btn_rename":                   "%s Rename",
-	"msg_settings_title":           "%s <b>Monitoring & Notification Settings</b>\n\nSelect a section to change parameters.",
-	"msg_sound_settings":           "Configure notification types for each event.",
-	"alert_v10_short":              "PM10",
-	"alert_v25_short":              "PM2.5",
-	"alert_vs_short":               "PM10+2.5",
-	"alert_short_action_up":        "Growth",
-	"alert_short_action_down":      "Decrease",
-	"msg_info":                     "INFORMATION",
-	"alert_pm_rise_in":             "PM%s level rise in %s",
-	"alert_pm_fall_in":             "PM%s level fall in %s",
-	"alert_pm_rise_to":             "PM%s level rise to %s",
-	"alert_pm_fall_to":             "PM%s level fall to %s",
-	"alert_pm_return":              "PM%s level returned to %s",
-	"alert_aqi_rise":               "AQI level rise to \"%s\" zone",
-	"alert_aqi_fall":               "AQI level fall to \"%s\" zone",
-	"alert_aqi_return":             "AQI level returned to normal",
-	"alert_short_zone_acc_1":       "Green",
-	"alert_short_zone_acc_2":       "Yellow",
-	"alert_short_zone_acc_3":       "Red",
-	"alert_short_zone_pre_1":       "Green",
-	"alert_short_zone_pre_2":       "Yellow",
-	"alert_short_zone_pre_3":       "Red",
+	"msgStatusNoData":               "No data for device <code>%s</code>",
+	"unitC":                       "Celsius (°C)",
+	"unitF":                       "Fahrenheit (°F)",
+	"unitHpa":                     "hPa",
+	"unitMmhg":                    "mmHg",
+	"msgStatusTime":              "%s %s %s %s",
+	"msgStatusPm":                "%s <b>%s: %.2f %s</b> %s\n",
+	"msgStatusDiff":              "    %s<b>%+.1f%%</b> (%.2f → %.2f)\n\n",
+	"msgStatusTemp":              "%s %s: %.1f %s\n",
+	"msgStatusHum":               "%s %s: %.1f%%\n",
+	"msgStatusPress":             "%s %s: %.1f %s\n",
+	"msgStatusDewPoint":         "%s %s: %.1f %s\n",
+	"msgStatusDevice":            "%s %s",
+	"msgRenamePrompt":            "%s Enter new name for device <code>%s</code>\n\nTo cancel, click the button below.",
+	"msgDeviceRenamed":           "✅ Device renamed: %s (<code>%s</code>)",
+	"msgRenameCancel":            "%s Renaming cancelled",
+	"btnRename":                   "%s Rename",
+	"msgSettingsTitle":           "%s <b>Monitoring & Notification Settings</b>\n\nSelect a section to change parameters.",
+	"msgSoundSettings":           "Configure notification types for each event.",
+	"alertV10Short":              "PM10",
+	"alertV25Short":              "PM2.5",
+	"alertVsShort":               "PM10+2.5",
+	"alertShortActionUp":        "Growth",
+	"alertShortActionDown":      "Decrease",
+	"msgInfo":                     "INFORMATION",
+	"alertPmRiseIn":             "PM%s level rise in %s",
+	"alertPmFallIn":             "PM%s level fall in %s",
+	"alertPmRiseTo":             "PM%s level rise to %s",
+	"alertPmFallTo":             "PM%s level fall to %s",
+	"alertPmReturn":              "PM%s level returned to %s",
+	"alertAqiRise":               "AQI level rise to \"%s\" zone",
+	"alertAqiFall":               "AQI level fall to \"%s\" zone",
+	"alertAqiReturn":             "AQI level returned to normal",
+	"alertShortZoneAcc1":       "Green",
+	"alertShortZoneAcc2":       "Yellow",
+	"alertShortZoneAcc3":       "Red",
+	"alertShortZonePre1":       "Green",
+	"alertShortZonePre2":       "Yellow",
+	"alertShortZonePre3":       "Red",
 }

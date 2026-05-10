@@ -126,7 +126,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	mcfg := b.GetUserSettings(chatID)
 	for _, m := range hist {
 		local := m.Timestamp.Local()
-		label := local.Format(b.T(chatID, "format_chart_label"))
+		label := local.Format(b.T(chatID, "formatChartLabel"))
 		labels = append(labels, label)
 		pm10Values = append(pm10Values, m.PM10)
 		pm25Values = append(pm25Values, m.PM25)
@@ -175,8 +175,8 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	}
 
 	var buffers [][]byte
-	pmTitle := b.T(chatID, "chart_pm_title")
-	pmBuf, err := b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "chart_unit_pm"), labels,
+	pmTitle := b.T(chatID, "txtChartPmTitle")
+	pmBuf, err := b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "txtChartUnitPm"), labels,
 		[]string{"PM2.5", "PM10"},
 		[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 	if err != nil {
@@ -185,8 +185,8 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	buffers = append(buffers, pmBuf)
 
 	if len(tempValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msg_temp"), b.unitTempLabel(chatID), labels,
-			[]string{b.T(chatID, "msg_temp"), b.T(chatID, "msg_dew_point")},
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgTemp"), b.unitTempLabel(chatID), labels,
+			[]string{b.T(chatID, "msgTemp"), b.T(chatID, "msgDewPoint")},
 			[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		if err == nil {
 			buffers = append(buffers, buf)
@@ -194,14 +194,14 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	}
 
 	if len(humValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msg_hum"), "%", labels, []string{b.T(chatID, "msg_hum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
 	}
 
 	if len(pressValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msg_press"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msg_press")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
@@ -259,7 +259,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 
 	for _, m := range filteredHist {
 		local := m.Timestamp.Local()
-		label := local.Format(b.T(chatID, "format_chart_label"))
+		label := local.Format(b.T(chatID, "formatChartLabel"))
 		labels = append(labels, label)
 		switch chartType {
 		case "pm":
@@ -309,30 +309,30 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 		deviceID = hist[0].DeviceID
 	}
 
-	pmTitle := b.T(chatID, "chart_pm_title")
+	pmTitle := b.T(chatID, "txtChartPmTitle")
 
 	switch chartType {
 	case "pm":
-		return b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "chart_unit_pm"),
+		return b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "txtChartUnitPm"),
 			labels, []string{"PM2.5", "PM10"},
 			[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 	case "temp":
 		if len(tempValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "msg_temp"), b.unitTempLabel(chatID),
-				labels, []string{b.T(chatID, "msg_temp"), b.T(chatID, "msg_dew_point")},
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msgTemp"), b.unitTempLabel(chatID),
+				labels, []string{b.T(chatID, "msgTemp"), b.T(chatID, "msgDewPoint")},
 				[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	case "hum":
 		if len(humValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "msg_hum"), "%", labels, []string{b.T(chatID, "msg_hum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	case "press":
 		if len(pressValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "msg_press"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msg_press")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	case "aqi":
 		if len(aqiValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "btn_chart_aqi"), mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "btnChartAqi"), mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg)
 		}
 	}
 
@@ -444,9 +444,9 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		}
 	} else {
 		colors := []charts.Color{colorSeriesBlue}
-		if title == b.T(chatID, "msg_temp") {
+		if title == b.T(chatID, "msgTemp") {
 			colors = []charts.Color{colorSeriesRed, colorSeriesBlue}
-		} else if title == b.T(chatID, "msg_press") {
+		} else if title == b.T(chatID, "msgPress") {
 			colors = []charts.Color{colorSeriesPurple}
 		}
 		opt.Theme = theme.WithSeriesColors(colors)
@@ -479,7 +479,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		FontColor: colorAxisLabel,
 	}
 	deviceStr := b.formatDeviceIDPlain(chatID, deviceID)
-	timeStr := b.T(chatID, "msg_chart_timestamp", map[string]interface{}{"date": time.Now(), "time": time.Now()})
+	timeStr := b.T(chatID, "msgChartTimestamp", map[string]interface{}{"date": time.Now(), "time": time.Now()})
 
 	rightEdge := yAxisWidth + int(gridW)
 	xDevice := rightEdge - int(calcTextWidth(deviceStr, metaFontSize))
@@ -501,8 +501,8 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 
 		barWidth := float64(chartWidth) * chartBarWidthCoef
 		textHalfLen := int(chartFontSize * chartLabelFontCoef * chartTextHalfLenCoef)
-		pureCp.Text(b.T(chatID, "chart_scale_pm25"), int(barWidth+chartFontSize*chartLabelXOffsetL), int(gridH/2)-textHalfLen, math.Pi/2, styleLeft)
-		pureCp.Text(b.T(chatID, "chart_scale_pm10"), int(gridW-barWidth-chartFontSize*chartLabelXOffsetR), int(gridH/2)+textHalfLen, -math.Pi/2, styleRight)
+		pureCp.Text(b.T(chatID, "txtChartScalePm25"), int(barWidth+chartFontSize*chartLabelXOffsetL), int(gridH/2)-textHalfLen, math.Pi/2, styleLeft)
+		pureCp.Text(b.T(chatID, "txtChartScalePm10"), int(gridW-barWidth-chartFontSize*chartLabelXOffsetR), int(gridH/2)+textHalfLen, -math.Pi/2, styleRight)
 
 		yAxisBottom := gridH
 		yAxisTop := 0.0

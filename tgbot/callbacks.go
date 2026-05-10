@@ -41,7 +41,7 @@ func (b *Bot) getAllAlerts(chatID int64) []struct {
 			loud bool
 		}{
 			id:   id,
-			name: fmt.Sprintf("%s: %s", b.T(chatID, "chart_subject_aqi"), b.T(chatID, "aqi_name_z"+fmt.Sprint(i)+"_"+std)),
+			name: fmt.Sprintf("%s: %s", b.T(chatID, "txtChartSubjectAqi"), b.T(chatID, "aqi_name_z"+fmt.Sprint(i)+"_"+std)),
 			loud: defWarnings[id],
 		})
 	}
@@ -67,11 +67,11 @@ func (b *Bot) getAllAlerts(chatID int64) []struct {
 				var pmLabel string
 				switch pm {
 				case "10":
-					pmLabel = b.T(chatID, "alert_v10_short")
+					pmLabel = b.T(chatID, "alertV10Short")
 				case "25":
-					pmLabel = b.T(chatID, "alert_v25_short")
+					pmLabel = b.T(chatID, "alertV25Short")
 				default:
-					pmLabel = b.T(chatID, "alert_vs_short")
+					pmLabel = b.T(chatID, "alertVsShort")
 				}
 
 				actIcon := IconTrendUp
@@ -95,7 +95,7 @@ func (b *Bot) getAllAlerts(chatID int64) []struct {
 					loud bool
 				}{
 					id:   id,
-					name: fmt.Sprintf("%s %s %s %s", pmLabel, actIcon, b.T(chatID, "label_in"), zoneIcon),
+					name: fmt.Sprintf("%s %s %s %s", pmLabel, actIcon, b.T(chatID, "txtLabelIn"), zoneIcon),
 					loud: defWarnings[id],
 				})
 			}
@@ -111,11 +111,11 @@ func (b *Bot) getAllAlerts(chatID int64) []struct {
 				var pmLabel string
 				switch pm {
 				case "10":
-					pmLabel = b.T(chatID, "alert_v10_short")
+					pmLabel = b.T(chatID, "alertV10Short")
 				case "25":
-					pmLabel = b.T(chatID, "alert_v25_short")
+					pmLabel = b.T(chatID, "alertV25Short")
 				default:
-					pmLabel = b.T(chatID, "alert_vs_short")
+					pmLabel = b.T(chatID, "alertVsShort")
 				}
 
 				actIcon := IconTrendUp
@@ -139,7 +139,7 @@ func (b *Bot) getAllAlerts(chatID int64) []struct {
 					loud bool
 				}{
 					id:   id,
-					name: fmt.Sprintf("%s %s %s %s (%s)", pmLabel, actIcon, b.T(chatID, "label_in"), zoneIcon, b.T(chatID, "label_dynamics")),
+					name: fmt.Sprintf("%s %s %s %s (%s)", pmLabel, actIcon, b.T(chatID, "txtLabelIn"), zoneIcon, b.T(chatID, "txtLabelDynamics")),
 					loud: defWarnings[id],
 				})
 			}
@@ -252,7 +252,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
 	case strings.HasPrefix(data, "charts_dev:"):
 		deviceID := strings.TrimPrefix(data, "charts_dev:")
-		b.sendWithKeyboard(chatID, b.T(chatID, "msg_charts_menu"), b.chartsMenuKeyboard(chatID, deviceID))
+		b.sendWithKeyboard(chatID, b.T(chatID, "msgChartsMenu"), b.chartsMenuKeyboard(chatID, deviceID))
 
 	case strings.HasPrefix(data, "pm_set:"):
 		parts := strings.Split(data, ":")
@@ -261,8 +261,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		}
 	case strings.HasPrefix(data, "unsub:"):
 		deviceID := strings.TrimPrefix(data, "unsub:")
-		text := b.T(chatID, "msg_unsub_confirm", map[string]interface {
-		}{"device_id": deviceID})
+		text := b.TDevice(chatID, "msgUnsubConfirm", deviceID)
 		kb := tu.InlineKeyboard(
 			tu.InlineKeyboardRow(
 				tu.InlineKeyboardButton(b.T(chatID, btnYes, IconSuccess)).WithCallbackData(fmt.Sprintf("unsub_yes:%s", deviceID)),
@@ -278,8 +277,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		deviceID := strings.TrimPrefix(data, "unsub_yes:")
 		b.store.Unsubscribe(chatID, deviceID)
 		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
-		b.sendWithKeyboard(chatID, b.T(chatID, "msg_unsubscribed", map[string]interface {
-		}{"device_id": deviceID}), nil)
+		b.sendWithKeyboard(chatID, b.TDevice(chatID, "msgUnsubscribed", deviceID), nil)
 		b.cmdList(chatID)
 
 	case strings.HasPrefix(data, "unsub_no:"):
@@ -319,7 +317,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 			ChatID:    tu.ID(chatID),
 			MessageID: cq.Message.GetMessageID(),
 		})
-		b.sendWithKeyboard(chatID, b.T(chatID, "msg_help"), b.mainKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.T(chatID, "msgHelp"), b.mainKeyboard(chatID))
 
 	case strings.HasPrefix(data, "toggle:"):
 		parts := strings.Split(data, ":")

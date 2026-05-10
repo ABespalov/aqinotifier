@@ -34,36 +34,36 @@ const (
 )
 
 const (
-	btnList           = "btn_list"
-	btnStatus         = "btn_status"
-	btnSettings       = "btn_settings"
-	btnHistory        = "btn_history"
-	btnSubscribe      = "btn_subscribe"
-	btnUnsubscribe    = "btn_unsubscribe"
-	btnMainMenu       = "btn_main_menu"
-	btnThresholds     = "btn_thresholds"
-	btnPM10Green      = "btn_pm10_green"
-	btnPM25Green      = "btn_pm25_green"
-	btnPM10Yellow     = "btn_pm10_yellow"
-	btnPM25Yellow     = "btn_pm25_yellow"
-	btnPM10Diff       = "btn_pm10_diff"
-	btnPM25Diff       = "btn_pm25_diff"
-	btnCharts         = "btn_charts"
-	btnSetByAQI       = "btn_set_pm_by_aqi"
-	btnChartPM        = "btn_chart_pm"
-	btnChartTemp      = "btn_chart_temp"
-	btnChartHum       = "btn_chart_hum"
-	btnChartPress     = "btn_chart_press"
-	btnResetDefaults  = "btn_reset_defaults"
+	btnList           = "btnList"
+	btnStatus         = "btnMenuMainStatus"
+	btnSettings       = "btnMenuMainSettings"
+	btnHistory        = "btnMenuMainHistory"
+	btnSubscribe      = "btnSubscribe"
+	btnUnsubscribe    = "btnUnsubscribe"
+	btnMainMenu       = "btnMainMenu"
+	btnThresholds     = "btnThresholds"
+	btnPM10Green      = "btnPm10Green"
+	btnPM25Green      = "btnPm25Green"
+	btnPM10Yellow     = "btnPm10Yellow"
+	btnPM25Yellow     = "btnPm25Yellow"
+	btnPM10Diff       = "btnPm10Diff"
+	btnPM25Diff       = "btnPm25Diff"
+	btnCharts         = "btnMenuMainCharts"
+	btnSetByAQI       = "btnSetPmByAqi"
+	btnChartPM        = "btnChartPm"
+	btnChartTemp      = "btnChartTemp"
+	btnChartHum       = "btnChartHum"
+	btnChartPress     = "btnChartPress"
+	btnResetDefaults  = "btnResetDefaults"
 	btnInfo           = "btn_info"
-	btnMonSettings    = "btn_mon_settings"
-	btnAQISettings    = "btn_aqi_settings"
-	btnChartAQI       = "btn_chart_aqi"
-	btnSoundProfiles  = "btn_sound_profiles"
-	btnSilentProfiles = "btn_silent_profiles"
-	btnYes            = "btn_yes"
-	btnNo             = "btn_no"
-	btnBack           = "btn_back"
+	btnMonSettings    = "btnMonSettings"
+	btnAQISettings    = "btnAqiSettings"
+	btnChartAQI       = "btnChartAqi"
+	btnSoundProfiles  = "btnSoundProfiles"
+	btnSilentProfiles = "btnSilentProfiles"
+	btnYes            = "btnYes"
+	btnNo             = "btnNo"
+	btnBack           = "btnBack"
 )
 
 const (
@@ -164,11 +164,11 @@ func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor
 
 func (b *Bot) buildCommands(lang string) []telego.BotCommand {
 	return []telego.BotCommand{
-		{Command: "start", Description: b.TLang(lang, "cmd_start_desc")},
-		{Command: "list", Description: b.TLang(lang, "cmd_list_desc")},
-		{Command: "status", Description: b.TLang(lang, "cmd_status_desc")},
-		{Command: "help", Description: b.TLang(lang, "cmd_help_desc")},
-		{Command: "lang", Description: b.TLang(lang, "cmd_lang_desc")},
+		{Command: "start", Description: b.TLang(lang, "txtCmdStartDesc")},
+		{Command: "list", Description: b.TLang(lang, "txtCmdListDesc")},
+		{Command: "status", Description: b.TLang(lang, "txtCmdStatusDesc")},
+		{Command: "help", Description: b.TLang(lang, "txtCmdHelpDesc")},
+		{Command: "lang", Description: b.TLang(lang, "txtCmdLangDesc")},
 	}
 }
 
@@ -221,9 +221,6 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		return
 	}
 
-	mcfg := b.GetUserSettings(chatID)
-	var sb strings.Builder
-
 	allEvents := append([]monitor.AlertEvent{}, alerts...)
 	allEvents = append(allEvents, clears...)
 
@@ -238,14 +235,11 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 	}
 
 	icon, title := b.getEventHeader(chatID, winnerID)
-	sb.WriteString(fmt.Sprintf("%s <b>%s</b>\n", icon, title))
 
-	t := m.Timestamp.Local()
-	sb.WriteString(b.T(chatID, "msg_status_time", map[string]interface{}{"date": t, "time": t}) + "\n")
-
+	var alertsSB strings.Builder
 	winnerDesc := b.getEventDescription(chatID, winnerID)
 	if winnerDesc != "" {
-		sb.WriteString(winnerDesc + "\n")
+		alertsSB.WriteString(winnerDesc + "\n")
 	}
 
 	for _, e := range allEvents {
@@ -254,23 +248,21 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		}
 		evtText := b.getEventDescription(chatID, e.ID)
 		if evtText != "" {
-			sb.WriteString(evtText + "\n")
+			alertsSB.WriteString(evtText + "\n")
 		}
 	}
-	sb.WriteString("\n")
+	if alertsSB.Len() > 0 {
+		alertsSB.WriteString("\n")
+	}
 
-	hasAQIEvent := strings.HasPrefix(winnerID, "aqi_")
-	aqiLine := b.formatAQILine(chatID, m, hasAQIEvent)
-	sb.WriteString(aqiLine + "\n\n")
+	argsMap := b.buildMeasurementArgs(chatID, m)
+	argsMap["icon"] = icon
+	argsMap["title"] = title
+	argsMap["alerts"] = alertsSB.String()
 
-	sb.WriteString(b.formatPMAlertLine(chatID, m, "PM2.5", mcfg, winnerID) + "\n\n")
-	sb.WriteString(b.formatPMAlertLine(chatID, m, "PM10", mcfg, winnerID) + "\n\n")
+	text := b.TDevice(chatID, "msgAlertNotify", m.DeviceID, argsMap)
 
-	sb.WriteString(b.formatWeatherLines(chatID, m))
-
-	sb.WriteString("\n\n" + b.formatFooter(chatID, m))
-
-	params := tu.Message(tu.ID(chatID), sb.String()).
+	params := tu.Message(tu.ID(chatID), text).
 		WithParseMode(telego.ModeHTML).
 		WithReplyMarkup(b.mainKeyboard(chatID))
 	params.DisableNotification = silent
@@ -281,7 +273,7 @@ func (b *Bot) sendHelp(chatID int64) {
 	b.clearLastPrompt(chatID)
 	b.setState(chatID, stateIdle)
 
-	b.sendWithKeyboard(chatID, b.T(chatID, "msg_help", map[string]interface{}{
+	b.sendWithKeyboard(chatID, b.T(chatID, "msgHelp", map[string]interface{}{
 		"bot_version": BotVersion,
 	}), b.mainKeyboard(chatID))
 }

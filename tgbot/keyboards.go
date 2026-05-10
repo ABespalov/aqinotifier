@@ -118,7 +118,7 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 	var rows [][]telego.InlineKeyboardButton
 
 	rows = append(rows, []telego.InlineKeyboardButton{
-		tu.InlineKeyboardButton(b.T(chatID, "btn_aqi_standard", map[string]interface{}{
+		tu.InlineKeyboardButton(b.T(chatID, "btnAqiStandard", map[string]interface{}{
 			"std": stdLabel, "aqi_standard_flag": "@flag_" + strings.ToLower(std) + "@",
 		})).WithCallbackData("aqi_std_toggle"),
 	})
@@ -130,10 +130,10 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 			statusIcon = IconChecked
 		}
 		soundIcon := IconSilent
-		soundLabel := "btn_without_sound"
+		soundLabel := "btnWithoutSound"
 		if loudWarnings[id] {
 			soundIcon = IconLoud
-			soundLabel = "btn_with_sound"
+			soundLabel = "btnWithSound"
 		}
 
 		levelChar := strings.TrimPrefix(id, "aqi_")
@@ -148,13 +148,13 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 			zoneIcon = icons[levelChar]
 		}
 
-		btnText := b.T(chatID, "alert_aqi_btn", map[string]interface {
+		btnText := b.T(chatID, "alertAqiBtn", map[string]interface {
 		}{"icon": name, "label": zoneIcon})
 
 		soundLabelStr := b.T(chatID, soundLabel)
 		callbackData := fmt.Sprintf("aqi_sound:%s", id)
 		if !activeNotifications[id] {
-			soundLabelStr = b.T(chatID, "btn_inactive")
+			soundLabelStr = b.T(chatID, "btnInactive")
 			soundIcon = ""
 			callbackData = "none"
 		}
@@ -199,16 +199,16 @@ func (b *Bot) notificationSettingsKeyboard(chatID int64, silent bool) *telego.In
 		}
 
 		soundIcon := IconSilent
-		soundLabel := "btn_without_sound"
+		soundLabel := "btnWithoutSound"
 		if activeWarnings[a.id] {
 			soundIcon = IconLoud
-			soundLabel = "btn_with_sound"
+			soundLabel = "btnWithSound"
 		}
 
 		soundLabelStr := b.T(chatID, soundLabel)
 		callbackData := fmt.Sprintf("toggle_sound:%s:%t", a.id, silent)
 		if !activeNotifications[a.id] {
-			soundLabelStr = b.T(chatID, "btn_inactive")
+			soundLabelStr = b.T(chatID, "btnInactive")
 			soundIcon = ""
 			callbackData = "none"
 		}
@@ -222,7 +222,7 @@ func (b *Bot) notificationSettingsKeyboard(chatID int64, silent bool) *telego.In
 	}
 
 	rows = append(rows, []telego.InlineKeyboardButton{
-		tu.InlineKeyboardButton(b.T(chatID, "btn_mon_settings")).WithCallbackData("menu_settings"),
+		tu.InlineKeyboardButton(b.T(chatID, "btnMonSettings")).WithCallbackData("menu_settings"),
 	})
 
 	return tu.InlineKeyboard(rows...)
@@ -230,7 +230,7 @@ func (b *Bot) notificationSettingsKeyboard(chatID int64, silent bool) *telego.In
 func (b *Bot) deviceInfoKeyboard(chatID int64, deviceID string) *telego.InlineKeyboardMarkup {
 	return tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, "btn_rename")).WithCallbackData(fmt.Sprintf("rename:%s", deviceID)),
+			tu.InlineKeyboardButton(b.T(chatID, "btnRename")).WithCallbackData(fmt.Sprintf("rename:%s", deviceID)),
 			tu.InlineKeyboardButton(b.T(chatID, btnUnsubscribe)).WithCallbackData(fmt.Sprintf("unsub:%s", deviceID)),
 		),
 		tu.InlineKeyboardRow(
