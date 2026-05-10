@@ -239,9 +239,14 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 	argsMap["winnerID"] = winnerID
 	argsMap["isAlert"] = strings.HasPrefix(winnerID, "alert") && !strings.Contains(winnerID, "clean") && !strings.Contains(winnerID, "return")
 	argsMap["isNorma"] = strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
-
 	for _, e := range allEvents {
-		argsMap["evt_"+e.ID] = true
+		// Convert snake-case or kebab-case to camelCase: val10-yu -> evtVal10Yu
+		parts := strings.FieldsFunc(e.ID, func(r rune) bool { return r == '-' || r == '_' })
+		key := "evt"
+		for _, p := range parts {
+			key += strings.Title(p)
+		}
+		argsMap[key] = true
 	}
 
 	text := b.TDevice(chatID, "msgAlertNotify", m.DeviceID, argsMap)

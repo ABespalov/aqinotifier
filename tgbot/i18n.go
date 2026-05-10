@@ -161,7 +161,16 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 					}
 					valStr = t.Format(f)
 				} else if format != "" {
-					valStr = fmt.Sprintf("%"+format, val)
+					switch format {
+					case "toUpper":
+						valStr = strings.ToUpper(fmt.Sprintf("%v", val))
+					case "toLower":
+						valStr = strings.ToLower(fmt.Sprintf("%v", val))
+					case "toTitle":
+						valStr = strings.Title(strings.ToLower(fmt.Sprintf("%v", val)))
+					default:
+						valStr = fmt.Sprintf("%"+format, val)
+					}
 				} else {
 					valStr = fmt.Sprintf("%v", val)
 				}
