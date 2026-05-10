@@ -1,61 +1,47 @@
-# Localization and Placeholder System Documentation
+# Localization System Documentation (v2.0)
 
-The system is based on recursive resolution of placeholders using the format @key%format@.
-
----
-
-## 1. Atomic Placeholders (Data from Code)
-These are primary values provided by the bot's core logic.
-
-| Placeholder | Type | Description |
-| :--- | :--- | :--- |
-| @val25@ / @val10@ | Float | Current PM2.5 / PM10 value. |
-| @curr25@ / @prev25@ | Float | Current and previous values. |
-| @diff25Percent@ | Float | Percentage change. |
-| @aqiVal@ | Float | Calculated AQI index. |
-| @deviceId@ | String | Device ID (e.g., 12345). |
-| @deviceName@ | String | Device name. |
-| @date@ | Time | Date object. Requires format. |
-| @time@ | Time | Time object. Requires format. |
-| @unitPm@ | String | PM unit (µg/m³). |
-| @valT@ / @unitT@ | Float/Str | Temperature and unit. |
-| @valH@ | Float | Humidity (%). |
-| @valP@ / @unitP@ | Float/Str | Pressure and unit. |
-| @valDp@ | Float | Dew point. |
+The system is based on a **recursive block-based template engine**. The UI construction logic has been moved from Go code to JSON files.
 
 ---
 
-## 2. Meta-holders (JSON Structure)
-Meta-holders are the keys defined in localization files.
+## 1. Core Principle: Block Structure
+Instead of assembling messages in code, we use "master templates" that reference other sub-templates (placeholders).
 
-### 2.1. Icons
-Any key from ico.json is available directly as @icoName@ (e.g., @icoStatus@, @icoAqi@).
+**Example (msgStatus):**
+```json
+"msgStatus": "@icoStatus@ <b>Latest values</b>\n@txtDateTime@\n\n@txtAqi@\n\n@txtPm25@\n\n@txtDevice@"
+```
+When calling `T("msgStatus")`, the engine automatically resolves `txtDateTime`, `txtAqi`, etc., from the same file.
 
-### 2.2. Message Templates (Example msgStatus)
-The main status message is now assembled from independent text blocks (txt):
+---
 
-"msgStatus": "@icoStatus@ <b>Latest received values</b>\n@txtDateTime@\n\n@txtAqi@\n\n@txtPm25@\n\n@txtPm10@\n\n@txtOtherUnits@\n\n@txtDevice@"
+## 2. Atomic Data (from Go)
+Primary values provided by the bot. They serve as the foundation for all blocks.
 
-| Key Group (JSON) | Description |
+| Placeholder | Description |
 | :--- | :--- |
-| msgStatus | Main status message template. |
-| txtDateTime | Date and time block. |
-| txtAqi | AQI index block. |
-| txtPm25 / txtPm10 | PM indicators with dynamics and zones. |
-| txtOtherUnits | Meteorological data block. |
-| txtDevice | Device identification block. |
+| @aqiVal@ | AQI Index (number). |
+| @val25@ / @val10@ | Current PM values (µg/m³). |
+| @diff25Percent@ | Change in % (e.g., +15.2). |
+| @trend25Icon@ | Trend icon (icoTrendUp/Down). |
+| @zone25Icon@ | Zone icon (icoGreenSq/YellowSq/RedSq). |
+| @deviceId@ | Device ID. |
+| @deviceName@ | Device name. |
+| @date@ / @time@ | Time objects (require format, e.g., @date%02.01.2006@). |
 
 ---
 
-## 3. Placeholder to Icon Mapping
-
-| Placeholder | Icons used from ico.json |
-| :--- | :--- |
-| @icon@ | AQI level circles: icoGreen, icoYellow, icoOrange, icoRed... |
-| @zone25Icon@ | PM zone squares: icoGreenSq, icoYellowSq, icoRedSq. |
-| @trend25Icon@ | Trends: icoTrendUp, icoTrendDown, icoTrendFlat. |
+## 3. File Organization (Sorting)
+For maintainability, keys in `ru.json` / `en.json` are sorted **topically**:
+1. **Main Templates (msg...)**: Key messages (Status, Notify).
+2. **Sub-templates (txt...)**: Blocks used within messages (Date, AQI, PM).
+3. **Buttons (btn...)**: Keyboard buttons.
+4. **Icons (ico...)**: Icon reference list.
+5. **System**: Units, formats, zone names.
 
 ---
 
-## 4. Date and Time Formatting
-Supports Go format: %02.01.2006 (date), %15:04:05 (time).
+## 4. Formatting Rules
+1. **HTML Tags**: Use native `<b>`, `<i>`, `<code>`.
+2. **Unicode**: Unicode escaping (like `\u003cb\u003e`) is forbidden. Use raw text and tags only.
+3. **Icons**: All icons use the `ico` prefix (e.g., `@icoAqi@`).
