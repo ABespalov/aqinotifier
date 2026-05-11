@@ -117,7 +117,7 @@ func (b *Bot) unitTempLabel(chatID int64) string {
 func (b *Bot) unitPressLabel(chatID int64) string {
 	unit := b.store.GetUnitPress(chatID)
 	if unit == "mmhg" {
-		return b.T(chatID, "msgUnitMmhg")
+		return b.T(chatID, "unitMmhg")
 	}
 	return b.T(chatID, "unitHpa")
 }

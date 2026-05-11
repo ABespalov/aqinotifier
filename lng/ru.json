@@ -190,9 +190,9 @@
   "txtStandardEu": "ЕС",
   "txtStandardUs": "США",
   "msgStatusNoData": "{icoUnknown} Нет данных по устройству {txtDevice}",
-  "unitC": "Цельсий ({txtUnitC})",
-  "unitF": "Фаренгейт ({txtUnitF})",
-  "unitHpa": "Гектопаскаль ({txtUnitHpa})",
-  "unitMmhg": "Миллиметры рт. ст. ({txtUnitMmhg})",
-  "unitPm": "Микрограмм на м³ ({txtUnitPm})"
+  "unitC": "{txtUnitC}",
+  "unitF": "{txtUnitF}",
+  "unitHpa": "{txtUnitHpa}",
+  "unitMmhg": "{txtUnitMmhg}",
+  "unitPm": "{txtUnitPm}"
 }

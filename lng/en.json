@@ -190,9 +190,9 @@
   "txtStandardEu": "EU",
   "txtStandardUs": "US",
   "msgStatusNoData": "{icoUnknown} No data for device {txtDevice}",
-  "unitC": "Celsius ({txtUnitC})",
-  "unitF": "Fahrenheit ({txtUnitF})",
-  "unitHpa": "Hectopascal ({txtUnitHpa})",
-  "unitMmhg": "Millimeters of mercury ({txtUnitMmhg})",
-  "unitPm": "Micrograms per m³ ({txtUnitPm})"
+  "unitC": "{txtUnitC}",
+  "unitF": "{txtUnitF}",
+  "unitHpa": "{txtUnitHpa}",
+  "unitMmhg": "{txtUnitMmhg}",
+  "unitPm": "{txtUnitPm}"
 }

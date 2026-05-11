@@ -97,7 +97,7 @@ func (b *Bot) subscriptionKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 			tu.InlineKeyboardButton(b.T(chatID, btnUnsubscribe)).WithCallbackData("menu_unsubscribe"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, btnBack)).WithCallbackData("menu_main"),
+			tu.InlineKeyboardButton(b.T(chatID, btnThresholdsBack)).WithCallbackData("menu_settings"),
 		),
 	)
 }

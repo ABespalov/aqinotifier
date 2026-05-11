@@ -216,12 +216,6 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 		}
 	}
 
-	if len(pressValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
-		if err == nil {
-			buffers = append(buffers, buf)
-		}
-	}
 
 	return buffers, nil
 }

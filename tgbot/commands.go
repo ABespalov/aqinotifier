@@ -23,7 +23,7 @@ func (b *Bot) cmdLangMenu(chatID int64) {
 	langs := AvailableLanguages()
 	var langBtns []telego.InlineKeyboardButton
 	for _, lang := range langs {
-		label := b.TLang(lang, "lang_"+lang)
+		label := b.TLang(lang, "lang"+strings.Title(lang))
 		if lang == currentLang || (currentLang == "" && lang == "en") {
 			label = icoSuccess + " " + label
 		}
