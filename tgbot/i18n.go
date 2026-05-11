@@ -31,8 +31,11 @@ func init() {
 }
 
 func loadExternalTranslations(dir string) {
-	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
 			return nil
 		}
 		if filepath.Ext(path) == ".json" {
@@ -41,6 +44,7 @@ func loadExternalTranslations(dir string) {
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
+				fmt.Printf("i18n: failed to read %s: %v\n", path, err)
 				return nil
 			}
 			var dict map[string]string
@@ -60,6 +64,9 @@ func loadExternalTranslations(dir string) {
 		}
 		return nil
 	})
+	if err != nil {
+		fmt.Printf("i18n: failed to walk lng directory %s: %v\n", dir, err)
+	}
 }
 
 func loadIcons(dir string) {
@@ -157,7 +164,7 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 						content := match[2 : len(match)-1]
 						parts := splitByTopLevelPercent(content)
 						if len(parts) > 0 {
-							condition := strings.TrimSpace(parts[0])
+							condition := strings.TrimPrefix(strings.TrimSpace(parts[0]), "?")
 							trueText := ""
 							if len(parts) > 1 {
 								trueText = parts[1]
