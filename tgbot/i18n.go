@@ -9,8 +9,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -98,14 +96,17 @@ func ReloadAll() {
 }
 
 func AvailableLanguages() []string {
+	i18nMu.RLock()
+	defer i18nMu.RUnlock()
 	seen := map[string]bool{"en": true}
 	langs := []string{"en"}
-	_ = filepath.Walk("lng", func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+	dir := "lng"
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
 			return nil
 		}
-		if filepath.Ext(path) == ".json" && info.Name() != "ico.json" {
-			code := strings.TrimSuffix(filepath.Base(path), ".json")
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".json") && info.Name() != "ico.json" {
+			code := strings.TrimSuffix(info.Name(), ".json")
 			if !seen[code] {
 				seen[code] = true
 				langs = append(langs, code)
@@ -116,26 +117,25 @@ func AvailableLanguages() []string {
 	return langs
 }
 
-func resolveTemplate(lang string, text string, argsMap map[string]interface{}, depth int) string {
+
+
+func resolveTemplateLocked(lang string, text string, argsMap map[string]interface{}, depth int) string {
 	if depth > 50 {
 		return text
 	}
 
-	log.Debug().Str("lang", lang).Int("depth", depth).Str("tmpl", text).Msg("i18n: resolving template")
 	for i := 0; i < 20; i++ {
 		var result strings.Builder
 		resolvedSomething := false
 
 		for j := 0; j < len(text); j++ {
 			if text[j] == '{' {
-				// Check for escaped {{
 				if j+1 < len(text) && text[j+1] == '{' {
 					result.WriteString("{{")
 					j++
 					continue
 				}
 
-				// Find matching }
 				idxOpen := j
 				idxClose := -1
 				stack := 0
@@ -161,8 +161,6 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 
 				if idxClose != -1 {
 					match := text[idxOpen : idxClose+1]
-					
-					// Case A: Conditional
 					if strings.HasPrefix(match, "{?") || strings.HasPrefix(match, "{ ?") {
 						content := match[2 : len(match)-1]
 						parts := splitByTopLevelPercent(content)
@@ -178,22 +176,16 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 							}
 
 							isTrue := evaluateCondition(argsMap, condition)
-							var condResult string
-							
-							// Select branch
-							branchText := ""
+							branchText := falseText
 							if isTrue {
 								branchText = trueText
-							} else {
-								branchText = falseText
 							}
 
-							// Auto-wrap nested shortcut conditionals if they lack braces
 							if strings.HasPrefix(strings.TrimSpace(branchText), "?") && !strings.HasPrefix(strings.TrimSpace(branchText), "{") {
 								branchText = "{" + branchText + "}"
 							}
 
-							condResult = resolveTemplate(lang, branchText, argsMap, depth+1)
+							condResult := resolveTemplateLocked(lang, branchText, argsMap, depth+1)
 							result.WriteString(condResult)
 							j = idxClose
 							resolvedSomething = true
@@ -201,7 +193,6 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 						}
 					}
 
-					// Case B: Regular placeholder
 					innerRegex := regexp.MustCompile(`^\{([^{}%?]+)(?:%([^}]+))?\}$`)
 					submatch := innerRegex.FindStringSubmatch(match)
 					if submatch != nil {
@@ -211,7 +202,7 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 							format = submatch[2]
 						}
 
-						resolved, ok := resolvePlaceholder(lang, key, format, argsMap, depth)
+						resolved, ok := resolvePlaceholderLocked(lang, key, format, argsMap, depth)
 						if ok {
 							result.WriteString(resolved)
 							j = idxClose
@@ -230,25 +221,18 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 		}
 	}
 
-	// Final cleanup of escaped braces
 	text = strings.ReplaceAll(text, "{{", "{")
 	text = strings.ReplaceAll(text, "}}", "}")
-
-	if depth == 0 {
-		log.Debug().Str("result", text).Msg("i18n: template resolution complete")
-	}
 	return text
 }
 
-func resolvePlaceholder(lang, key, format string, argsMap map[string]interface{}, depth int) (string, bool) {
-	// 1. Try argsMap
+func resolvePlaceholderLocked(lang, key, format string, argsMap map[string]interface{}, depth int) (string, bool) {
 	if argsMap != nil {
 		if val, exists := argsMap[key]; exists {
 			var res string
 			if t, okT := val.(time.Time); okT {
 				f := format
 				if f == "" {
-					i18nMu.RLock()
 					if dict, okD := langDicts[lang]; okD {
 						if defF, okF := dict["format_"+key]; okF {
 							f = defF
@@ -256,7 +240,6 @@ func resolvePlaceholder(lang, key, format string, argsMap map[string]interface{}
 							f = defF
 						}
 					}
-					i18nMu.RUnlock()
 				}
 				if f == "" {
 					f = "2006-01-02 15:04:05"
@@ -276,33 +259,24 @@ func resolvePlaceholder(lang, key, format string, argsMap map[string]interface{}
 			} else {
 				res = fmt.Sprintf("%v", val)
 			}
-			log.Debug().Str("key", key).Str("val", res).Msg("i18n: placeholder resolved from args")
 			return res, true
 		}
 	}
 
-	// 2. Try dictionaries and icons
-	i18nMu.RLock()
-	defer i18nMu.RUnlock()
-	
 	if dict, ok := langDicts[lang]; ok {
 		if v, exists := dict[key]; exists {
-			log.Debug().Str("key", key).Str("val", v).Msg("i18n: dictionary key resolved")
-			return resolveTemplate(lang, v, argsMap, depth+1), true
+			return resolveTemplateLocked(lang, v, argsMap, depth+1), true
 		}
 	}
 	if enDict, ok := langDicts["en"]; ok {
 		if v, exists := enDict[key]; exists {
-			log.Debug().Str("key", key).Str("val", v).Msg("i18n: en fallback key resolved")
-			return resolveTemplate(lang, v, argsMap, depth+1), true
+			return resolveTemplateLocked(lang, v, argsMap, depth+1), true
 		}
 	}
 	if v, ok := iconsMap[key]; ok {
-		log.Debug().Str("key", key).Str("val", v).Msg("i18n: icon resolved")
 		return v, true
 	}
 
-	log.Debug().Str("key", key).Msg("i18n: placeholder NOT resolved")
 	return "", false
 }
 
@@ -449,26 +423,40 @@ func (b *Bot) detectLang(langCode string) string {
 }
 
 func (b *Bot) TLang(lang, key string, args ...interface{}) string {
-	if lang == "" { lang = "en" }
+	if lang == "" {
+		lang = "en"
+	}
 	i18nMu.RLock()
+	defer i18nMu.RUnlock()
+
 	dict, ok := langDicts[lang]
 	var tmpl string
 	found := false
-	if ok { tmpl, found = dict[key] }
+	if ok {
+		tmpl, found = dict[key]
+	}
 	if !found {
 		if enDict, okEN := langDicts["en"]; okEN {
 			tmpl, found = enDict[key]
 		}
 	}
-	i18nMu.RUnlock()
-	if !found { return fmt.Sprintf("!!%s!!", key) }
+	if !found {
+		if v, ok := iconsMap[key]; ok {
+			tmpl = v
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Sprintf("!!%s!!", key)
+	}
+
 	var argsMap map[string]interface{}
 	if len(args) == 1 {
 		if m, okMap := args[0].(map[string]interface{}); okMap {
 			argsMap = m
 		}
 	}
-	return resolveTemplate(lang, tmpl, argsMap, 0)
+	return resolveTemplateLocked(lang, tmpl, argsMap, 0)
 }
 
 func (b *Bot) I(key string) string {

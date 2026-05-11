@@ -62,7 +62,7 @@ database:
 # - 'format' can be 'json' (recommended for production) or 'console' (human).
 log:
   # log level: debug, info, warn, error, fatal
-  level: "info"
+  level: "debug"
   # File to write logs to. Relative paths are resolved from the working dir.
   # Example: "logs/aqinotifier.log". Leave empty to disable file logging.
   log_file: "{app}.log"

@@ -10,138 +10,182 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-func (b *Bot) getAllAlerts(chatID int64) []struct {
-	id   string
-	name string
-	loud bool
-} {
+type AlertItem struct {
+	id         string
+	pm         string
+	action     string
+	actionIcon string
+	zone       string
+	zoneIcon   string
+	delta      string
+	aqiPrefix  string
+	aqiName    string
+	loud       bool
+}
+
+func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 	d := b.defaults
 	defWarnings := make(map[string]bool)
 	for _, w := range d.Warnings {
 		defWarnings[w] = true
 	}
 
-	var res []struct {
-		id   string
-		name string
-		loud bool
-	}
+	var res []AlertItem
 
 	// 1. AQI Alerts (aqi_z1 - aqi_z7)
-	mcfg := b.GetUserSettings(chatID)
-	std := strings.ToLower(mcfg.AQIStandard)
-	for i := 1; i <= 7; i++ {
-		if i > 6 && std == "eu" {
-			continue // EU only has 6 zones
+	if filter == "" || filter == "aqi" {
+		mcfg := b.GetUserSettings(chatID)
+		std := strings.ToLower(mcfg.AQIStandard)
+		for i := 1; i <= 7; i++ {
+			if i > 6 && std == "eu" {
+				continue // EU only has 6 zones
+			}
+			id := fmt.Sprintf("aqi_z%d", i)
+			zoneIcon := b.I("icoAqi" + strings.ToUpper(std) + "Level" + fmt.Sprint(i))
+			res = append(res, AlertItem{
+				id:        id,
+				aqiPrefix: b.T(chatID, "txtChartSubjectAqi"),
+				aqiName:   b.T(chatID, "aqiNameZ"+fmt.Sprint(i)+strings.Title(std)),
+				zoneIcon:  zoneIcon,
+				loud:      defWarnings[id],
+			})
 		}
-		id := fmt.Sprintf("aqi_z%d", i)
-		res = append(res, struct {
-			id   string
-			name string
-			loud bool
-		}{
-			id:   id,
-			name: fmt.Sprintf("%s: %s", b.T(chatID, "txtChartSubjectAqi"), b.T(chatID, "aqi_name_z"+fmt.Sprint(i)+"_"+std)),
-			loud: defWarnings[id],
-		})
 	}
 
 	// 2. PM Value Alerts (valXX-XX)
-	pmTypes := []string{"25", "10", "s"}
-	actions := []string{"u", "d"}
-	zones := []string{"g", "y", "r"}
+	if filter == "" || filter == "val" || filter == "pm" {
+		pmTypes := []string{"25", "10", "s"}
+		actions := []string{"u", "d"}
+		zones := []string{"g", "y", "r"}
 
-	for _, pm := range pmTypes {
-		for _, act := range actions {
-			for _, zone := range zones {
-				// Skip impossible combinations (e.g. up to green or down to red usually not tracked)
-				if act == "u" && zone == "g" {
-					continue
-				}
-				if act == "d" && zone == "r" {
-					continue
-				}
+		for _, pm := range pmTypes {
+			for _, act := range actions {
+				for _, zone := range zones {
+					// Skip impossible combinations (e.g. up to green or down to red usually not tracked)
+					if act == "u" && zone == "g" {
+						continue
+					}
+					if act == "d" && zone == "r" {
+						continue
+					}
 
-				id := fmt.Sprintf("val%s-%s%s", pm, zone, act)
-				
-				var pmLabel string
-				switch pm {
-				case "10":
-					pmLabel = b.T(chatID, "alertV10Short")
-				case "25":
-					pmLabel = b.T(chatID, "alertV25Short")
-				default:
-					pmLabel = b.T(chatID, "alertVsShort")
-				}
+					id := fmt.Sprintf("val%s-%s%s", pm, zone, act)
+					
+					var pmLabel string
+					switch pm {
+					case "10":
+						pmLabel = b.T(chatID, "alertV10Short")
+					case "25":
+						pmLabel = b.T(chatID, "alertV25Short")
+					default:
+						pmLabel = b.T(chatID, "alertVsShort")
+					}
 
-				actIcon := icoTrendUp
-				if act == "d" {
-					actIcon = icoTrendDown
-				}
+					actIcon := icoTrendUp
+					if act == "d" {
+						actIcon = icoTrendDown
+					}
 
-				var zoneIcon string
-				switch zone {
-				case "g":
-					zoneIcon = icoGreenSq
-				case "y":
-					zoneIcon = icoYellowSq
-				default:
-					zoneIcon = icoRedSq
-				}
+					var zoneIcon string
+					switch zone {
+					case "g":
+						zoneIcon = icoPmLevel1
+					case "y":
+						zoneIcon = icoPmLevel2
+					default:
+						zoneIcon = icoPmLevel3
+					}
 
-				res = append(res, struct {
-					id   string
-					name string
-					loud bool
-				}{
-					id:   id,
-					name: fmt.Sprintf("%s %s %s %s", pmLabel, actIcon, b.T(chatID, "txtLabelIn"), zoneIcon),
-					loud: defWarnings[id],
-				})
+					actName := b.T(chatID, "alertActionRise")
+					if act == "d" {
+						actName = b.T(chatID, "alertActionFall")
+					}
+
+					var zoneName string
+					switch zone {
+					case "g":
+						zoneName = b.T(chatID, "labelZoneGreenAcc")
+					case "y":
+						zoneName = b.T(chatID, "labelZoneYellowAcc")
+					default:
+						zoneName = b.T(chatID, "labelZoneRedAcc")
+					}
+
+					res = append(res, AlertItem{
+						id:         id,
+						pm:         pmLabel,
+						action:     actName,
+						actionIcon: actIcon,
+						zone:       zoneName,
+						zoneIcon:   zoneIcon,
+						loud:       defWarnings[id],
+					})
+				}
 			}
 		}
 	}
 
 	// 3. PM Dynamics Alerts (diffXX-XX)
-	for _, pm := range pmTypes {
-		for _, act := range actions {
-			for _, zone := range zones {
-				id := fmt.Sprintf("diff%s-%s%s", pm, zone, act)
-				
-				var pmLabel string
-				switch pm {
-				case "10":
-					pmLabel = b.T(chatID, "alertV10Short")
-				case "25":
-					pmLabel = b.T(chatID, "alertV25Short")
-				default:
-					pmLabel = b.T(chatID, "alertVsShort")
-				}
+	if filter == "" || filter == "diff" || filter == "pm" {
+		pmTypes := []string{"25", "10", "s"}
+		actions := []string{"u", "d"}
+		zones := []string{"g", "y", "r"}
+		for _, pm := range pmTypes {
+			for _, act := range actions {
+				for _, zone := range zones {
+					id := fmt.Sprintf("diff%s-%s%s", pm, zone, act)
+					
+					var pmLabel string
+					switch pm {
+					case "10":
+						pmLabel = b.T(chatID, "alertV10Short")
+					case "25":
+						pmLabel = b.T(chatID, "alertV25Short")
+					default:
+						pmLabel = b.T(chatID, "alertVsShort")
+					}
 
-				actIcon := icoTrendUp
-				if act == "d" {
-					actIcon = icoTrendDown
-				}
+					actIcon := icoTrendUp
+					if act == "d" {
+						actIcon = icoTrendDown
+					}
 
-				var zoneIcon string
-				switch zone {
-				case "g":
-					zoneIcon = icoGreenSq
-				case "y":
-					zoneIcon = icoYellowSq
-				default:
-					zoneIcon = icoRedSq
-				}
+					var zoneIcon string
+					switch zone {
+					case "g":
+						zoneIcon = icoPmLevel1
+					case "y":
+						zoneIcon = icoPmLevel2
+					default:
+						zoneIcon = icoPmLevel3
+					}
 
-				res = append(res, struct {
-					id   string
-					name string
-					loud bool
-				}{
-					id:   id,
-					name: fmt.Sprintf("%s %s %s %s (%s)", pmLabel, actIcon, b.T(chatID, "txtLabelIn"), zoneIcon, b.T(chatID, "txtLabelDynamics")),
-					loud: defWarnings[id],
-				})
+					actName := b.T(chatID, "alertActionRise")
+					if act == "d" {
+						actName = b.T(chatID, "alertActionFall")
+					}
+
+					var zoneName string
+					switch zone {
+					case "g":
+						zoneName = b.T(chatID, "labelZoneGreenAcc")
+					case "y":
+						zoneName = b.T(chatID, "labelZoneYellowAcc")
+					default:
+						zoneName = b.T(chatID, "labelZoneRedAcc")
+					}
+
+					res = append(res, AlertItem{
+						id:         id,
+						pm:         pmLabel,
+						action:     actName,
+						actionIcon: actIcon,
+						zone:       zoneName,
+						zoneIcon:   zoneIcon,
+						delta:      b.T(chatID, "txtLabelDelta"),
+						loud:       defWarnings[id],
+					})
+				}
 			}
 		}
 	}
@@ -208,6 +252,9 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.cmdUnsubscribeMenu(chatID)
 	case data == "menu_aqi":
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
+	case data == "menu_lang":
+		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cmdLangMenu(chatID)
 	case data == "aqi_std_toggle":
 		mcfg := b.GetUserSettings(chatID)
 		if mcfg.AQIStandard == "EU" {

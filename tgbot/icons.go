@@ -35,17 +35,6 @@ var (
 	icoChecked      = "☑️"
 	icoUnchecked    = "🔳"
 	icoBullet       = "•"
-	icoGreen        = "🟢"
-	icoYellow       = "🟡"
-	icoOrange       = "🟠"
-	icoRed          = "🔴"
-	icoPurple       = "🟣"
-	icoMaroon       = "🟤"
-	icoBlue         = "🔵"
-	icoBlack        = "⚫"
-	icoGreenSq      = "🟩"
-	icoYellowSq     = "🟨"
-	icoRedSq        = "🟥"
 	icoThreshold    = "⚖️"
 	icoSetByAQI     = "🧭"
 	icoWrite        = "✍️"
@@ -58,6 +47,10 @@ var (
 	icoFlagUS       = "🇺🇸"
 	icoDynamics     = "↗️"
 	icoLevels       = "📶"
+
+	icoPmLevel1 = "🟩"
+	icoPmLevel2 = "🟨"
+	icoPmLevel3 = "🟥"
 
 	icoAqiUSLevel1 = "🟢"
 	icoAqiUSLevel2 = "🟡"
@@ -178,39 +171,6 @@ func updateicoVars(m map[string]string) {
 	if v, ok := m["icoBullet"]; ok {
 		icoBullet = v
 	}
-	if v, ok := m["icoGreen"]; ok {
-		icoGreen = v
-	}
-	if v, ok := m["icoYellow"]; ok {
-		icoYellow = v
-	}
-	if v, ok := m["icoOrange"]; ok {
-		icoOrange = v
-	}
-	if v, ok := m["icoRed"]; ok {
-		icoRed = v
-	}
-	if v, ok := m["icoPurple"]; ok {
-		icoPurple = v
-	}
-	if v, ok := m["icoMaroon"]; ok {
-		icoMaroon = v
-	}
-	if v, ok := m["icoBlue"]; ok {
-		icoBlue = v
-	}
-	if v, ok := m["icoBlack"]; ok {
-		icoBlack = v
-	}
-	if v, ok := m["icoGreenSq"]; ok {
-		icoGreenSq = v
-	}
-	if v, ok := m["icoYellowSq"]; ok {
-		icoYellowSq = v
-	}
-	if v, ok := m["icoRedSq"]; ok {
-		icoRedSq = v
-	}
 	if v, ok := m["icoThreshold"]; ok {
 		icoThreshold = v
 	}
@@ -247,6 +207,10 @@ func updateicoVars(m map[string]string) {
 	if v, ok := m["icoLevels"]; ok {
 		icoLevels = v
 	}
+
+	if v, ok := m["icoPmLevel1"]; ok { icoPmLevel1 = v }
+	if v, ok := m["icoPmLevel2"]; ok { icoPmLevel2 = v }
+	if v, ok := m["icoPmLevel3"]; ok { icoPmLevel3 = v }
 
 	if v, ok := m["icoAqiUSLevel1"]; ok { icoAqiUSLevel1 = v }
 	if v, ok := m["icoAqiUSLevel2"]; ok { icoAqiUSLevel2 = v }

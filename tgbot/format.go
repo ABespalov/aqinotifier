@@ -182,12 +182,12 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 
 	getZoneIcon := func(v, g, y float64) string {
 		if v <= g {
-			return icoGreenSq
+			return icoPmLevel1
 		}
 		if v <= y {
-			return icoYellowSq
+			return icoPmLevel2
 		}
-		return icoRedSq
+		return icoPmLevel3
 	}
 	args["zone25Icon"] = getZoneIcon(m.PM25, mcfg.PM25Green, mcfg.PM25Yellow)
 	args["zone10Icon"] = getZoneIcon(m.PM10, mcfg.PM10Green, mcfg.PM10Yellow)
@@ -204,14 +204,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	args["aqiIcon"] = b.getAQIIcon(level, mcfg.AQIStandard)
 	args["aqiVal"] = aqi
 	args["aqiLevel"] = int(level)
-	// Manual title case for std and levelChar
-	stdTitle := "Eu"
-	if len(std) > 0 {
-		stdTitle = strings.ToUpper(std[:1]) + std[1:]
-	}
-	levelTitle := strings.ToUpper(levelChar[:1]) + levelChar[1:]
-	
-	key := "aqiName" + levelTitle + stdTitle
+	key := fmt.Sprintf("aqiName%s%s", strings.Title(levelChar), strings.Title(std))
 	args["aqiName"] = b.T(chatID, key)
 	args["aqiStandardFlag"] = "{icoFlag" + strings.ToUpper(std) + "}"
 

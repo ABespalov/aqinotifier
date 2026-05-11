@@ -319,15 +319,15 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 
 	kb := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnText("PM2.5", icoGreenSq, mcfg.PM25Green)).WithCallbackData("aqi_cycle:PM2.5:green"),
-			tu.InlineKeyboardButton(btnText("PM10", icoGreenSq, mcfg.PM10Green)).WithCallbackData("aqi_cycle:PM10:green"),
+			tu.InlineKeyboardButton(btnText("PM2.5", icoPmLevel1, mcfg.PM25Green)).WithCallbackData("aqi_cycle:PM2.5:green"),
+			tu.InlineKeyboardButton(btnText("PM10", icoPmLevel1, mcfg.PM10Green)).WithCallbackData("aqi_cycle:PM10:green"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnText("PM2.5", icoYellowSq, mcfg.PM25Yellow)).WithCallbackData("aqi_cycle:PM2.5:yellow"),
-			tu.InlineKeyboardButton(btnText("PM10", icoYellowSq, mcfg.PM10Yellow)).WithCallbackData("aqi_cycle:PM10:yellow"),
+			tu.InlineKeyboardButton(btnText("PM2.5", icoPmLevel2, mcfg.PM25Yellow)).WithCallbackData("aqi_cycle:PM2.5:yellow"),
+			tu.InlineKeyboardButton(btnText("PM10", icoPmLevel2, mcfg.PM10Yellow)).WithCallbackData("aqi_cycle:PM10:yellow"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, btnThresholds)).WithCallbackData(cmdThresholdsMenu),
+			tu.InlineKeyboardButton(b.T(chatID, "btnAqiBackToThresholds")).WithCallbackData(cmdThresholdsMenu),
 		),
 	)
 
@@ -416,7 +416,7 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	log.Debug().Int64("chat_id", chatID).Int("count", len(history)).Msg("tgbot: history loaded")
 	
 	if len(history) == 0 {
-		b.sendWithKeyboard(chatID, b.TDevice(chatID, "msgHistoryNoData", deviceID), b.mainKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.TDevice(chatID, "msgHistoryEmpty", deviceID), b.mainKeyboard(chatID))
 		return
 	}
 
@@ -469,15 +469,15 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 func (b *Bot) cmdResetConfirm(chatID int64) {
 	d := b.defaults
 	std := strings.ToLower(d.AQIStandard)
-	stdLabel := b.T(chatID, "standard_"+std)
+	stdLabel := b.T(chatID, "standard"+strings.Title(std))
 
 
 
-	unitT := b.T(chatID, "unit_"+b.cfg.DefaultUnitTemp)
-	unitP := b.T(chatID, "unit_"+b.cfg.DefaultUnitPress)
+	unitT := b.T(chatID, "txtUnit"+strings.Title(strings.ToLower(b.cfg.DefaultUnitTemp)))
+	unitP := b.T(chatID, "txtUnit"+strings.Title(strings.ToLower(b.cfg.DefaultUnitPress)))
 
 	var alertsSB strings.Builder
-	allAlerts := b.getAllAlerts(chatID)
+	allAlerts := b.getAllAlerts(chatID, "")
 
 	defNotifications := make(map[string]bool)
 	for _, n := range d.Notifications {
@@ -490,22 +490,47 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 
 	for _, a := range allAlerts {
 		if defNotifications[a.id] {
-			icon := "•"
+			statusIcon := b.I("icoSilent")
 			if defWarnings[a.id] {
-				icon = icoLoud
-			} else {
-				icon = icoSilent
+				statusIcon = b.I("icoLoud")
 			}
-			alertsSB.WriteString(fmt.Sprintf("%s %s\n", icon, a.name))
+			// Atoms for templates
+			atoms := map[string]interface{}{
+				"statusIcon": statusIcon,
+				"pm":         a.pm,
+				"action":     a.action,
+				"icon":       a.actionIcon, // Trend icon (📈/📉)
+				"zone":       a.zone,
+				"zoneIcon":   a.zoneIcon,
+				"in":         b.T(chatID, "txtLabelIn"),
+				"delta":      a.delta,
+				"aqiPrefix":  a.aqiPrefix,
+				"aqiName":    a.aqiName,
+				"isAqi":      strings.HasPrefix(a.id, "aqi_"),
+				"isVal":      strings.HasPrefix(a.id, "val"),
+				"isDiff":     strings.HasPrefix(a.id, "diff"),
+			}
+
+			// Pre-render 'name' (button label part) for use in parentheses
+			if atoms["isAqi"].(bool) {
+				atoms["name"] = fmt.Sprintf("%s: %s", a.aqiPrefix, a.aqiName)
+			} else if atoms["isVal"].(bool) {
+				atoms["name"] = b.T(chatID, "alertValBtn", atoms)
+			} else {
+				atoms["name"] = b.T(chatID, "alertDiffBtn", atoms)
+			}
+
+			line := b.T(chatID, "msgResetAlertItem", atoms)
+			alertsSB.WriteString(line + "\n")
 		}
 	}
 
 	text := b.T(chatID, "msgResetConfirm", map[string]interface{}{
-		"pm25_g": d.PM25Green, "pm25_y": d.PM25Yellow, "pm25_dyn": d.PM25Diff,
-		"pm10_g": d.PM10Green, "pm10_y": d.PM10Yellow, "pm10_dyn": d.PM10Diff,
-		"std_name": stdLabel, "aqi_standard_flag": "{icoFlag"+strings.ToUpper(std)+"}",
-		"unit_t": unitT, "unit_p": unitP,
-		"alerts_list": alertsSB.String(),
+		"pm25G": d.PM25Green, "pm25Y": d.PM25Yellow, "pm25Dyn": d.PM25Diff,
+		"pm10G": d.PM10Green, "pm10Y": d.PM10Yellow, "pm10Dyn": d.PM10Diff,
+		"stdName": stdLabel, "aqiStandardFlag": "{icoFlag"+strings.ToUpper(std)+"}",
+		"unitT": unitT, "unitP": unitP,
+		"alertsList": alertsSB.String(),
 	})
 
 	b.sendWithKeyboard(chatID, text, b.resetDefaultsKeyboard(chatID))
@@ -515,8 +540,8 @@ func (b *Bot) cmdResetExecute(chatID int64) {
 
 	mcfg := b.store.GetSettings(chatID, b.defaults)
 	text := b.T(chatID, "msgResetDone", map[string]interface{}{
-		"pm25_g": mcfg.PM25Green, "pm25_y": mcfg.PM25Yellow, "pm25_dyn": mcfg.PM25Diff,
-		"pm10_g": mcfg.PM10Green, "pm10_y": mcfg.PM10Yellow, "pm10_dyn": mcfg.PM10Diff,
+		"pm25G": mcfg.PM25Green, "pm25Y": mcfg.PM25Yellow, "pm25Dyn": mcfg.PM25Diff,
+		"pm10G": mcfg.PM10Green, "pm10Y": mcfg.PM10Yellow, "pm10Dyn": mcfg.PM10Diff,
 	})
 
 	b.sendWithKeyboard(chatID, text, b.settingsKeyboard(chatID))

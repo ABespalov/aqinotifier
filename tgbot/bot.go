@@ -64,6 +64,7 @@ const (
 	btnYes            = "btnYes"
 	btnNo             = "btnNo"
 	btnBack           = "btnBack"
+	btnLang           = "btnLang"
 	btnThresholdsBack = "btnThresholdsBack"
 )
 
@@ -79,6 +80,7 @@ const (
 	cmdHelp           = "menu_main"
 	cmdSoundProfiles  = "menu_sound"
 	cmdSilentProfiles = "menu_silent"
+	cmdLang           = "menu_lang"
 	cmdPM10Green      = "pm_set:PM10:green"
 	cmdPM10Yellow     = "pm_set:PM10:yellow"
 	cmdPM25Green      = "pm_set:PM2.5:green"
@@ -235,11 +237,22 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		}
 	}
 
+	mcfg := b.GetUserSettings(chatID)
 	argsMap := b.buildMeasurementArgs(chatID, m)
 	argsMap["winnerID"] = winnerID
-	argsMap["isAlert"] = strings.Contains(winnerID, "-ru") || strings.Contains(winnerID, "-yu") || strings.Contains(winnerID, "alert") || 
-		(strings.HasPrefix(winnerID, "aqi_z") && winnerID != "aqi_z1" && winnerID != "aqi_z2")
-	argsMap["isNorma"] = strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
+	isAqiAlert := false
+	if strings.HasPrefix(winnerID, "aqi_z") {
+		levelNum := 0
+		fmt.Sscanf(winnerID, "aqi_z%d", &levelNum)
+		if strings.ToLower(mcfg.AQIStandard) == "us" {
+			isAqiAlert = levelNum > 1 // US Level 2 (Moderate) is an alert
+		} else {
+			isAqiAlert = levelNum > 2 // EU Level 2 (Good) is normal, Level 3 (Fair) is an alert
+		}
+	}
+
+	argsMap["isAlert"] = strings.Contains(winnerID, "-ru") || strings.Contains(winnerID, "-yu") || strings.Contains(winnerID, "alert") || isAqiAlert
+	argsMap["isNorma"] = strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return") || winnerID == "aqi_z1" || (!isAqiAlert && strings.HasPrefix(winnerID, "aqi_z"))
 
 	// Atomic alert components for the primary event
 	if winnerID != "" {
@@ -274,7 +287,12 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		WithParseMode(telego.ModeHTML).
 		WithReplyMarkup(b.mainKeyboard(chatID))
 	params.DisableNotification = silent
-	_, _ = b.api.SendMessage(context.Background(), params)
+	_, err := b.api.SendMessage(context.Background(), params)
+	if err != nil {
+		log.Error().Err(err).Int64("chat_id", chatID).Str("winner", winnerID).Msg("tgbot: failed to send notification")
+	} else {
+		log.Info().Int64("chat_id", chatID).Str("winner", winnerID).Bool("silent", silent).Msg("tgbot: notification sent")
+	}
 }
 
 func (b *Bot) sendHelp(chatID int64) {
@@ -282,7 +300,7 @@ func (b *Bot) sendHelp(chatID int64) {
 	b.setState(chatID, stateIdle)
 
 	b.sendWithKeyboard(chatID, b.T(chatID, "msgHelp", map[string]interface{}{
-		"bot_version": b.version,
+		"botVersion": b.version,
 	}), b.mainKeyboard(chatID))
 }
 

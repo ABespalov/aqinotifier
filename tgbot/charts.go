@@ -3,6 +3,7 @@ package tgbot
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -176,17 +177,24 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	}
 
 	var buffers [][]byte
+	if len(aqiValues) > 0 {
+		aqiTitle := b.T(chatID, "txtChartTitleAqi")
+		aqiBuf, err := b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+		if err == nil {
+			buffers = append(buffers, aqiBuf)
+		}
+	}
+
 	pmTitle := b.T(chatID, "txtChartPmTitle")
-	pmBuf, err := b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "txtChartUnitPm"), labels,
+	pmBuf, err := b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "txtUnitPm"), labels,
 		[]string{"PM2.5", "PM10"},
 		[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		buffers = append(buffers, pmBuf)
 	}
-	buffers = append(buffers, pmBuf)
 
 	if len(tempValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgTemp"), b.unitTempLabel(chatID), labels,
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "txtChartTitleTemp"), b.unitTempLabel(chatID), labels,
 			[]string{b.T(chatID, "msgTemp"), b.T(chatID, "msgDewPoint")},
 			[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		if err == nil {
@@ -195,7 +203,14 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	}
 
 	if len(humValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "txtChartTitleHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+		if err == nil {
+			buffers = append(buffers, buf)
+		}
+	}
+
+	if len(pressValues) > 0 {
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "txtChartTitlePress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
@@ -312,7 +327,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 
 	pmTitle := b.T(chatID, "txtChartPmTitle")
 	aqiTitle := b.T(chatID, "btnChartAqi")
-	pmUnit := b.T(chatID, "txtChartUnitPm")
+	pmUnit := b.T(chatID, "txtUnitPm")
 	switch chartType {
 	case "pm":
 		return b.buildChart(chatID, deviceID, pmTitle, pmUnit,
@@ -342,11 +357,10 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 }
 
 func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string, labels []string, seriesNames []string, data [][]float64, forceZero bool, chartWidth, chartHeight int, chartFontSize float64, mcfg *config.Monitor, smooth float64) ([]byte, error) {
-	isPM := strings.Contains(strings.ToLower(title), "pm")
-	isAQI := strings.Contains(strings.ToLower(title), "aqi")
-	theme := charts.GetDefaultTheme()
+	isPM := title == b.T(chatID, "txtChartPmTitle")
+	isAQI := strings.Contains(title, "AQI")
 
-	var yMin, yMax float64 = math.MaxFloat64, -math.MaxFloat64
+	yMin, yMax := math.MaxFloat64, -math.MaxFloat64
 	hasData := false
 	for _, series := range data {
 		for _, v := range series {
@@ -390,8 +404,9 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		Top:    int(pTop),
 		Bottom: int(pBottom),
 	}
+	titleText := fmt.Sprintf("%s (%s)", stripIcons(title), yAxisName)
 	opt.Title = charts.TitleOption{
-		Text:      fmt.Sprintf("%s (%s)", title, yAxisName),
+		Text:      titleText,
 		FontStyle: charts.FontStyle{FontSize: chartFontSize * chartTitleFontCoef},
 	}
 
@@ -433,8 +448,9 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		{X: 0, Y: 0},
 	}, charts.ColorWhite)
 
+	var theme = charts.GetDefaultTheme()
 	if isPM {
-		opt.Theme = charts.GetDefaultTheme().WithSeriesColors([]charts.Color{colorSeriesRed, colorSeriesBlue})
+		opt.Theme = theme.WithSeriesColors([]charts.Color{colorSeriesRed, colorSeriesBlue})
 		opt.Theme = opt.Theme.WithBackgroundColor(charts.ColorTransparent)
 		for i := 0; i < len(opt.SeriesList); i++ {
 			opt.SeriesList[i].Name = seriesNames[i]
@@ -446,9 +462,9 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		}
 	} else {
 		colors := []charts.Color{colorSeriesBlue}
-		if title == b.T(chatID, "msgTemp") {
+		if strings.Contains(title, b.T(chatID, "msgTemp")) {
 			colors = []charts.Color{colorSeriesRed, colorSeriesBlue}
-		} else if title == b.T(chatID, "msgPress") {
+		} else if strings.Contains(title, b.T(chatID, "msgPress")) {
 			colors = []charts.Color{colorSeriesPurple}
 		}
 		opt.Theme = theme.WithSeriesColors(colors)
@@ -490,8 +506,50 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 	cp.Text(deviceStr, xDevice, int(float64(titleHeight)*chartMetaY1Coef), 0, metaStyle)
 	cp.Text(timeStr, xTime, int(float64(titleHeight)*chartMetaY2Coef), 0, metaStyle)
 
-	if isPM {
+	yAxisBottom := gridH
+	yAxisTop := 0.0
+	plotHeight := yAxisBottom - yAxisTop
+	yFunc := func(val float64) float64 {
+		y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
+		if y < yAxisTop {
+			y = yAxisTop
+		}
+		if y > yAxisBottom {
+			y = yAxisBottom
+		}
+		return y
+	}
 
+	drawSeriesPoints := func(seriesData []float64, color charts.Color, yOffset float64) {
+		// Dots on data points are now disabled globally. 
+		// Threshold crossing dots are handled by drawDots function.
+	}
+
+	drawDots := func(seriesData []float64, threshold float64, color charts.Color, yOffset float64) {
+		if len(seriesData) < 2 {
+			return
+		}
+		yT := yFunc(threshold) + yOffset
+		for i := 0; i < len(seriesData)-1; i++ {
+			v1 := seriesData[i]
+			v2 := seriesData[i+1]
+			if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
+				if v1 == v2 {
+					continue
+				}
+				t := (threshold - v1) / (v2 - v1)
+				x1 := float64(i) / float64(len(seriesData)-1) * gridW
+				x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
+				x := x1 + t*(x2-x1)
+				pureCp.Circle(chartStrokeWidth*chartDotLargeCoef, int(x), int(yT), color, color, 0)
+				pureCp.Circle(chartStrokeWidth*chartDotSmallCoef, int(x), int(yT), charts.ColorWhite, charts.ColorWhite, 0)
+			}
+		}
+	}
+
+	if isPM {
+		barWidth := float64(chartWidth) * chartBarWidthCoef
+		textHalfLen := int(chartFontSize * chartLabelFontCoef * chartTextHalfLenCoef)
 		styleLeft := charts.FontStyle{
 			FontSize:  chartFontSize * chartLabelFontCoef,
 			FontColor: colorSeriesRed,
@@ -500,26 +558,8 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			FontSize:  chartFontSize * chartLabelFontCoef,
 			FontColor: colorSeriesBlue,
 		}
-
-		barWidth := float64(chartWidth) * chartBarWidthCoef
-		textHalfLen := int(chartFontSize * chartLabelFontCoef * chartTextHalfLenCoef)
 		pureCp.Text(b.T(chatID, "txtChartScalePm25"), int(barWidth+chartFontSize*chartLabelXOffsetL), int(gridH/2)-textHalfLen, math.Pi/2, styleLeft)
 		pureCp.Text(b.T(chatID, "txtChartScalePm10"), int(gridW-barWidth-chartFontSize*chartLabelXOffsetR), int(gridH/2)+textHalfLen, -math.Pi/2, styleRight)
-
-		yAxisBottom := gridH
-		yAxisTop := 0.0
-		plotHeight := yAxisBottom - yAxisTop
-
-		yFunc := func(val float64) float64 {
-			y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
-			if y < yAxisTop {
-				y = yAxisTop
-			}
-			if y > yAxisBottom {
-				y = yAxisBottom
-			}
-			return y
-		}
 
 		drawBar := func(x1, x2 float64, low, high float64, color charts.Color) {
 			start := math.Max(low, yMin)
@@ -563,30 +603,6 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			pureCp.DashedLineStroke([]charts.Point{{X: int(tx1), Y: int(y)}, {X: int(tx2), Y: int(y)}}, color, dashWidth, dashPattern)
 		}
 
-		drawDots := func(seriesData []float64, threshold float64, color charts.Color, yOffset float64) {
-			if len(seriesData) < 2 {
-				return
-			}
-			yT := yFunc(threshold) + yOffset
-			for i := 0; i < len(seriesData)-1; i++ {
-				v1 := seriesData[i]
-				v2 := seriesData[i+1]
-				if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
-					if v1 == v2 {
-						continue
-					}
-					t := (threshold - v1) / (v2 - v1)
-					x1 := float64(i) / float64(len(seriesData)-1) * gridW
-					x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
-					x := x1 + t*(x2-x1)
-					pureCp.Circle(chartStrokeWidth*chartDotLargeCoef, int(x), int(yT), color, color, 0)
-					if !isAQI {
-						pureCp.Circle(chartStrokeWidth*chartDotSmallCoef, int(x), int(yT), charts.ColorWhite, charts.ColorWhite, 0)
-					}
-				}
-			}
-		}
-
 		drawThreshold(mcfg.PM25Green, colorSeriesRed, true, 0)
 		drawDots(data[0], mcfg.PM25Green, colorSeriesRed, 0)
 		drawThreshold(mcfg.PM25Yellow, colorSeriesRed, true, 0)
@@ -605,22 +621,12 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		}
 		drawThreshold(mcfg.PM10Yellow, colorSeriesBlue, false, y10Offset)
 		drawDots(data[1], mcfg.PM10Yellow, colorSeriesBlue, y10Offset)
+
+		drawSeriesPoints(data[0], colorSeriesRed, 0)
+		drawSeriesPoints(data[1], colorSeriesBlue, g10Offset)
 	}
 
 	if isAQI {
-		yAxisBottom := gridH
-		yAxisTop := 0.0
-		plotHeight := yAxisBottom - yAxisTop
-		yFunc := func(val float64) float64 {
-			y := yAxisBottom - (val-yMin)/(yMax-yMin)*plotHeight
-			if y < yAxisTop {
-				y = yAxisTop
-			}
-			if y > yAxisBottom {
-				y = yAxisBottom
-			}
-			return y
-		}
 		breakpoints := sensor.IndexPointsEU
 		if mcfg.AQIStandard == "US" {
 			breakpoints = sensor.IndexPointsUS
@@ -655,26 +661,6 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 				}, c)
 			}
 		}
-		drawDots := func(seriesData []float64, threshold float64, color charts.Color) {
-			if len(seriesData) < 2 {
-				return
-			}
-			yT := yFunc(threshold)
-			for i := 0; i < len(seriesData)-1; i++ {
-				v1 := seriesData[i]
-				v2 := seriesData[i+1]
-				if (v1 <= threshold && v2 >= threshold) || (v1 >= threshold && v2 <= threshold) {
-					if v1 == v2 {
-						continue
-					}
-					t := (threshold - v1) / (v2 - v1)
-					x1 := float64(i) / float64(len(seriesData)-1) * gridW
-					x2 := float64(i+1) / float64(len(seriesData)-1) * gridW
-					x := x1 + t*(x2-x1)
-					pureCp.Circle(chartStrokeWidth*2.4, int(x), int(yT), color, color, 0)
-				}
-			}
-		}
 		dashWidth := chartStrokeWidth * chartDashWidthCoef
 		dashPattern := chartDashPattern
 		for i := 1; i < len(breakpoints); i++ {
@@ -684,7 +670,22 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			}
 			y := yFunc(val)
 			pureCp.DashedLineStroke([]charts.Point{{X: 0, Y: int(y)}, {X: int(gridW), Y: int(y)}}, colors[i-1], dashWidth, dashPattern)
-			drawDots(data[0], val, colorSeriesGrey)
+			drawDots(data[0], val, colorSeriesGrey, 0)
+		}
+		drawSeriesPoints(data[0], colorSeriesGrey, 0)
+	}
+
+	if !isPM && !isAQI {
+		colors := []charts.Color{colorSeriesBlue}
+		if strings.Contains(title, b.T(chatID, "msgTemp")) {
+			colors = []charts.Color{colorSeriesRed, colorSeriesBlue}
+		} else if strings.Contains(title, b.T(chatID, "msgPress")) {
+			colors = []charts.Color{colorSeriesPurple}
+		}
+		for i, c := range colors {
+			if i < len(data) {
+				drawSeriesPoints(data[i], c, 0)
+			}
 		}
 	}
 
@@ -697,4 +698,19 @@ func CalcDewPoint(t, rh float64) float64 {
 	}
 	gamma := math.Log(rh/100.0) + (magnusB*t)/(magnusC+t)
 	return (magnusC * gamma) / (magnusB - gamma)
+}
+
+func stripIcons(s string) string {
+	// Remove HTML tags
+	reHTML := regexp.MustCompile(`<[^>]*>`)
+	s = reHTML.ReplaceAllString(s, "")
+
+	// Remove emojis but keep ASCII and Cyrillic
+	var sb strings.Builder
+	for _, r := range s {
+		if (r >= 0x0020 && r <= 0x007E) || (r >= 0x0400 && r <= 0x04FF) || r == 0x00B0 {
+			sb.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(sb.String())
 }
