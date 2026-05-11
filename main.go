@@ -18,6 +18,8 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+const BotVersion = "0.10.19a"
+
 func main() {
 	execPath, err := os.Executable()
 	if err != nil {
@@ -44,6 +46,8 @@ func main() {
 		}
 	}()
 
+	log.Info().Str("version", BotVersion).Msg("🌬️ AQI Notifier Bot starting...")
+
 	if cfg.Database.JsonFile == "" {
 		fmt.Fprintf(os.Stderr, "database.json_file is required for the application to function\n")
 		os.Exit(1)
@@ -58,6 +62,10 @@ func main() {
 		for i := 0; i < 5; i++ {
 			db, err = config.NewDB(cfg.Database)
 			if err == nil {
+				// Configure connection pool
+				db.SetMaxOpenConns(cfg.Database.MaxOpenConns)
+				db.SetMaxIdleConns(cfg.Database.MaxIdleConns)
+				db.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
 				break
 			}
 			log.Warn().Err(err).Msgf("db: connection failed, retrying in 5s... (%d/5)", i+1)
@@ -181,7 +189,7 @@ func main() {
 					log.Error().Msg("tgbot.enabled is true but tgbot.token is not set")
 				} else {
 					var err error
-					bot, err = tgbot.NewBot(cfg, &cfg.Monitor, ms)
+					bot, err = tgbot.NewBot(cfg, &cfg.Monitor, ms, BotVersion)
 					if err != nil {
 						log.Error().Err(err).Msg("failed to start Telegram bot")
 					} else {

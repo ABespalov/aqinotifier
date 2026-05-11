@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -125,10 +126,8 @@ func (s *MonitorService) SetDB(db *sql.DB) {
 	}
 
 	// Load last N values into RAM for each device
-	s.loadHistoryFromSQL()
+	s.loadHistoryFromSQLLocked()
 }
-
-
 
 func (s *MonitorService) loadHistory() {
 	if s.cfg.Database.Type != "json" || s.cfg.Database.JsonFile == "" {
@@ -153,15 +152,16 @@ func (s *MonitorService) loadHistory() {
 		s.history[m.DeviceID] = append(s.history[m.DeviceID], m)
 	}
 	for id := range s.history {
-		s.recalculateDiffs(id)
+		s.recalculateDiffsLocked(id)
 	}
 	s.trimHistoryInternal()
 	log.Info().Int("records", len(all)).Msg("monitor: history loaded from JSON")
 }
 
-func (s *MonitorService) loadHistoryFromSQL() {
-	// Must be called with s.mu held if s.history is already being used,
-	// but SetDB holds the lock.
+func (s *MonitorService) loadHistoryFromSQLLocked() {
+	if s.db == nil {
+		return
+	}
 
 	// 1. Get unique device IDs
 	rows, err := s.db.Query("SELECT DISTINCT device_id FROM measurements")
@@ -196,21 +196,43 @@ func (s *MonitorService) loadHistoryFromSQL() {
 			continue
 		}
 
-		var deviceHist []Measurement
+		var sqlHist []Measurement
 		for mRows.Next() {
 			var m Measurement
 			if err := mRows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
-				deviceHist = append([]Measurement{m}, deviceHist...) // Prepend to keep chronological order
+				sqlHist = append([]Measurement{m}, sqlHist...)
 			}
 		}
 		mRows.Close()
-		s.history[id] = deviceHist
-		s.recalculateDiffs(id)
+
+		// Merge with existing (JSON) history
+		existing := s.history[id]
+		merged := append(existing, sqlHist...)
+
+		// Deduplicate and sort
+		unique := make(map[int64]Measurement)
+		for _, m := range merged {
+			unique[m.Timestamp.Unix()] = m
+		}
+
+		var final []Measurement
+		for _, m := range unique {
+			final = append(final, m)
+		}
+		sort.Slice(final, func(i, j int) bool {
+			return final[i].Timestamp.Before(final[j].Timestamp)
+		})
+
+		if len(final) > max {
+			final = final[len(final)-max:]
+		}
+		s.history[id] = final
+		s.recalculateDiffsLocked(id)
 	}
-	log.Info().Int("devices", len(deviceIDs)).Int("limit_per_device", max).Msg("monitor: history loaded from SQL")
+	log.Info().Int("devices", len(deviceIDs)).Int("limit_per_device", max).Msg("monitor: history loaded and merged from SQL")
 }
 
-func (s *MonitorService) recalculateDiffs(deviceID string) {
+func (s *MonitorService) recalculateDiffsLocked(deviceID string) {
 	hist := s.history[deviceID]
 	if len(hist) < 2 {
 		return
@@ -281,17 +303,18 @@ func (s *MonitorService) saveToJSON(m Measurement) {
 }
 
 func (s *MonitorService) saveToSQL(m Measurement) {
-	log.Debug().Str("device", m.DeviceID).Time("ts", m.Timestamp).Msg("db: saving measurement to sql")
-	query := "INSERT INTO measurements (device_id, timestamp, pm10, pm25, temperature, humidity, pressure) VALUES ($1, $2, $3, $4, $5, $6, $7)"
-	_, err := s.db.Exec(query, m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.Temperature, m.Humidity, m.Pressure)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to save to SQL")
-	}
+	go func(m Measurement) {
+		log.Debug().Str("device", m.DeviceID).Time("ts", m.Timestamp).Msg("db: saving measurement to sql")
+		query := "INSERT INTO measurements (device_id, timestamp, pm10, pm25, temperature, humidity, pressure) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+		_, err := s.db.Exec(query, m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.Temperature, m.Humidity, m.Pressure)
+		if err != nil {
+			log.Error().Err(err).Msg("failed to save to SQL")
+		}
+	}(m)
 }
 
 func (s *MonitorService) Process(data *sensor.SensorData) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	m := Measurement{
 		DeviceID:  data.ParentID,
@@ -323,20 +346,21 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 
 	// Safety: don't process measurements without any PM data
 	if !hasPM10 && !hasPM25 {
+		s.mu.Unlock()
 		log.Debug().Str("device", data.ParentID).Msg("skipping measurement with no PM data")
 		return
 	}
 
 	// Safety: Glitch filter for phantom zeros
-	// If both PM values are exactly 0.0 but previous ones were > 0.5, it's likely a sensor error/warming up
-	last := s.LastMeasurement(m.DeviceID)
+	last := s.lastMeasurementLocked(m.DeviceID)
 	if last != nil && m.PM10 == 0 && m.PM25 == 0 && (last.PM10 > 0.5 || last.PM25 > 0.5) {
+		s.mu.Unlock()
 		log.Warn().Str("device", data.ParentID).Float64("prev10", last.PM10).Float64("prev25", last.PM25).Msg("ignoring phantom zero measurement")
 		return
 	}
 
 	// Calculate diff BEFORE adding to history
-	s.calculateDiff(&m)
+	s.calculateDiffLocked(&m)
 
 	// Add to history
 	hist := s.history[m.DeviceID]
@@ -346,20 +370,30 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 	// Trim history
 	s.trimHistoryInternal()
 
-	// Save
-	s.saveHistory(m)
+	// Copy measurement for async processing
+	mCopy := m
+	s.mu.Unlock()
 
-	// Check warnings
-	s.notify(&m)
+	// Save and notify OUTSIDE of lock
+	s.saveHistory(mCopy)
+	s.notify(&mCopy)
 }
 
-func (s *MonitorService) calculateDiff(m *Measurement) {
+func (s *MonitorService) lastMeasurementLocked(deviceID string) *Measurement {
+	hist := s.history[deviceID]
+	if len(hist) == 0 {
+		return nil
+	}
+	copy := hist[len(hist)-1]
+	return &copy
+}
+
+func (s *MonitorService) calculateDiffLocked(m *Measurement) {
 	hist := s.history[m.DeviceID]
 	if len(hist) == 0 {
 		return
 	}
 
-	// Always compare with the previous measurement in history
 	prev := &hist[len(hist)-1]
 	actualDiffSec := m.Timestamp.Sub(prev.Timestamp).Seconds()
 
@@ -661,25 +695,34 @@ func (s *MonitorService) notify(m *Measurement) {
 // GetHistoryByDuration returns history for the given device up to 24h back.
 // It prioritizes DB/Persistent store if available.
 func (s *MonitorService) GetHistoryByDuration(deviceID string, duration time.Duration) []Measurement {
-	var res []Measurement
-	// 1. Try SQL
+	// 1. Try RAM first (memcache)
+	res := s.GetHistory(deviceID)
+	if len(res) >= 2 {
+		since := time.Now().Add(-duration)
+		// Return RAM only if the earliest record is older or equal to the requested start time
+		if res[0].Timestamp.Before(since) || res[0].Timestamp.Equal(since) {
+			log.Debug().Str("device", deviceID).Int("count", len(res)).Msg("monitor: history fetched from RAM (covers duration)")
+			return res
+		}
+	}
+
+	// 2. Try SQL if RAM is empty or insufficient
 	if s.db != nil {
 		res = s.getHistoryFromSQL(deviceID, duration)
 		if len(res) > 0 {
+			log.Debug().Str("device", deviceID).Int("count", len(res)).Msg("monitor: history fetched from SQL")
 			return res
 		}
 	}
-	// 2. Try JSON
+	// 3. Try JSON
 	if s.cfg.Database.JsonFile != "" {
 		res = s.getHistoryFromJSON(deviceID, duration)
 		if len(res) > 0 {
+			log.Debug().Str("device", deviceID).Int("count", len(res)).Msg("monitor: history fetched from JSON")
 			return res
 		}
 	}
-	// 3. Try RAM
-	res = s.GetHistory(deviceID)
-	log.Debug().Str("device", deviceID).Dur("duration", duration).Int("count", len(res)).Msg("monitor: history fetched (fallback)")
-	return res
+	return nil
 }
 
 func (s *MonitorService) getHistoryFromSQL(deviceID string, duration time.Duration) []Measurement {

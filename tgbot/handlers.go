@@ -223,7 +223,7 @@ func (b *Bot) sendChartForDevice(chatID int64, deviceID string, chartType string
 	}
 
 	log.Debug().Msgf("Generating %s chart with width=%d, height=%d, fontSize=%.1f", chartType, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize)
-	buf, err := generateSingleChart(b, chatID, hist, chartType, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize)
+	buf, err := generateSingleChart(b, chatID, hist, chartType, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize, chartSmoothing24h)
 	if err != nil || buf == nil {
 		b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorCharts", map[string]interface {
 		}{"err": err}), b.chartsMenuKeyboard(chatID, deviceID))
@@ -397,7 +397,7 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 		oldVal = mcfg.PM10Green
 		mcfg.PM10Green = val
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm10"), "zone_str": b.T(chatID, "txtLabelZone1"), "zone_icon": icoGreenSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "labelThreshold"), "pm": b.T(chatID, "labelPm10"), "zone_str": b.T(chatID, "labelZoneGreenAcc"), "zone_icon": icoGreenSq, "suffix": ""})
 	case stateAwaitPM10Yellow:
 		if val < mcfg.PM10Green {
 			b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorYellow"), b.thresholdsKeyboard(chatID))
@@ -406,17 +406,17 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 		oldVal = mcfg.PM10Yellow
 		mcfg.PM10Yellow = val
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm10"), "zone_str": b.T(chatID, "txtLabelZone2"), "zone_icon": icoYellowSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "labelThreshold"), "pm": b.T(chatID, "labelPm10"), "zone_str": b.T(chatID, "labelZoneYellowAcc"), "zone_icon": icoYellowSq, "suffix": ""})
 	case stateAwaitDiff10:
 		oldVal = mcfg.PM10Diff
 		mcfg.PM10Diff = val
 		title = b.T(chatID, "msgThresholdDiffTitleFmt", map[string]interface {
-		}{"pm": b.T(chatID, "txtLabelPm10"), "label": b.T(chatID, "txtLabelDynamics"), "icon": icoPm10})
+		}{"pm": b.T(chatID, "labelPm10"), "label": b.T(chatID, "labelDynamics"), "icon": icoPm10})
 	case stateAwaitPM25Green:
 		oldVal = mcfg.PM25Green
 		mcfg.PM25Green = val
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm25"), "zone_str": b.T(chatID, "txtLabelZone1"), "zone_icon": icoGreenSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "labelThreshold"), "pm": b.T(chatID, "labelPm25"), "zone_str": b.T(chatID, "labelZoneGreenAcc"), "zone_icon": icoGreenSq, "suffix": ""})
 	case stateAwaitPM25Yellow:
 		if val < mcfg.PM25Green {
 			b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorYellow"), b.thresholdsKeyboard(chatID))
@@ -425,12 +425,12 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 		oldVal = mcfg.PM25Yellow
 		mcfg.PM25Yellow = val
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": b.T(chatID, "txtLabelPm25"), "zone_str": b.T(chatID, "txtLabelZone2"), "zone_icon": icoYellowSq, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "labelThreshold"), "pm": b.T(chatID, "labelPm25"), "zone_str": b.T(chatID, "labelZoneYellowAcc"), "zone_icon": icoYellowSq, "suffix": ""})
 	case stateAwaitDiff25:
 		oldVal = mcfg.PM25Diff
 		mcfg.PM25Diff = val
 		title = b.T(chatID, "msgThresholdDiffTitleFmt", map[string]interface {
-		}{"pm": b.T(chatID, "txtLabelPm25"), "label": b.T(chatID, "txtLabelDynamics"), "icon": icoPm25})
+		}{"pm": b.T(chatID, "labelPm25"), "label": b.T(chatID, "labelDynamics"), "icon": icoPm25})
 	default:
 		return
 	}
@@ -438,6 +438,7 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 	b.sendWithKeyboard(chatID, b.T(chatID, "msgThresholdUpd", map[string]interface {
 	}{"title": title, "old": oldVal, "new": val}), nil)
 
+	b.store.UpdateSettings(chatID, mcfg)
 	b.cmdThresholdsMenu(chatID)
 }
 func (b *Bot) clearLastPrompt(chatID int64) {
@@ -468,16 +469,16 @@ func (b *Bot) promptThreshold(chatID int64, param, zone string) {
 
 	switch param {
 	case "PM10":
-		pmLabel = b.T(chatID, "txtLabelPm10")
+		pmLabel = b.T(chatID, "labelPm10")
 		switch zone {
 		case "green":
 			b.setState(chatID, stateAwaitPM10Green)
-			zoneLabel = b.T(chatID, "txtLabelZone1")
+			zoneLabel = b.T(chatID, "labelZoneGreen")
 			zoneIcon = icoGreenSq
 			currentVal = mcfg.PM10Green
 		case "yellow":
 			b.setState(chatID, stateAwaitPM10Yellow)
-			zoneLabel = b.T(chatID, "txtLabelZone2")
+			zoneLabel = b.T(chatID, "labelZoneYellow")
 			zoneIcon = icoYellowSq
 			currentVal = mcfg.PM10Yellow
 		case "diff":
@@ -487,16 +488,16 @@ func (b *Bot) promptThreshold(chatID int64, param, zone string) {
 			currentVal = mcfg.PM10Diff
 		}
 	case "PM2.5":
-		pmLabel = b.T(chatID, "txtLabelPm25")
+		pmLabel = b.T(chatID, "labelPm25")
 		switch zone {
 		case "green":
 			b.setState(chatID, stateAwaitPM25Green)
-			zoneLabel = b.T(chatID, "txtLabelZone1")
+			zoneLabel = b.T(chatID, "labelZoneGreen")
 			zoneIcon = icoGreenSq
 			currentVal = mcfg.PM25Green
 		case "yellow":
 			b.setState(chatID, stateAwaitPM25Yellow)
-			zoneLabel = b.T(chatID, "txtLabelZone2")
+			zoneLabel = b.T(chatID, "labelZoneYellow")
 			zoneIcon = icoYellowSq
 			currentVal = mcfg.PM25Yellow
 		case "diff":
@@ -513,7 +514,7 @@ func (b *Bot) promptThreshold(chatID int64, param, zone string) {
 		}{"pm": pmLabel, "label": zoneLabel, "icon": zoneIcon})
 	} else {
 		title = b.T(chatID, "msgThresholdTitleFmt", map[string]interface {
-		}{"label": b.T(chatID, "msgThresholdLabel"), "pm": pmLabel, "zone_str": zoneLabel, "zone_icon": zoneIcon, "suffix": b.T(chatID, "txtLabelZoneSuffix")})
+		}{"label": b.T(chatID, "labelThreshold"), "pm": pmLabel, "zone_str": zoneLabel, "zone_icon": zoneIcon, "suffix": b.T(chatID, "labelZoneSuffix")})
 	}
 
 	text := b.T(chatID, "msgThresholdPrompt", map[string]interface {

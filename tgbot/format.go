@@ -6,6 +6,7 @@ import (
 
 	"github.com/ABespalov/aqinotifier/monitor"
 	"github.com/ABespalov/aqinotifier/sensor"
+	"github.com/rs/zerolog/log"
 )
 
 func (b *Bot) getEventPriority(id string) int {
@@ -65,11 +66,15 @@ func (b *Bot) getAQIIcon(level sensor.AQILevel, standard string) string {
 	return icoUnknown
 }
 func (b *Bot) formatDeviceStatus(chatID int64, deviceID string) string {
+	log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: formatDeviceStatus start")
 	m := b.monitor.LastMeasurement(deviceID)
 	if m == nil {
+		log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: no measurement found")
 		return b.TDevice(chatID, "msgStatusNoData", deviceID)
 	}
-	return b.formatMeasurement(chatID, m)
+	res := b.formatMeasurement(chatID, m)
+	log.Debug().Int64("chat_id", chatID).Int("len", len(res)).Msg("tgbot: formatDeviceStatus end")
+	return res
 }
 func (b *Bot) formatDeviceShortInfo(chatID int64, deviceID string) string {
 	mcfg := b.GetUserSettings(chatID)
@@ -200,10 +205,17 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	args["aqiVal"] = aqi
 	args["aqiLevel"] = int(level)
 	// Manual title case for std and levelChar
-	stdTitle := strings.ToUpper(std[:1]) + std[1:]
+	stdTitle := "Eu"
+	if len(std) > 0 {
+		stdTitle = strings.ToUpper(std[:1]) + std[1:]
+	}
 	levelTitle := strings.ToUpper(levelChar[:1]) + levelChar[1:]
-	args["aqiName"] = b.T(chatID, "aqiName"+levelTitle+stdTitle)
+	
+	key := "aqiName" + levelTitle + stdTitle
+	args["aqiName"] = b.T(chatID, key)
 	args["aqiStandardFlag"] = "{icoFlag" + strings.ToUpper(std) + "}"
+
+	log.Debug().Interface("args", args).Msg("tgbot: measurement args built")
 
 	if m.Temperature != 0 {
 		args["labelT"] = b.T(chatID, "msgTemp")

@@ -17,7 +17,7 @@ import (
 	"github.com/ABespalov/aqinotifier/monitor"
 )
 
-const BotVersion = "0.10.0a"
+
 
 type chatState int
 
@@ -111,7 +111,7 @@ type Bot struct {
 	renameIDs  map[int64]string
 }
 
-func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor.MonitorService) (*Bot, error) {
+func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor.MonitorService, version string) (*Bot, error) {
 	cfg := &fullCfg.TgBot
 	var opts []telego.BotOption
 	if cfg.Debug {
@@ -147,7 +147,7 @@ func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor
 		states:      make(map[int64]chatState),
 		stopFunc:    cancel,
 		defaults:    monitorDefaults,
-		version:     BotVersion,
+		version:     version,
 		lastPrompts: make(map[int64]int),
 		renameIDs:   make(map[int64]string),
 	}
@@ -204,7 +204,7 @@ func (b *Bot) registerCommands() {
 
 func (b *Bot) Run() {
 	b.handler.Start()
-	log.Info().Msg("tgbot: bot is running and listening for updates")
+	log.Info().Msg("tgbot: bot is running")
 
 	select {}
 }
@@ -237,20 +237,21 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 
 	argsMap := b.buildMeasurementArgs(chatID, m)
 	argsMap["winnerID"] = winnerID
-	argsMap["isAlert"] = strings.HasPrefix(winnerID, "alert") && !strings.Contains(winnerID, "clean") && !strings.Contains(winnerID, "return")
-	argsMap["isNorma"] = strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
+	argsMap["isAlert"] = strings.Contains(winnerID, "-ru") || strings.Contains(winnerID, "-yu") || strings.Contains(winnerID, "alert") || 
+		(strings.HasPrefix(winnerID, "aqi_z") && winnerID != "aqi_z1" && winnerID != "aqi_z2")
+	argsMap["isNorma"] = strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
 
 	// Atomic alert components for the primary event
 	if winnerID != "" {
-		argsMap["isRise"] = strings.Contains(winnerID, "-yu") || strings.Contains(winnerID, "-ru") || strings.Contains(winnerID, "-gu") || strings.Contains(winnerID, "-rise")
-		argsMap["isFall"] = strings.Contains(winnerID, "-yd") || strings.Contains(winnerID, "-rd") || strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "-fall")
-		argsMap["isReturn"] = strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
-		argsMap["isSharp"] = strings.Contains(winnerID, "-rise") || strings.Contains(winnerID, "-fall")
+		argsMap["isRise"] = strings.Contains(winnerID, "-yu") || strings.Contains(winnerID, "-ru") || strings.Contains(winnerID, "-gu") || strings.Contains(winnerID, "-rise") || strings.Contains(winnerID, "yu") || strings.Contains(winnerID, "ru")
+		argsMap["isFall"] = strings.Contains(winnerID, "-yd") || strings.Contains(winnerID, "-rd") || strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "-fall") || strings.Contains(winnerID, "yd") || strings.Contains(winnerID, "gd")
+		argsMap["isReturn"] = strings.Contains(winnerID, "-gd") || strings.Contains(winnerID, "-yd") || strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
+		argsMap["isSharp"] = strings.Contains(winnerID, "rise") || strings.Contains(winnerID, "fall")
 
-		argsMap["isPm10"] = strings.Contains(winnerID, "val10") || strings.Contains(winnerID, "pm10")
-		argsMap["isPm25"] = strings.Contains(winnerID, "val25") || strings.Contains(winnerID, "pm25")
-		argsMap["isAqi"] = strings.Contains(winnerID, "aqi")
 		argsMap["isBoth"] = strings.Contains(winnerID, "vals")
+		argsMap["isPm10"] = strings.Contains(winnerID, "val10") || strings.Contains(winnerID, "pm10") || argsMap["isBoth"].(bool)
+		argsMap["isPm25"] = strings.Contains(winnerID, "val25") || strings.Contains(winnerID, "pm25") || argsMap["isBoth"].(bool)
+		argsMap["isAqi"] = strings.Contains(winnerID, "aqi")
 
 		argsMap["isRed"] = strings.Contains(winnerID, "-ru") || strings.Contains(winnerID, "-rd")
 		argsMap["isYellow"] = strings.Contains(winnerID, "-yu") || strings.Contains(winnerID, "-yd")
@@ -281,7 +282,7 @@ func (b *Bot) sendHelp(chatID int64) {
 	b.setState(chatID, stateIdle)
 
 	b.sendWithKeyboard(chatID, b.T(chatID, "msgHelp", map[string]interface{}{
-		"bot_version": BotVersion,
+		"bot_version": b.version,
 	}), b.mainKeyboard(chatID))
 }
 
@@ -290,7 +291,6 @@ func (b *Bot) updateCommandsForUser(chatID int64, lang string) {
 		lang = "en"
 	}
 	cmds := b.buildCommands(lang)
-	log.Debug().Int64("chat_id", chatID).Str("lang", lang).Msg("tgbot: updating commands for user scope")
 	err := b.api.SetMyCommands(context.Background(), &telego.SetMyCommandsParams{
 		Commands:     cmds,
 		Scope:        &telego.BotCommandScopeChat{Type: "chat", ChatID: tu.ID(chatID)},

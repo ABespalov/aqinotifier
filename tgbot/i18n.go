@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -119,6 +121,7 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 		return text
 	}
 
+	log.Debug().Str("lang", lang).Int("depth", depth).Str("tmpl", text).Msg("i18n: resolving template")
 	for i := 0; i < 20; i++ {
 		var result strings.Builder
 		resolvedSomething := false
@@ -160,7 +163,7 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 					match := text[idxOpen : idxClose+1]
 					
 					// Case A: Conditional
-					if strings.HasPrefix(match, "{?") {
+					if strings.HasPrefix(match, "{?") || strings.HasPrefix(match, "{ ?") {
 						content := match[2 : len(match)-1]
 						parts := splitByTopLevelPercent(content)
 						if len(parts) > 0 {
@@ -176,15 +179,21 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 
 							isTrue := evaluateCondition(argsMap, condition)
 							var condResult string
-							// Auto-wrap nested shortcut conditionals: ?var%true%false
-							if strings.HasPrefix(trueText, "?") { trueText = "{" + trueText + "}" }
-							if strings.HasPrefix(falseText, "?") { falseText = "{" + falseText + "}" }
-
+							
+							// Select branch
+							branchText := ""
 							if isTrue {
-								condResult = resolveTemplate(lang, trueText, argsMap, depth+1)
+								branchText = trueText
 							} else {
-								condResult = resolveTemplate(lang, falseText, argsMap, depth+1)
+								branchText = falseText
 							}
+
+							// Auto-wrap nested shortcut conditionals if they lack braces
+							if strings.HasPrefix(strings.TrimSpace(branchText), "?") && !strings.HasPrefix(strings.TrimSpace(branchText), "{") {
+								branchText = "{" + branchText + "}"
+							}
+
+							condResult = resolveTemplate(lang, branchText, argsMap, depth+1)
 							result.WriteString(condResult)
 							j = idxClose
 							resolvedSomething = true
@@ -196,13 +205,13 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 					innerRegex := regexp.MustCompile(`^\{([^{}%?]+)(?:%([^}]+))?\}$`)
 					submatch := innerRegex.FindStringSubmatch(match)
 					if submatch != nil {
-						key := submatch[1]
+						key := strings.TrimSpace(submatch[1])
 						format := ""
 						if len(submatch) > 2 {
 							format = submatch[2]
 						}
 
-						resolved, ok := resolvePlaceholder(lang, key, format, argsMap)
+						resolved, ok := resolvePlaceholder(lang, key, format, argsMap, depth)
 						if ok {
 							result.WriteString(resolved)
 							j = idxClose
@@ -225,13 +234,17 @@ func resolveTemplate(lang string, text string, argsMap map[string]interface{}, d
 	text = strings.ReplaceAll(text, "{{", "{")
 	text = strings.ReplaceAll(text, "}}", "}")
 
+	if depth == 0 {
+		log.Debug().Str("result", text).Msg("i18n: template resolution complete")
+	}
 	return text
 }
 
-func resolvePlaceholder(lang, key, format string, argsMap map[string]interface{}) (string, bool) {
+func resolvePlaceholder(lang, key, format string, argsMap map[string]interface{}, depth int) (string, bool) {
 	// 1. Try argsMap
 	if argsMap != nil {
 		if val, exists := argsMap[key]; exists {
+			var res string
 			if t, okT := val.(time.Time); okT {
 				f := format
 				if f == "" {
@@ -248,21 +261,23 @@ func resolvePlaceholder(lang, key, format string, argsMap map[string]interface{}
 				if f == "" {
 					f = "2006-01-02 15:04:05"
 				}
-				return t.Format(f), true
+				res = t.Format(f)
 			} else if format != "" {
 				switch format {
 				case "toUpper":
-					return strings.ToUpper(fmt.Sprintf("%v", val)), true
+					res = strings.ToUpper(fmt.Sprintf("%v", val))
 				case "toLower":
-					return strings.ToLower(fmt.Sprintf("%v", val)), true
+					res = strings.ToLower(fmt.Sprintf("%v", val))
 				case "toTitle":
-					return strings.Title(strings.ToLower(fmt.Sprintf("%v", val))), true
+					res = strings.Title(strings.ToLower(fmt.Sprintf("%v", val)))
 				default:
-					return fmt.Sprintf("%"+format, val), true
+					res = fmt.Sprintf("%"+format, val)
 				}
 			} else {
-				return fmt.Sprintf("%v", val), true
+				res = fmt.Sprintf("%v", val)
 			}
+			log.Debug().Str("key", key).Str("val", res).Msg("i18n: placeholder resolved from args")
+			return res, true
 		}
 	}
 
@@ -272,18 +287,22 @@ func resolvePlaceholder(lang, key, format string, argsMap map[string]interface{}
 	
 	if dict, ok := langDicts[lang]; ok {
 		if v, exists := dict[key]; exists {
-			return v, true
+			log.Debug().Str("key", key).Str("val", v).Msg("i18n: dictionary key resolved")
+			return resolveTemplate(lang, v, argsMap, depth+1), true
 		}
 	}
 	if enDict, ok := langDicts["en"]; ok {
 		if v, exists := enDict[key]; exists {
-			return v, true
+			log.Debug().Str("key", key).Str("val", v).Msg("i18n: en fallback key resolved")
+			return resolveTemplate(lang, v, argsMap, depth+1), true
 		}
 	}
 	if v, ok := iconsMap[key]; ok {
+		log.Debug().Str("key", key).Str("val", v).Msg("i18n: icon resolved")
 		return v, true
 	}
 
+	log.Debug().Str("key", key).Msg("i18n: placeholder NOT resolved")
 	return "", false
 }
 

@@ -157,6 +157,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		return
 	}
 	chatID := cq.Message.GetChat().ID
+	log.Debug().Int64("chat_id", chatID).Str("data", data).Msg("tgbot: received callback")
 
 	switch {
 	case data == "none":
@@ -313,10 +314,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.store.SetLanguage(chatID, lang)
 		log.Debug().Int64("chat_id", chatID).Str("to", lang).Msg("tgbot: language changed via menu")
 		b.updateCommandsForUser(chatID, lang)
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
-			ChatID:    tu.ID(chatID),
-			MessageID: cq.Message.GetMessageID(),
-		})
+		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
 		b.sendWithKeyboard(chatID, b.T(chatID, "msgHelp"), b.mainKeyboard(chatID))
 
 	case strings.HasPrefix(data, "toggle:"):
@@ -404,6 +402,6 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 
 	case strings.HasPrefix(data, "history:"):
 		deviceID := strings.TrimPrefix(data, "history:")
-		b.cmdDeviceHistory(chatID, deviceID, cq.Message.GetMessageID())
+		b.cmdDeviceHistory(chatID, deviceID)
 	}
 }

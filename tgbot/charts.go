@@ -34,8 +34,9 @@ var (
 )
 
 const (
-	chartStrokeWidth = 3.0
-	chartSmoothing   = 0.2
+	chartStrokeWidth      = 3.0
+	chartSmoothingHistory = 0.1
+	chartSmoothing24h     = 0.4
 
 	chartPadLeft   = 3.5
 	chartPadRight  = 6.0
@@ -112,7 +113,7 @@ func calcYAxisWidth(fs float64, yMin, yMax float64, isAQI bool) int {
 	return int(calcTextWidth(s, fs) + fs*chartAxisBase)
 }
 
-func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth, chartHeight int, chartFontSize float64) ([][]byte, error) {
+func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth, chartHeight int, chartFontSize float64, smooth float64) ([][]byte, error) {
 	if len(hist) == 0 {
 		return nil, nil
 	}
@@ -178,7 +179,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	pmTitle := b.T(chatID, "txtChartPmTitle")
 	pmBuf, err := b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "txtChartUnitPm"), labels,
 		[]string{"PM2.5", "PM10"},
-		[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg)
+		[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 	if err != nil {
 		return nil, err
 	}
@@ -187,21 +188,21 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	if len(tempValues) > 0 {
 		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgTemp"), b.unitTempLabel(chatID), labels,
 			[]string{b.T(chatID, "msgTemp"), b.T(chatID, "msgDewPoint")},
-			[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+			[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
 	}
 
 	if len(humValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
 	}
 
 	if len(pressValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
@@ -210,7 +211,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	return buffers, nil
 }
 
-func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chartType string, chartWidth, chartHeight int, chartFontSize float64) ([]byte, error) {
+func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chartType string, chartWidth, chartHeight int, chartFontSize float64, smooth float64) ([]byte, error) {
 	if len(hist) == 0 {
 		return nil, nil
 	}
@@ -316,31 +317,31 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 	case "pm":
 		return b.buildChart(chatID, deviceID, pmTitle, pmUnit,
 			labels, []string{"PM2.5", "PM10"},
-			[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg)
+			[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 	case "temp":
 		if len(tempValues) > 0 {
 			return b.buildChart(chatID, deviceID, b.T(chatID, "msgTemp"), b.unitTempLabel(chatID),
 				labels, []string{b.T(chatID, "msgTemp"), b.T(chatID, "msgDewPoint")},
-				[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+				[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		}
 	case "hum":
 		if len(humValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		}
 	case "press":
 		if len(pressValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		}
 	case "aqi":
 		if len(aqiValues) > 0 {
-			return b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg)
+			return b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		}
 	}
 
 	return nil, nil
 }
 
-func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string, labels []string, seriesNames []string, data [][]float64, forceZero bool, chartWidth, chartHeight int, chartFontSize float64, mcfg *config.Monitor) ([]byte, error) {
+func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string, labels []string, seriesNames []string, data [][]float64, forceZero bool, chartWidth, chartHeight int, chartFontSize float64, mcfg *config.Monitor, smooth float64) ([]byte, error) {
 	isPM := strings.Contains(strings.ToLower(title), "pm")
 	isAQI := strings.Contains(strings.ToLower(title), "aqi")
 	theme := charts.GetDefaultTheme()
@@ -418,7 +419,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		FontStyle: charts.FontStyle{FontSize: chartFontSize},
 	}
 	opt.LineStrokeWidth = chartStrokeWidth
-	opt.StrokeSmoothingTension = chartSmoothing
+	opt.StrokeSmoothingTension = smooth
 
 	p := charts.NewPainter(charts.PainterOptions{
 		Width:  chartWidth,

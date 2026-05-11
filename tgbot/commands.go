@@ -10,6 +10,8 @@ import (
 	tu "github.com/mymmrac/telego/telegoutil"
 	"github.com/rs/zerolog/log"
 
+
+
 	"github.com/ABespalov/aqinotifier/sensor"
 )
 
@@ -154,6 +156,7 @@ func (b *Bot) cmdUnsubscribeMenu(chatID int64) {
 	_, _ = b.api.SendMessage(context.Background(), params)
 }
 func (b *Bot) cmdStatusMenu(chatID int64) {
+	log.Debug().Int64("chat_id", chatID).Msg("tgbot: cmdStatusMenu called")
 	b.clearLastPrompt(chatID)
 	devices := b.store.Subscriptions(chatID)
 	if len(devices) == 0 {
@@ -231,6 +234,9 @@ func (b *Bot) cmdThresholdsMenu(chatID int64) {
 	text := b.T(chatID, "msgThresholdsMenu", map[string]interface{}{
 		"vg1": mcfg.PM25Green, "vy1": mcfg.PM25Yellow, "vdyn1": mcfg.PM25Diff,
 		"vg2": mcfg.PM10Green, "vy2": mcfg.PM10Yellow, "vdyn2": mcfg.PM10Diff,
+		"labelPm25": b.T(chatID, "labelPm25"), "labelPm10": b.T(chatID, "labelPm10"),
+		"labelZoneGreen": b.T(chatID, "labelZoneGreen"), "labelZoneYellow": b.T(chatID, "labelZoneYellow"),
+		"labelDynamics": b.T(chatID, "labelDynamics"),
 	})
 
 	b.sendWithKeyboard(chatID, text, b.thresholdsKeyboard(chatID))
@@ -260,7 +266,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 			for _, v := range eu {
 				if v == val {
 					std = "EU"
-					flag = b.T(chatID, "flagEu")
+					flag = b.T(chatID, "icoFlagEU")
 					found = true
 					break
 				}
@@ -269,7 +275,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 				for _, v := range us {
 					if v == val {
 						std = "US"
-						flag = b.T(chatID, "flagUs")
+						flag = b.T(chatID, "icoFlagUS")
 						found = true
 						break
 					}
@@ -279,7 +285,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 			for _, v := range us {
 				if v == val {
 					std = "US"
-					flag = b.T(chatID, "flagUs")
+					flag = b.T(chatID, "icoFlagUS")
 					found = true
 					break
 				}
@@ -288,7 +294,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 				for _, v := range eu {
 					if v == val {
 						std = "EU"
-						flag = b.T(chatID, "flagEu")
+						flag = b.T(chatID, "icoFlagEU")
 						found = true
 						break
 					}
@@ -335,6 +341,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 	}
 }
 func (b *Bot) cmdHistoryMenu(chatID int64) {
+	log.Debug().Int64("chat_id", chatID).Msg("tgbot: cmdHistoryMenu called")
 	b.clearLastPrompt(chatID)
 	devices := b.store.Subscriptions(chatID)
 	if len(devices) == 0 {
@@ -399,28 +406,28 @@ func (b *Bot) cmdRename(chatID int64, deviceID string) {
 	)
 	b.sendWithKeyboard(chatID, text, keyboard)
 }
-func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string, msgID ...int) {
-
-	if len(msgID) > 0 {
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
-			ChatID:    tu.ID(chatID),
-			MessageID: msgID[0],
-		})
-	}
-
-	hist := b.monitor.GetHistory(deviceID)
-	if len(hist) == 0 {
-		b.sendWithKeyboard(chatID, b.TDevice(chatID, "msgHistoryEmpty", deviceID), b.mainKeyboard(chatID))
+func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
+	log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: cmdDeviceHistory start")
+	
+	_ = b.api.SendChatAction(context.Background(), &telego.SendChatActionParams{ChatID: tu.ID(chatID), Action: "upload_photo"})
+	
+	// Use GetHistoryByDuration which is now optimized (RAM first)
+	history := b.monitor.GetHistory(deviceID)
+	log.Debug().Int64("chat_id", chatID).Int("count", len(history)).Msg("tgbot: history loaded")
+	
+	if len(history) == 0 {
+		b.sendWithKeyboard(chatID, b.TDevice(chatID, "msgHistoryNoData", deviceID), b.mainKeyboard(chatID))
 		return
 	}
 
-	log.Debug().Msgf("Generating charts with width=%d, height=%d, fontSize=%.1f", b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize)
-	buffers, err := generateCharts(b, chatID, hist, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize)
+	log.Debug().Int64("chat_id", chatID).Msg("tgbot: drawing charts start")
+	buffers, err := generateCharts(b, chatID, history, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize, chartSmoothingHistory)
 	if err != nil {
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorCharts", map[string]interface {
-		}{"err": err}), b.mainKeyboard(chatID))
+		log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to generate charts")
+		b.sendWithKeyboard(chatID, b.T(chatID, "msgHistoryError"), b.mainKeyboard(chatID))
 		return
 	}
+	log.Debug().Int64("chat_id", chatID).Int("charts", len(buffers)).Msg("tgbot: drawing charts end")
 
 	var media []telego.InputMedia
 	for i, buf := range buffers {
@@ -428,27 +435,35 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string, msgID ...int) {
 			Reader: bytes.NewReader(buf),
 			name:   fmt.Sprintf("chart_%d.png", i),
 		}
-
+		
 		photo := &telego.InputMediaPhoto{
 			Type:  "photo",
 			Media: tu.File(nr),
 		}
-
 		media = append(media, photo)
 	}
 
 	params := tu.MediaGroup(tu.ID(chatID), media...)
 	_, err = b.api.SendMediaGroup(context.Background(), params)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to send history charts")
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorSendCh"), b.mainKeyboard(chatID))
-		return
+		log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to send media group")
+		// Fallback to individual photos if media group fails
+		for i, buf := range buffers {
+			nr := &bytesNamedReader{Reader: bytes.NewReader(buf), name: fmt.Sprintf("chart_%d.png", i)}
+			p := &telego.SendPhotoParams{ChatID: tu.ID(chatID), Photo: tu.File(nr)}
+			_, _ = b.api.SendPhoto(context.Background(), p)
+		}
 	}
 
+	// Send footer with keyboard
 	mcfg := b.GetUserSettings(chatID)
 	deviceName := mcfg.DeviceNames[deviceID]
-	footer := b.T(chatID, "msgHistoryFooter", map[string]interface {
-	}{"count": b.sys.ValuesInRam, "deviceId": deviceID, "deviceName": deviceName})
+	if deviceName == "" {
+		deviceName = deviceID
+	}
+	footer := b.T(chatID, "msgHistoryFooter", map[string]interface{}{
+		"count": len(history), "deviceId": deviceID, "deviceName": deviceName,
+	})
 	b.sendWithKeyboard(chatID, footer, b.mainKeyboard(chatID))
 }
 func (b *Bot) cmdResetConfirm(chatID int64) {
