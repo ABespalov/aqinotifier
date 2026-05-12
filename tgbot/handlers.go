@@ -215,6 +215,7 @@ func (b *Bot) promptDeviceID(chatID int64) {
 	}
 }
 func (b *Bot) sendChartForDevice(chatID int64, deviceID string, chartType string) {
+	b.clearLastPrompt(chatID)
 	hist := b.monitor.GetHistoryByDuration(deviceID, 24*time.Hour)
 	if len(hist) == 0 {
 		b.sendWithKeyboard(chatID, b.TDevice(chatID, "msgHistoryEmpty", deviceID), b.chartsMenuKeyboard(chatID, deviceID))
@@ -255,10 +256,12 @@ func (b *Bot) sendChartForDevice(chatID int64, deviceID string, chartType string
 		}{"subject": typeName, "deviceId": deviceID, "deviceName": deviceName})).
 		WithParseMode(telego.ModeHTML).
 		WithReplyMarkup(b.chartsMenuKeyboard(chatID, deviceID))
-	_, err = b.api.SendPhoto(context.Background(), params)
+	msg, err := b.api.SendPhoto(context.Background(), params)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to send chart")
 		b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorSendCh"), b.chartsMenuKeyboard(chatID, deviceID))
+	} else {
+		b.setLastPrompt(chatID, msg.GetMessageID())
 	}
 }
 func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, messageID int) {
@@ -442,20 +445,24 @@ func (b *Bot) handleThresholdUpdate(chatID int64, msg *telego.Message) {
 }
 func (b *Bot) clearLastPrompt(chatID int64) {
 	b.lastPromptsMu.Lock()
-	msgID, ok := b.lastPrompts[chatID]
+	msgIDs, ok := b.lastPrompts[chatID]
 	delete(b.lastPrompts, chatID)
 	b.lastPromptsMu.Unlock()
 
-	if ok && msgID != 0 {
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
-			ChatID:    tu.ID(chatID),
-			MessageID: msgID,
-		})
+	if ok {
+		for _, id := range msgIDs {
+			if id != 0 {
+				_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
+					ChatID:    tu.ID(chatID),
+					MessageID: id,
+				})
+			}
+		}
 	}
 }
 func (b *Bot) setLastPrompt(chatID int64, msgID int) {
 	b.lastPromptsMu.Lock()
-	b.lastPrompts[chatID] = msgID
+	b.lastPrompts[chatID] = append(b.lastPrompts[chatID], msgID)
 	b.lastPromptsMu.Unlock()
 }
 func (b *Bot) promptThreshold(chatID int64, param, zone string) {

@@ -107,7 +107,7 @@ type Bot struct {
 	version  string
 
 	lastPromptsMu sync.Mutex
-	lastPrompts   map[int64]int
+	lastPrompts   map[int64][]int
 
 	renameIDMu sync.Mutex
 	renameIDs  map[int64]string
@@ -150,7 +150,7 @@ func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor
 		stopFunc:    cancel,
 		defaults:    monitorDefaults,
 		version:     version,
-		lastPrompts: make(map[int64]int),
+		lastPrompts: make(map[int64][]int),
 		renameIDs:   make(map[int64]string),
 	}
 

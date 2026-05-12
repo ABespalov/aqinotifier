@@ -407,6 +407,7 @@ func (b *Bot) cmdRename(chatID int64, deviceID string) {
 	b.sendWithKeyboard(chatID, text, keyboard)
 }
 func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
+	b.clearLastPrompt(chatID)
 	log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: cmdDeviceHistory start")
 	
 	_ = b.api.SendChatAction(context.Background(), &telego.SendChatActionParams{ChatID: tu.ID(chatID), Action: "upload_photo"})
@@ -444,14 +445,21 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	}
 
 	params := tu.MediaGroup(tu.ID(chatID), media...)
-	_, err = b.api.SendMediaGroup(context.Background(), params)
-	if err != nil {
+	msgs, err := b.api.SendMediaGroup(context.Background(), params)
+	if err == nil {
+		for _, m := range msgs {
+			b.setLastPrompt(chatID, m.GetMessageID())
+		}
+	} else {
 		log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to send media group")
 		// Fallback to individual photos if media group fails
 		for i, buf := range buffers {
 			nr := &bytesNamedReader{Reader: bytes.NewReader(buf), name: fmt.Sprintf("chart_%d.png", i)}
 			p := &telego.SendPhotoParams{ChatID: tu.ID(chatID), Photo: tu.File(nr)}
-			_, _ = b.api.SendPhoto(context.Background(), p)
+			m, err := b.api.SendPhoto(context.Background(), p)
+			if err == nil {
+				b.setLastPrompt(chatID, m.GetMessageID())
+			}
 		}
 	}
 

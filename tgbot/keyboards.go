@@ -260,8 +260,10 @@ func (b *Bot) sendWithKeyboard(chatID int64, text string, markup telego.ReplyMar
 		WithReplyMarkup(markup).
 		WithParseMode(telego.ModeHTML)
 
-	_, err := b.api.SendMessage(context.Background(), params)
+	msg, err := b.api.SendMessage(context.Background(), params)
 	if err != nil {
 		log.Error().Err(err).Int64("chat_id", chatID).Str("text", text).Msg("tgbot: failed to send message")
+	} else if markup != nil {
+		b.setLastPrompt(chatID, msg.GetMessageID())
 	}
 }
