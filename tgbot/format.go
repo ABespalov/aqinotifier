@@ -76,15 +76,6 @@ func (b *Bot) formatDeviceStatus(chatID int64, deviceID string) string {
 	log.Debug().Int64("chat_id", chatID).Int("len", len(res)).Msg("tgbot: formatDeviceStatus end")
 	return res
 }
-func (b *Bot) formatDeviceShortInfo(chatID int64, deviceID string) string {
-	mcfg := b.GetUserSettings(chatID)
-	name, ok := mcfg.DeviceNames[deviceID]
-	if !ok || name == "" {
-		name = b.T(chatID, "msgDevice") + " " + deviceID
-	}
-	header := b.T(chatID, "msgDeviceInfoHeader")
-	return fmt.Sprintf("%s\n\n<code>%s</code>\n%s", header, deviceID, name)
-}
 func (b *Bot) formatDeviceIDPlain(chatID int64, deviceID string) string {
 	mcfg := b.GetUserSettings(chatID)
 	name, ok := mcfg.DeviceNames[deviceID]
@@ -132,15 +123,15 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 
 		"deviceId": m.DeviceID,
 
-		"val25":      m.PM25,
-		"prev25":     m.PM25Prev,
-		"curr25":     m.PM25,
-		"unitPm":     b.T(chatID, "unitPm"),
-		"val10":      m.PM10,
-		"prev10":     m.PM10Prev,
-		"curr10":     m.PM10,
-		"labelPm25":  b.T(chatID, "labelPm25"),
-		"labelPm10":  b.T(chatID, "labelPm10"),
+		"val25":     m.PM25,
+		"prev25":    m.PM25Prev,
+		"curr25":    m.PM25,
+		"unitPm":    b.T(chatID, "unitPm"),
+		"val10":     m.PM10,
+		"prev10":    m.PM10Prev,
+		"curr10":    m.PM10,
+		"labelPm25": b.T(chatID, "labelPm25"),
+		"labelPm10": b.T(chatID, "labelPm10"),
 	}
 
 	if name, ok := mcfg.DeviceNames[m.DeviceID]; ok && name != "" {
@@ -189,8 +180,8 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 		}
 		return icoPmLevel3
 	}
-	args["zone25Icon"] = getZoneIcon(m.PM25, mcfg.PM25Green, mcfg.PM25Yellow)
-	args["zone10Icon"] = getZoneIcon(m.PM10, mcfg.PM10Green, mcfg.PM10Yellow)
+	args["zone25Icon"] = getZoneIcon(m.PM25, mcfg.PM25L1, mcfg.PM25L2)
+	args["zone10Icon"] = getZoneIcon(m.PM10, mcfg.PM10L1, mcfg.PM10L2)
 
 	var aqi float64
 	var level sensor.AQILevel
@@ -200,7 +191,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 		aqi, level = sensor.CalculateEU_AQI(m.PM25, m.PM10)
 	}
 
-	levelChar := fmt.Sprintf("z%d", level)
+	levelChar := fmt.Sprintf("l%d", level)
 	args["aqiIcon"] = b.getAQIIcon(level, mcfg.AQIStandard)
 	args["aqiVal"] = aqi
 	args["aqiLevel"] = int(level)

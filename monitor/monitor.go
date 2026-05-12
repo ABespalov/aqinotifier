@@ -443,22 +443,22 @@ func (s *MonitorService) notify(m *Measurement) {
 			continue
 		}
 
-		// Ensure PM10Yellow/PM25Yellow >= PM10Green/PM25Green
-		pm10Green := mcfg.PM10Green
-		pm10Yellow := mcfg.PM10Yellow
-		if pm10Yellow < pm10Green {
-			pm10Yellow = pm10Green
+		// Ensure Level2 >= Level1
+		pm10Level1 := mcfg.PM10L1
+		pm10Level2 := mcfg.PM10L2
+		if pm10Level2 < pm10Level1 {
+			pm10Level2 = pm10Level1
 		}
-		pm25Green := mcfg.PM25Green
-		pm25Yellow := mcfg.PM25Yellow
-		if pm25Yellow < pm25Green {
-			pm25Yellow = pm25Green
+		pm25Level1 := mcfg.PM25L1
+		pm25Level2 := mcfg.PM25L2
+		if pm25Level2 < pm25Level1 {
+			pm25Level2 = pm25Level1
 		}
 
-		z10 := getZone(m.PM10, pm10Green, pm10Yellow)
-		z25 := getZone(m.PM25, pm25Green, pm25Yellow)
-		prevZ10 := getZone(m.PM10Prev, pm10Green, pm10Yellow)
-		prevZ25 := getZone(m.PM25Prev, pm25Green, pm25Yellow)
+		z10 := getZone(m.PM10, pm10Level1, pm10Level2)
+		z25 := getZone(m.PM25, pm25Level1, pm25Level2)
+		prevZ10 := getZone(m.PM10Prev, pm10Level1, pm10Level2)
+		prevZ25 := getZone(m.PM25Prev, pm25Level1, pm25Level2)
 
 		notifications := make(map[string]bool)
 		for _, n := range mcfg.Notifications {
@@ -517,44 +517,44 @@ func (s *MonitorService) notify(m *Measurement) {
 
 		// PM10 transitions
 		if z10 == zoneYellow && prevZ10 == zoneGreen {
-			addEvent("val10-yu")
+			addEvent("val10_l2u")
 		}
 		if z10 == zoneRed && prevZ10 != zoneRed {
-			addEvent("val10-ru")
+			addEvent("val10_l3u")
 		}
 		if z10 == zoneYellow && prevZ10 == zoneRed {
-			addEvent("val10-yd")
+			addEvent("val10_l2d")
 		}
 		if z10 == zoneGreen && prevZ10 != zoneGreen {
-			addClear("val10-gd")
+			addClear("val10_l1d")
 		}
 
 		// PM2.5 transitions
 		if z25 == zoneYellow && prevZ25 == zoneGreen {
-			addEvent("val25-yu")
+			addEvent("val25_l2u")
 		}
 		if z25 == zoneRed && prevZ25 != zoneRed {
-			addEvent("val25-ru")
+			addEvent("val25_l3u")
 		}
 		if z25 == zoneYellow && prevZ25 == zoneRed {
-			addEvent("val25-yd")
+			addEvent("val25_l2d")
 		}
 		if z25 == zoneGreen && prevZ25 != zoneGreen {
-			addClear("val25-gd")
+			addClear("val25_l1d")
 		}
 
 		// Combined transitions
 		if (z10 >= zoneYellow && z25 >= zoneYellow) && (prevZ10 == zoneGreen && prevZ25 == zoneGreen) && (z10 == zoneYellow || z25 == zoneYellow) {
-			addEvent("vals-yu")
+			addEvent("vals_l2u")
 		}
 		if (z10 == zoneRed && z25 == zoneRed) && (prevZ10 != zoneRed || prevZ25 != zoneRed) {
-			addEvent("vals-ru")
+			addEvent("vals_l3u")
 		}
 		if (z10 == zoneYellow && z25 == zoneYellow) && (prevZ10 == zoneRed && prevZ25 == zoneRed) {
-			addEvent("vals-yd")
+			addEvent("vals_l2d")
 		}
 		if (z10 == zoneGreen && z25 == zoneGreen) && (prevZ10 != zoneGreen || prevZ25 != zoneGreen) {
-			addClear("vals-gd")
+			addClear("vals_l1d")
 		}
 
 		// AQI Notifications
@@ -574,19 +574,19 @@ func (s *MonitorService) notify(m *Measurement) {
 			var aqiID string
 			switch level {
 			case sensor.LevelGood:
-				aqiID = "aqi_z1"
+				aqiID = "aqi_l1"
 			case sensor.LevelModerate:
-				aqiID = "aqi_z2"
+				aqiID = "aqi_l2"
 			case sensor.LevelSlightlyUnhealthy:
-				aqiID = "aqi_z3"
+				aqiID = "aqi_l3"
 			case sensor.LevelUnhealthy:
-				aqiID = "aqi_z4"
+				aqiID = "aqi_l4"
 			case sensor.LevelVeryUnhealthy:
-				aqiID = "aqi_z5"
+				aqiID = "aqi_l5"
 			case sensor.LevelHazardous:
-				aqiID = "aqi_z6"
+				aqiID = "aqi_l6"
 			case sensor.LevelExtremelyHazardous:
-				aqiID = "aqi_z7"
+				aqiID = "aqi_l7"
 			}
 
 			if aqiID != "" {
@@ -605,73 +605,73 @@ func (s *MonitorService) notify(m *Measurement) {
 		// PM10 Growth
 		if pm10DiffExceeded && p10d > 0 {
 			if z10 == zoneGreen {
-				addEvent("diff10-gu")
+				addEvent("diff10_l1u")
 			}
 			if z10 == zoneYellow {
-				addEvent("diff10-yu")
+				addEvent("diff10_l2u")
 			}
 			if z10 == zoneRed {
-				addEvent("diff10-ru")
+				addEvent("diff10_l3u")
 			}
 		}
 		// PM2.5 Growth
 		if pm25DiffExceeded && p25d > 0 {
 			if z25 == zoneGreen {
-				addEvent("diff25-gu")
+				addEvent("diff25_l1u")
 			}
 			if z25 == zoneYellow {
-				addEvent("diff25-yu")
+				addEvent("diff25_l2u")
 			}
 			if z25 == zoneRed {
-				addEvent("diff25-ru")
+				addEvent("diff25_l3u")
 			}
 		}
 		// Combined Growth
 		if pm10DiffExceeded && p10d > 0 && pm25DiffExceeded && p25d > 0 {
 			if z10 == zoneGreen && z25 == zoneGreen {
-				addEvent("diffs-gu")
+				addEvent("diffs_l1u")
 			}
 			if z10 == zoneYellow && z25 == zoneYellow {
-				addEvent("diffs-yu")
+				addEvent("diffs_l2u")
 			}
 			if z10 == zoneRed && z25 == zoneRed {
-				addEvent("diffs-ru")
+				addEvent("diffs_l3u")
 			}
 		}
 		// PM10 Drop
 		if pm10DiffExceeded && p10d < 0 {
 			if z10 == zoneGreen {
-				addEvent("diff10-gd")
+				addEvent("diff10_l1d")
 			}
 			if z10 == zoneYellow {
-				addEvent("diff10-yd")
+				addEvent("diff10_l2d")
 			}
 			if z10 == zoneRed {
-				addEvent("diff10-rd")
+				addEvent("diff10_l3d")
 			}
 		}
 		// PM2.5 Drop
 		if pm25DiffExceeded && p25d < 0 {
 			if z25 == zoneGreen {
-				addEvent("diff25-gd")
+				addEvent("diff25_l1d")
 			}
 			if z25 == zoneYellow {
-				addEvent("diff25-yd")
+				addEvent("diff25_l2d")
 			}
 			if z25 == zoneRed {
-				addEvent("diff25-rd")
+				addEvent("diff25_l3d")
 			}
 		}
 		// Combined Drop
 		if pm10DiffExceeded && p10d < 0 && pm25DiffExceeded && p25d < 0 {
 			if z10 == zoneGreen && z25 == zoneGreen {
-				addEvent("diffs-gd")
+				addEvent("diffs_l1d")
 			}
 			if z10 == zoneYellow && z25 == zoneYellow {
-				addEvent("diffs-yd")
+				addEvent("diffs_l2d")
 			}
 			if z10 == zoneRed && z25 == zoneRed {
-				addEvent("diffs-rd")
+				addEvent("diffs_l3d")
 			}
 		}
 

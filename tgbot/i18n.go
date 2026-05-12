@@ -295,7 +295,7 @@ func evaluateCondition(argsMap map[string]interface{}, condition string) bool {
 
 	if len(parts) == 1 {
 		if !ok || val == nil {
-			return varName != "" && varName != "false"
+			return varName == "true"
 		}
 		if b, isBool := val.(bool); isBool {
 			return b

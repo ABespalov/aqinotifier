@@ -32,44 +32,41 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 
 	var res []AlertItem
 
-	// 1. AQI Alerts (aqi_z1 - aqi_z7)
 	if filter == "" || filter == "aqi" {
 		mcfg := b.GetUserSettings(chatID)
 		std := strings.ToLower(mcfg.AQIStandard)
 		for i := 1; i <= 7; i++ {
 			if i > 6 && std == "eu" {
-				continue // EU only has 6 zones
+				continue
 			}
-			id := fmt.Sprintf("aqi_z%d", i)
+			id := fmt.Sprintf("aqi_l%d", i)
 			zoneIcon := b.I("icoAqi" + strings.ToUpper(std) + "Level" + fmt.Sprint(i))
 			res = append(res, AlertItem{
 				id:        id,
 				aqiPrefix: b.T(chatID, "txtChartSubjectAqi"),
-				aqiName:   b.T(chatID, "aqiNameZ"+fmt.Sprint(i)+strings.Title(std)),
+				aqiName:   b.T(chatID, "aqiNameL"+fmt.Sprint(i)+strings.Title(std)),
 				zoneIcon:  zoneIcon,
 				loud:      defWarnings[id],
 			})
 		}
 	}
 
-	// 2. PM Value Alerts (valXX-XX)
 	if filter == "" || filter == "val" || filter == "pm" {
 		pmTypes := []string{"25", "10", "s"}
 		actions := []string{"u", "d"}
-		zones := []string{"g", "y", "r"}
+		levels := []string{"1", "2", "3"}
 
 		for _, pm := range pmTypes {
 			for _, act := range actions {
-				for _, zone := range zones {
-					// Skip impossible combinations (e.g. up to green or down to red usually not tracked)
-					if act == "u" && zone == "g" {
+				for _, level := range levels {
+					if act == "u" && level == "1" {
 						continue
 					}
-					if act == "d" && zone == "r" {
+					if act == "d" && level == "3" {
 						continue
 					}
 
-					id := fmt.Sprintf("val%s-%s%s", pm, zone, act)
+					id := fmt.Sprintf("val%s_l%s%s", pm, level, act)
 					
 					var pmLabel string
 					switch pm {
@@ -87,10 +84,10 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 					}
 
 					var zoneIcon string
-					switch zone {
-					case "g":
+					switch level {
+					case "1":
 						zoneIcon = icoPmLevel1
-					case "y":
+					case "2":
 						zoneIcon = icoPmLevel2
 					default:
 						zoneIcon = icoPmLevel3
@@ -102,10 +99,10 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 					}
 
 					var zoneName string
-					switch zone {
-					case "g":
+					switch level {
+					case "1":
 						zoneName = b.T(chatID, "labelZoneGreenAcc")
-					case "y":
+					case "2":
 						zoneName = b.T(chatID, "labelZoneYellowAcc")
 					default:
 						zoneName = b.T(chatID, "labelZoneRedAcc")
@@ -125,15 +122,14 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 		}
 	}
 
-	// 3. PM Dynamics Alerts (diffXX-XX)
 	if filter == "" || filter == "diff" || filter == "pm" {
 		pmTypes := []string{"25", "10", "s"}
 		actions := []string{"u", "d"}
-		zones := []string{"g", "y", "r"}
+		levels := []string{"1", "2", "3"}
 		for _, pm := range pmTypes {
 			for _, act := range actions {
-				for _, zone := range zones {
-					id := fmt.Sprintf("diff%s-%s%s", pm, zone, act)
+				for _, level := range levels {
+					id := fmt.Sprintf("diff%s_l%s%s", pm, level, act)
 					
 					var pmLabel string
 					switch pm {
@@ -151,10 +147,10 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 					}
 
 					var zoneIcon string
-					switch zone {
-					case "g":
+					switch level {
+					case "1":
 						zoneIcon = icoPmLevel1
-					case "y":
+					case "2":
 						zoneIcon = icoPmLevel2
 					default:
 						zoneIcon = icoPmLevel3
@@ -166,10 +162,10 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 					}
 
 					var zoneName string
-					switch zone {
-					case "g":
+					switch level {
+					case "1":
 						zoneName = b.T(chatID, "labelZoneGreenAcc")
-					case "y":
+					case "2":
 						zoneName = b.T(chatID, "labelZoneYellowAcc")
 					default:
 						zoneName = b.T(chatID, "labelZoneRedAcc")
@@ -206,55 +202,60 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 	switch {
 	case data == "none":
 		return
-	case data == "menu_reset_defaults":
+	case data == cmdResetSettings:
+		b.cleanupMessage(chatID, cq)
 		b.cmdResetConfirm(chatID)
 		return
 
-	case data == "menu_main":
+	case data == cmdHelp:
 		b.cleanupMessage(chatID, cq)
 		b.sendHelp(chatID)
-	case data == "menu_settings":
+	case data == cmdSettings:
 		b.cleanupMessage(chatID, cq)
 		b.cmdSettings(chatID)
-	case data == "menu_status":
+	case data == cmdStatus:
 		b.cleanupMessage(chatID, cq)
 		b.cmdStatusMenu(chatID)
-	case data == "menu_charts":
+	case data == cmdCharts:
 		b.cleanupMessage(chatID, cq)
 		b.cmdChartsMenu(chatID)
-	case data == "menu_history":
+	case data == cmdHistory:
 		b.cleanupMessage(chatID, cq)
 		b.cmdHistoryMenu(chatID)
-	case data == "menu_list":
+	case data == cmdList:
 		b.cleanupMessage(chatID, cq)
 		b.cmdList(chatID)
-	case data == "menu_thresholds":
+	case data == cmdThresholdsMenu:
 		b.cleanupMessage(chatID, cq)
 		b.cmdThresholdsMenu(chatID)
-	case data == "menu_aqi_cycle":
+	case data == cmdAqiCycleMenu:
 		b.cmdAQICycleMenu(chatID, cq.Message.GetMessageID())
-	case data == "menu_aqi_thresholds":
-		b.cmdAQICycleMenu(chatID, cq.Message.GetMessageID())
-	case data == "reset_defaults":
-		b.cmdResetConfirm(chatID)
-	case data == "reset_defaults_yes":
+	case data == cmdResetDefaultsYes:
 		b.cleanupMessage(chatID, cq)
 		b.cmdResetExecute(chatID)
-	case data == "menu_sound":
+	case data == cmdSoundProfiles:
+		b.cleanupMessage(chatID, cq)
 		b.cmdSoundMenu(chatID, false)
-	case data == "menu_silent":
+	case data == cmdSilentProfiles:
+		b.cleanupMessage(chatID, cq)
 		b.cmdSoundMenu(chatID, true)
-	case data == "menu_subscribe":
+	case data == cmdSubscribe:
 		b.cleanupMessage(chatID, cq)
 		b.promptDeviceID(chatID)
-	case data == "menu_unsubscribe":
+	case data == cmdUnsubscribe:
 		b.cleanupMessage(chatID, cq)
 		b.cmdUnsubscribeMenu(chatID)
-	case data == "menu_aqi":
+	case data == cmdAQISettings:
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
-	case data == "menu_lang":
+	case data == cmdLang:
 		b.cleanupMessage(chatID, cq)
 		b.cmdLangMenu(chatID)
+	case data == cmdCancelThreshold:
+		b.cleanupMessage(chatID, cq)
+		b.setState(chatID, stateIdle)
+	case data == cmdCancelSub:
+		b.cleanupMessage(chatID, cq)
+		b.setState(chatID, stateIdle)
 	case data == "aqi_std_toggle":
 		mcfg := b.GetUserSettings(chatID)
 		if mcfg.AQIStandard == "EU" {
@@ -299,8 +300,9 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
 	case strings.HasPrefix(data, "charts_dev:"):
+		b.cleanupMessage(chatID, cq)
 		deviceID := strings.TrimPrefix(data, "charts_dev:")
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgChartsMenu"), b.chartsMenuKeyboard(chatID, deviceID))
+		b.sendWithKeyboard(chatID, b.T(chatID, msgChartsMenu), b.chartsMenuKeyboard(chatID, deviceID))
 
 	case strings.HasPrefix(data, "pm_set:"):
 		parts := strings.Split(data, ":")
@@ -309,31 +311,24 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		}
 	case strings.HasPrefix(data, "unsub:"):
 		deviceID := strings.TrimPrefix(data, "unsub:")
-		text := b.TDevice(chatID, "msgUnsubConfirm", deviceID)
+		text := b.TDevice(chatID, msgUnsubConfirm, deviceID)
 		kb := tu.InlineKeyboard(
 			tu.InlineKeyboardRow(
 				tu.InlineKeyboardButton(b.T(chatID, btnYes, icoSuccess)).WithCallbackData(fmt.Sprintf("unsub_yes:%s", deviceID)),
 				tu.InlineKeyboardButton(b.T(chatID, btnNo, icoError)).WithCallbackData(fmt.Sprintf("unsub_no:%s", deviceID)),
 			),
 		)
-		params := tu.EditMessageText(tu.ID(chatID), cq.Message.GetMessageID(), text).
-			WithParseMode(telego.ModeHTML).
-			WithReplyMarkup(kb)
-		_, _ = b.api.EditMessageText(context.Background(), params)
+		b.sendWithKeyboard(chatID, text, kb)
 
 	case strings.HasPrefix(data, "unsub_yes:"):
 		deviceID := strings.TrimPrefix(data, "unsub_yes:")
 		b.store.Unsubscribe(chatID, deviceID)
 		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
-		b.sendWithKeyboard(chatID, b.TDevice(chatID, "msgUnsubscribed", deviceID), nil)
+		b.sendWithKeyboard(chatID, b.TDevice(chatID, msgUnsubscribed, deviceID), nil)
 		b.cmdList(chatID)
 
 	case strings.HasPrefix(data, "unsub_no:"):
-		deviceID := strings.TrimPrefix(data, "unsub_no:")
-		params := tu.EditMessageText(tu.ID(chatID), cq.Message.GetMessageID(), b.formatDeviceShortInfo(chatID, deviceID)).
-			WithParseMode(telego.ModeHTML).
-			WithReplyMarkup(b.deviceInfoKeyboard(chatID, deviceID))
-		_, _ = b.api.EditMessageText(context.Background(), params)
+		b.cleanupMessage(chatID, cq)
 
 	case strings.HasPrefix(data, "aqi_cycle:"):
 		b.handleAQIThresholdCycle(chatID, data, cq.Message.GetMessageID())
@@ -362,7 +357,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		log.Debug().Int64("chat_id", chatID).Str("to", lang).Msg("tgbot: language changed via menu")
 		b.updateCommandsForUser(chatID, lang)
 		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgHelp"), b.mainKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.T(chatID, msgHelp), b.mainKeyboard(chatID))
 
 	case strings.HasPrefix(data, "toggle:"):
 		parts := strings.Split(data, ":")
@@ -417,28 +412,37 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.cmdRename(chatID, deviceID)
 		return
 	case strings.HasPrefix(data, "rename_cancel:"):
-		deviceID := strings.TrimPrefix(data, "rename_cancel:")
 		b.setState(chatID, stateIdle)
 		b.renameIDMu.Lock()
 		delete(b.renameIDs, chatID)
 		b.renameIDMu.Unlock()
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
-		b.sendWithKeyboard(chatID, b.formatDeviceShortInfo(chatID, deviceID), b.deviceInfoKeyboard(chatID, deviceID))
+		b.cleanupMessage(chatID, cq)
 		return
 	case data == "rename_cancel":
 		b.setState(chatID, stateIdle)
 		b.renameIDMu.Lock()
 		delete(b.renameIDs, chatID)
 		b.renameIDMu.Unlock()
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
-		b.cmdList(chatID)
+		b.cleanupMessage(chatID, cq)
 		return
 
 	case strings.HasPrefix(data, "status:"):
 		b.cleanupMessage(chatID, cq)
 		deviceID := strings.TrimPrefix(data, "status:")
+		b.sendWithKeyboard(chatID, b.formatDeviceStatus(chatID, deviceID), b.mainKeyboard(chatID, deviceID))
 
-		b.sendWithKeyboard(chatID, b.formatDeviceShortInfo(chatID, deviceID), b.deviceInfoKeyboard(chatID, deviceID))
+	case strings.HasPrefix(data, "dev_settings:"):
+		b.cleanupMessage(chatID, cq)
+		deviceID := strings.TrimPrefix(data, "dev_settings:")
+		text := b.TDevice(chatID, "msgDeviceSettingsTitle", deviceID) +
+			"\n\n" + b.TDevice(chatID, "txtDevice", deviceID) +
+			"\n\n" + b.T(chatID, "msgDeviceSettingsHint")
+		b.sendWithKeyboard(chatID, text, b.deviceSettingsKeyboard(chatID, deviceID))
+
+	case strings.HasPrefix(data, "info:"):
+		b.cleanupMessage(chatID, cq)
+		deviceID := strings.TrimPrefix(data, "info:")
+		b.sendWithKeyboard(chatID, b.formatDeviceStatus(chatID, deviceID), b.deviceInfoKeyboard(chatID, deviceID))
 
 	case strings.HasPrefix(data, "chart:"):
 		b.cleanupMessage(chatID, cq)

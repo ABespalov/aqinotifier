@@ -571,12 +571,12 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			}
 		}
 
-		drawBar(0, barWidth, 0, mcfg.PM25Green, colorGreenZone)
-		drawBar(0, barWidth, mcfg.PM25Green, mcfg.PM25Yellow, colorYellowZone)
-		drawBar(0, barWidth, mcfg.PM25Yellow, math.MaxFloat64, colorRedZone)
-		drawBar(gridW-barWidth, gridW, 0, mcfg.PM10Green, colorGreenZone)
-		drawBar(gridW-barWidth, gridW, mcfg.PM10Green, mcfg.PM10Yellow, colorYellowZone)
-		drawBar(gridW-barWidth, gridW, mcfg.PM10Yellow, math.MaxFloat64, colorRedZone)
+		drawBar(0, barWidth, 0, mcfg.PM25L1, colorGreenZone)
+		drawBar(0, barWidth, mcfg.PM25L1, mcfg.PM25L2, colorYellowZone)
+		drawBar(0, barWidth, mcfg.PM25L2, math.MaxFloat64, colorRedZone)
+		drawBar(gridW-barWidth, gridW, 0, mcfg.PM10L1, colorGreenZone)
+		drawBar(gridW-barWidth, gridW, mcfg.PM10L1, mcfg.PM10L2, colorYellowZone)
+		drawBar(gridW-barWidth, gridW, mcfg.PM10L2, math.MaxFloat64, colorRedZone)
 
 		dashWidth := chartStrokeWidth * chartDashWidthCoef
 		dashPattern := chartDashPattern
@@ -597,24 +597,24 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			pureCp.DashedLineStroke([]charts.Point{{X: int(tx1), Y: int(y)}, {X: int(tx2), Y: int(y)}}, color, dashWidth, dashPattern)
 		}
 
-		drawThreshold(mcfg.PM25Green, colorSeriesRed, true, 0)
-		drawDots(data[0], mcfg.PM25Green, colorSeriesRed, 0)
-		drawThreshold(mcfg.PM25Yellow, colorSeriesRed, true, 0)
-		drawDots(data[0], mcfg.PM25Yellow, colorSeriesRed, 0)
+		drawThreshold(mcfg.PM25L1, colorSeriesRed, true, 0)
+		drawDots(data[0], mcfg.PM25L1, colorSeriesRed, 0)
+		drawThreshold(mcfg.PM25L2, colorSeriesRed, true, 0)
+		drawDots(data[0], mcfg.PM25L2, colorSeriesRed, 0)
 
 		var g10Offset float64
-		if mcfg.PM10Green == mcfg.PM25Green || mcfg.PM10Green == mcfg.PM25Yellow {
+		if mcfg.PM10L1 == mcfg.PM25L1 || mcfg.PM10L1 == mcfg.PM25L2 {
 			g10Offset = dashWidth * 2
 		}
-		drawThreshold(mcfg.PM10Green, colorSeriesBlue, false, g10Offset)
-		drawDots(data[1], mcfg.PM10Green, colorSeriesBlue, g10Offset)
+		drawThreshold(mcfg.PM10L1, colorSeriesBlue, false, g10Offset)
+		drawDots(data[1], mcfg.PM10L1, colorSeriesBlue, g10Offset)
 
 		var y10Offset float64
-		if mcfg.PM10Yellow == mcfg.PM25Green || mcfg.PM10Yellow == mcfg.PM25Yellow {
+		if mcfg.PM10L2 == mcfg.PM25L1 || mcfg.PM10L2 == mcfg.PM25L2 {
 			y10Offset = dashWidth * 2
 		}
-		drawThreshold(mcfg.PM10Yellow, colorSeriesBlue, false, y10Offset)
-		drawDots(data[1], mcfg.PM10Yellow, colorSeriesBlue, y10Offset)
+		drawThreshold(mcfg.PM10L2, colorSeriesBlue, false, y10Offset)
+		drawDots(data[1], mcfg.PM10L2, colorSeriesBlue, y10Offset)
 
 		drawSeriesPoints(data[0], colorSeriesRed, 0)
 		drawSeriesPoints(data[1], colorSeriesBlue, g10Offset)

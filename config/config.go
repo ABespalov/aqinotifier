@@ -169,13 +169,13 @@ func NewSystemConfig() *System {
 }
 
 type Monitor struct {
-	PM10Green    float64  `yaml:"pm10_green" json:"pm10_green"`
-	PM25Green    float64  `yaml:"pm25_green" json:"pm25_green"`
-	PM10Yellow   float64  `yaml:"pm10_yellow" json:"pm10_yellow"`
-	PM25Yellow   float64  `yaml:"pm25_yellow" json:"pm25_yellow"`
-	PM10Diff     float64  `yaml:"pm10_diff" json:"pm10_diff"`
-	PM25Diff     float64  `yaml:"pm25_diff" json:"pm25_diff"`
-	Notifications []string `yaml:"notifications" json:"notifications"`
+	PM10L1        float64           `yaml:"pm10_l1" json:"pm10_l1"`
+	PM25L1        float64           `yaml:"pm25_l1" json:"pm25_l1"`
+	PM10L2        float64           `yaml:"pm10_l2" json:"pm10_l2"`
+	PM25L2        float64           `yaml:"pm25_l2" json:"pm25_l2"`
+	PM10Diff      float64           `yaml:"pm10_diff" json:"pm10_diff"`
+	PM25Diff      float64           `yaml:"pm25_diff" json:"pm25_diff"`
+	Notifications []string          `yaml:"notifications" json:"notifications"`
 	Warnings      []string          `yaml:"warnings" json:"warnings"`
 	AQIStandard   string            `yaml:"aqi_standard" json:"aqi_standard"`
 	DeviceNames   map[string]string `yaml:"device_names" json:"device_names"`
@@ -184,16 +184,48 @@ type Monitor struct {
 // NewMonitorConfig returns a Monitor pre-populated with default values
 func NewMonitorConfig() *Monitor {
 	return &Monitor{
-		PM10Green:     54.0,
-		PM25Green:     9.0,
-		PM10Yellow:    154.0,
-		PM25Yellow:    35.0,
+		PM10L1:        54.0,
+		PM25L1:        9.0,
+		PM10L2:        154.0,
+		PM25L2:        35.0,
 		PM10Diff:      66.0,
 		PM25Diff:      50.0,
-		Notifications: []string{"aqi_z1", "aqi_z2", "aqi_z3", "aqi_z4", "aqi_z5", "aqi_z6", "aqi_z7", "vals-ru", "vals-gd"},
-		Warnings:      []string{"aqi_z1", "aqi_z2", "aqi_z3", "aqi_z4", "aqi_z5", "aqi_z6", "aqi_z7", "val25-yu", "val25-ru", "val25-yd", "val25-gd", "val10-yu", "val10-ru", "val10-yd", "val10-gd", "vals-yu", "vals-ru", "vals-yd", "vals-gd"},
+		Notifications: []string{"aqi_l1", "aqi_l2", "aqi_l3", "aqi_l4", "aqi_l5", "aqi_l6", "aqi_l7", "vals_l3u", "vals_l1d"},
+		Warnings:      []string{"aqi_l1", "aqi_l2", "aqi_l3", "aqi_l4", "aqi_l5", "aqi_l6", "aqi_l7", "val25_l2u", "val25_l3u", "val25_l2d", "val25_l1d", "val10_l2u", "val10_l3u", "val10_l2d", "val10_l1d", "vals_l2u", "vals_l3u", "vals_l2d", "vals_l1d"},
 		AQIStandard:   "EU",
 		DeviceNames:   make(map[string]string),
+	}
+}
+
+// Validate ensures that the Monitor configuration is valid and populates defaults for missing values
+func (m *Monitor) Validate() {
+	defaults := NewMonitorConfig()
+	if m.PM10L1 == 0 {
+		m.PM10L1 = defaults.PM10L1
+	}
+	if m.PM25L1 == 0 {
+		m.PM25L1 = defaults.PM25L1
+	}
+	if m.PM10L2 == 0 {
+		m.PM10L2 = defaults.PM10L2
+	}
+	if m.PM25L2 == 0 {
+		m.PM25L2 = defaults.PM25L2
+	}
+	if m.PM10Diff == 0 {
+		m.PM10Diff = defaults.PM10Diff
+	}
+	if m.PM25Diff == 0 {
+		m.PM25Diff = defaults.PM25Diff
+	}
+	if m.AQIStandard == "" {
+		m.AQIStandard = defaults.AQIStandard
+	}
+	if m.Notifications == nil {
+		m.Notifications = defaults.Notifications
+	}
+	if m.Warnings == nil {
+		m.Warnings = defaults.Warnings
 	}
 }
 

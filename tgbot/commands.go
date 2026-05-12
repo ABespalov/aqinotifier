@@ -6,66 +6,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
 	"github.com/rs/zerolog/log"
-
-
-
-	"github.com/ABespalov/aqinotifier/sensor"
 )
 
-func (b *Bot) cmdLangMenu(chatID int64) {
-	currentLang := b.store.GetLanguage(chatID)
-	currentTemp := b.store.GetUnitTemp(chatID)
-	currentPress := b.store.GetUnitPress(chatID)
-
-	langs := AvailableLanguages()
-	var langBtns []telego.InlineKeyboardButton
-	for _, lang := range langs {
-		label := b.TLang(lang, "lang"+strings.Title(lang))
-		if lang == currentLang || (currentLang == "" && lang == "en") {
-			label = icoSuccess + " " + label
-		}
-		langBtns = append(langBtns, tu.InlineKeyboardButton(label).WithCallbackData("lang_set:"+lang))
-	}
-
-	btnC := b.T(chatID, "unitC")
-	btnF := b.T(chatID, "unitF")
-	if currentTemp == "c" {
-		btnC = icoSuccess + " " + btnC
-	} else {
-		btnF = icoSuccess + " " + btnF
-	}
-
-	btnMMHG := b.T(chatID, "unitMmhg")
-	btnHPA := b.T(chatID, "unitHpa")
-	if currentPress == "mmhg" {
-		btnMMHG = icoSuccess + " " + btnMMHG
-	} else {
-		btnHPA = icoSuccess + " " + btnHPA
-	}
-
-	inlineKeyboard := tu.InlineKeyboard(
-		tu.InlineKeyboardRow(langBtns...),
-		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnC).WithCallbackData("unit_set:temp:c"),
-			tu.InlineKeyboardButton(btnF).WithCallbackData("unit_set:temp:f"),
-		),
-		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnMMHG).WithCallbackData("unit_set:press:mmhg"),
-			tu.InlineKeyboardButton(btnHPA).WithCallbackData("unit_set:press:hpa"),
-		),
-		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData("menu_settings"),
-		),
-	)
-
-	params := tu.Message(tu.ID(chatID), b.T(chatID, "msgSelectLang")).
-		WithParseMode(telego.ModeHTML).
-		WithReplyMarkup(inlineKeyboard)
-	_, _ = b.api.SendMessage(context.Background(), params)
-}
 func (b *Bot) cmdSubscribeDevice(chatID int64, msg *telego.Message) {
 	b.clearLastPrompt(chatID)
 	input := strings.TrimSpace(msg.Text)
@@ -86,135 +32,145 @@ func (b *Bot) cmdSubscribeDevice(chatID int64, msg *telego.Message) {
 
 	for _, c := range deviceID {
 		if c < '0' || c > '9' {
-			b.sendWithKeyboard(chatID, b.T(chatID, "msgInvalidDeviceId"), b.mainKeyboard(chatID))
+			b.sendWithKeyboard(chatID, b.T(chatID, msgInvalidDeviceId), b.mainKeyboard(chatID))
 			return
 		}
 	}
 
 	var text string
 	if b.store.Subscribe(chatID, deviceID, b.defaults) {
-		text = b.TDevice(chatID, "msgSubscribed", deviceID)
+		text = b.TDevice(chatID, msgSubscribed, deviceID)
 	} else {
-		text = b.TDevice(chatID, "msgAlreadySub", deviceID)
+		text = b.TDevice(chatID, msgAlreadySub, deviceID)
 	}
 	b.sendWithKeyboard(chatID, text, nil)
 	b.cmdList(chatID)
 }
-func (b *Bot) cmdList(chatID int64) {
-	devices := b.store.Subscriptions(chatID)
-	if len(devices) == 0 {
-		text := b.T(chatID, "msgNoSubs")
-		b.sendWithKeyboard(chatID, text, b.subscriptionKeyboard(chatID))
-		return
-	}
 
-	var rows [][]telego.InlineKeyboardButton
-	for _, id := range devices {
-		mcfg := b.GetUserSettings(chatID)
-		label := id
-		if name, ok := mcfg.DeviceNames[id]; ok && name != "" {
-			label = fmt.Sprintf("%s (%s)", name, id)
-		}
-		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", icoStatus, label)).WithCallbackData(fmt.Sprintf("status:%s", id)),
-		})
-	}
-
-	rows = append(rows, []telego.InlineKeyboardButton{
-		tu.InlineKeyboardButton(b.T(chatID, btnSubscribe)).WithCallbackData("menu_subscribe"),
-		tu.InlineKeyboardButton(b.T(chatID, btnBack)).WithCallbackData("menu_main"),
-	})
-
-	text := b.T(chatID, "msgYourSubs")
-	params := tu.Message(tu.ID(chatID), text).
-		WithParseMode(telego.ModeHTML).
-		WithReplyMarkup(tu.InlineKeyboard(rows...))
-	_, _ = b.api.SendMessage(context.Background(), params)
+func (b *Bot) cmdSettings(chatID int64) {
+	b.clearLastPrompt(chatID)
+	b.sendWithKeyboard(chatID, b.T(chatID, msgSettingsTitle), b.settingsKeyboard(chatID))
 }
-func (b *Bot) cmdUnsubscribeMenu(chatID int64) {
-	devices := b.store.Subscriptions(chatID)
-	if len(devices) == 0 {
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgNoSubs"), b.subscriptionKeyboard(chatID))
-		return
-	}
 
-	var rows [][]telego.InlineKeyboardButton
-	for _, id := range devices {
-		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s  %s", icoUnsubscribe, id)).WithCallbackData(fmt.Sprintf("unsub:%s", id)),
-		})
-	}
-
-	rows = append(rows, []telego.InlineKeyboardButton{
-		tu.InlineKeyboardButton(b.T(chatID, btnBack)).WithCallbackData("menu_main"),
-	})
-
-	params := tu.Message(tu.ID(chatID), b.T(chatID, "msgSelectUnsub",
-		icoDelete)).
-		WithParseMode(telego.ModeHTML).
-		WithReplyMarkup(tu.InlineKeyboard(rows...))
-	_, _ = b.api.SendMessage(context.Background(), params)
-}
 func (b *Bot) cmdStatusMenu(chatID int64) {
-	log.Debug().Int64("chat_id", chatID).Msg("tgbot: cmdStatusMenu called")
 	b.clearLastPrompt(chatID)
 	devices := b.store.Subscriptions(chatID)
 	if len(devices) == 0 {
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgNoSubs"), b.subscriptionKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.T(chatID, msgNoSubs), b.subscriptionKeyboard(chatID))
 		return
 	}
 	if len(devices) == 1 {
-		b.sendWithKeyboard(chatID, b.formatDeviceStatus(chatID, devices[0]), b.mainKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.formatDeviceStatus(chatID, devices[0]), b.mainKeyboard(chatID, devices[0]))
 		return
 	}
 
 	var rows [][]telego.InlineKeyboardButton
 	for _, id := range devices {
 		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", icoStatus, id)).WithCallbackData(fmt.Sprintf("status:%s", id)),
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", b.I(kIcoStatus), id)).WithCallbackData(fmt.Sprintf("status:%s", id)),
 		})
 	}
 
-	params := tu.Message(tu.ID(chatID), b.T(chatID, "msgSelectDevice")).
-		WithParseMode(telego.ModeHTML).
-		WithReplyMarkup(tu.InlineKeyboard(rows...))
-	_, _ = b.api.SendMessage(context.Background(), params)
+	rows = append(rows, []telego.InlineKeyboardButton{
+		tu.InlineKeyboardButton(b.T(chatID, btnMainMenu)).WithCallbackData(cmdHelp),
+	})
+
+	b.sendWithKeyboard(chatID, b.T(chatID, msgSelectDevice), tu.InlineKeyboard(rows...))
 }
-func (b *Bot) cmdSettings(chatID int64) {
-	ReloadAll()
+
+func (b *Bot) cmdList(chatID int64) {
+	log.Debug().Int64("chat_id", chatID).Msg("tgbot: cmdList called")
 	b.clearLastPrompt(chatID)
-	b.sendWithKeyboard(chatID, b.T(chatID, "msgSettingsTitle"), b.settingsKeyboard(chatID))
+	devices := b.store.Subscriptions(chatID)
+
+	var text string
+	if len(devices) == 0 {
+		text = b.T(chatID, msgNoSubs)
+	} else {
+		text = b.T(chatID, msgYourSubs)
+	}
+
+	var rows [][]telego.InlineKeyboardButton
+	for _, id := range devices {
+		rows = append(rows, []telego.InlineKeyboardButton{
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", b.I(kIcoDevice), b.formatDeviceIDPlain(chatID, id))).WithCallbackData(fmt.Sprintf("dev_settings:%s", id)),
+		})
+	}
+
+	rows = append(rows, []telego.InlineKeyboardButton{
+		tu.InlineKeyboardButton(b.T(chatID, btnSubscribe)).WithCallbackData(cmdSubscribe),
+		tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),
+	})
+
+	b.sendWithKeyboard(chatID, text, tu.InlineKeyboard(rows...))
 }
+
+func (b *Bot) cmdUnsubscribeMenu(chatID int64) {
+	b.clearLastPrompt(chatID)
+	devices := b.store.Subscriptions(chatID)
+	if len(devices) == 0 {
+		b.sendWithKeyboard(chatID, b.T(chatID, msgNoSubs), b.subscriptionKeyboard(chatID))
+		return
+	}
+
+	var rows [][]telego.InlineKeyboardButton
+	for _, id := range devices {
+		rows = append(rows, []telego.InlineKeyboardButton{
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", b.I(kIcoDelete), b.formatDeviceIDPlain(chatID, id))).WithCallbackData(fmt.Sprintf("unsub:%s", id)),
+		})
+	}
+	rows = append(rows, []telego.InlineKeyboardButton{
+		tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),
+	})
+
+	b.sendWithKeyboard(chatID, b.T(chatID, msgSelectUnsub), tu.InlineKeyboard(rows...))
+}
+
 func (b *Bot) cmdChartsMenu(chatID int64) {
 	b.clearLastPrompt(chatID)
 	devices := b.store.Subscriptions(chatID)
 	if len(devices) == 0 {
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgNoSubs"), b.subscriptionKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.T(chatID, msgNoSubs), b.subscriptionKeyboard(chatID))
 		return
 	}
 	if len(devices) == 1 {
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgChartsMenu"), b.chartsMenuKeyboard(chatID, devices[0]))
+		b.sendWithKeyboard(chatID, b.T(chatID, msgChartsMenu), b.chartsMenuKeyboard(chatID, devices[0]))
 		return
 	}
 
 	var rows [][]telego.InlineKeyboardButton
 	for _, id := range devices {
 		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", icoStatus, id)).WithCallbackData(fmt.Sprintf("charts_dev:%s", id)),
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", b.I(kIcoTrendUp), id)).WithCallbackData(fmt.Sprintf("charts_dev:%s", id)),
 		})
 	}
-
 	rows = append(rows, []telego.InlineKeyboardButton{
-		tu.InlineKeyboardButton(b.T(chatID, btnMainMenu)).WithCallbackData("menu_main"),
+		tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),
 	})
 
-	params := tu.Message(tu.ID(chatID), b.T(chatID, "msgSelectDevice")).
-		WithParseMode(telego.ModeHTML).
-		WithReplyMarkup(tu.InlineKeyboard(rows...))
-	_, _ = b.api.SendMessage(context.Background(), params)
+	b.sendWithKeyboard(chatID, b.T(chatID, msgSelectDevice), tu.InlineKeyboard(rows...))
 }
+
+func (b *Bot) cmdLangMenu(chatID int64) {
+	b.clearLastPrompt(chatID)
+	kb := tu.InlineKeyboard(
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, "langRu")).WithCallbackData("lang_set:ru"),
+			tu.InlineKeyboardButton(b.T(chatID, "langEn")).WithCallbackData("lang_set:en"),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, "txtUnit"+strings.Title(b.store.GetUnitTemp(chatID)))).WithCallbackData("unit_set:temp:toggle"),
+			tu.InlineKeyboardButton(b.T(chatID, "txtUnit"+strings.Title(b.store.GetUnitPress(chatID)))).WithCallbackData("unit_set:press:toggle"),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),
+		),
+	)
+	b.sendWithKeyboard(chatID, b.T(chatID, msgSelectLang), kb)
+}
+
 func (b *Bot) cmdAqiMenu(chatID int64, editMsgID ...int) {
-	text := b.T(chatID, "msgAqiSettings")
+	text := b.T(chatID, msgAqiSettings)
 	kb := b.aqiSettingsKeyboard(chatID)
 
 	if len(editMsgID) > 0 {
@@ -223,17 +179,16 @@ func (b *Bot) cmdAqiMenu(chatID int64, editMsgID ...int) {
 			WithReplyMarkup(kb)
 		_, _ = b.api.EditMessageText(context.Background(), params)
 	} else {
-		params := tu.Message(tu.ID(chatID), text).
-			WithParseMode(telego.ModeHTML).
-			WithReplyMarkup(kb)
-		_, _ = b.api.SendMessage(context.Background(), params)
+		b.sendWithKeyboard(chatID, text, kb)
 	}
 }
+
 func (b *Bot) cmdThresholdsMenu(chatID int64) {
+	b.clearLastPrompt(chatID)
 	mcfg := b.GetUserSettings(chatID)
-	text := b.T(chatID, "msgThresholdsMenu", map[string]interface{}{
-		"vg1": mcfg.PM25Green, "vy1": mcfg.PM25Yellow, "vdyn1": mcfg.PM25Diff,
-		"vg2": mcfg.PM10Green, "vy2": mcfg.PM10Yellow, "vdyn2": mcfg.PM10Diff,
+	text := b.T(chatID, msgThresholdsMenu, map[string]interface{}{
+		"vg1": mcfg.PM25L1, "vy1": mcfg.PM25L2, "vdyn1": mcfg.PM25Diff,
+		"vg2": mcfg.PM10L1, "vy2": mcfg.PM10L2, "vdyn2": mcfg.PM10Diff,
 		"labelPm25": b.T(chatID, "labelPm25"), "labelPm10": b.T(chatID, "labelPm10"),
 		"labelZoneGreen": b.T(chatID, "labelZoneGreen"), "labelZoneYellow": b.T(chatID, "labelZoneYellow"),
 		"labelDynamics": b.T(chatID, "labelDynamics"),
@@ -241,12 +196,13 @@ func (b *Bot) cmdThresholdsMenu(chatID int64) {
 
 	b.sendWithKeyboard(chatID, text, b.thresholdsKeyboard(chatID))
 }
+
 func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 	mcfg := b.GetUserSettings(chatID)
 
-	text := b.T(chatID, "msgAqiCycleMenu", map[string]interface{}{
-		"vg1": mcfg.PM25Green, "vy1": mcfg.PM25Yellow,
-		"vg2": mcfg.PM10Green, "vy2": mcfg.PM10Yellow,
+	text := b.T(chatID, msgAqiCycleMenu, map[string]interface{}{
+		"vg1": mcfg.PM25L1, "vy1": mcfg.PM25L2,
+		"vg2": mcfg.PM10L1, "vy2": mcfg.PM10L2,
 	})
 
 	getIcon := func(pmType string, val float64) (string, string) {
@@ -266,7 +222,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 			for _, v := range eu {
 				if v == val {
 					std = "EU"
-					flag = b.T(chatID, "icoFlagEU")
+					flag = b.I(kIcoFlagEU)
 					found = true
 					break
 				}
@@ -275,7 +231,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 				for _, v := range us {
 					if v == val {
 						std = "US"
-						flag = b.T(chatID, "icoFlagUS")
+						flag = b.I(kIcoFlagUS)
 						found = true
 						break
 					}
@@ -285,7 +241,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 			for _, v := range us {
 				if v == val {
 					std = "US"
-					flag = b.T(chatID, "icoFlagUS")
+					flag = b.I(kIcoFlagUS)
 					found = true
 					break
 				}
@@ -294,7 +250,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 				for _, v := range eu {
 					if v == val {
 						std = "EU"
-						flag = b.T(chatID, "icoFlagEU")
+						flag = b.I(kIcoFlagEU)
 						found = true
 						break
 					}
@@ -306,7 +262,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 			_, level := sensor.CalculateValueAQI(val, pmType, std)
 			return flag, b.getAQIIcon(level, std)
 		}
-		return icoWrite, ""
+		return b.I(kIcoWrite), ""
 	}
 
 	btnText := func(pmType, zoneIcon string, val float64) string {
@@ -319,15 +275,15 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 
 	kb := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnText("PM2.5", icoPmLevel1, mcfg.PM25Green)).WithCallbackData("aqi_cycle:PM2.5:green"),
-			tu.InlineKeyboardButton(btnText("PM10", icoPmLevel1, mcfg.PM10Green)).WithCallbackData("aqi_cycle:PM10:green"),
+			tu.InlineKeyboardButton(btnText(b.T(chatID, "labelPm25"), b.I(kIcoPmLevel1), mcfg.PM25L1)).WithCallbackData("aqi_cycle:PM2.5:level1"),
+			tu.InlineKeyboardButton(btnText(b.T(chatID, "labelPm10"), b.I(kIcoPmLevel1), mcfg.PM10L1)).WithCallbackData("aqi_cycle:PM10:level1"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnText("PM2.5", icoPmLevel2, mcfg.PM25Yellow)).WithCallbackData("aqi_cycle:PM2.5:yellow"),
-			tu.InlineKeyboardButton(btnText("PM10", icoPmLevel2, mcfg.PM10Yellow)).WithCallbackData("aqi_cycle:PM10:yellow"),
+			tu.InlineKeyboardButton(btnText(b.T(chatID, "labelPm25"), b.I(kIcoPmLevel2), mcfg.PM25L2)).WithCallbackData("aqi_cycle:PM2.5:level2"),
+			tu.InlineKeyboardButton(btnText(b.T(chatID, "labelPm10"), b.I(kIcoPmLevel2), mcfg.PM10L2)).WithCallbackData("aqi_cycle:PM10:level2"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, "btnAqiBackToThresholds")).WithCallbackData(cmdThresholdsMenu),
+			tu.InlineKeyboardButton(b.T(chatID, btnAqiBackToThresholds)).WithCallbackData(cmdThresholdsMenu),
 		),
 	)
 
@@ -340,12 +296,13 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
 		b.sendWithKeyboard(chatID, text, kb)
 	}
 }
+
 func (b *Bot) cmdHistoryMenu(chatID int64) {
 	log.Debug().Int64("chat_id", chatID).Msg("tgbot: cmdHistoryMenu called")
 	b.clearLastPrompt(chatID)
 	devices := b.store.Subscriptions(chatID)
 	if len(devices) == 0 {
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgNoSubs"), b.subscriptionKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.T(chatID, msgNoSubs), b.subscriptionKeyboard(chatID))
 		return
 	}
 	if len(devices) == 1 {
@@ -356,27 +313,25 @@ func (b *Bot) cmdHistoryMenu(chatID int64) {
 	var rows [][]telego.InlineKeyboardButton
 	for _, id := range devices {
 		rows = append(rows, []telego.InlineKeyboardButton{
-			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", icoHistory, id)).WithCallbackData(fmt.Sprintf("history:%s", id)),
+			tu.InlineKeyboardButton(fmt.Sprintf("%s %s", b.I(kIcoHistory), id)).WithCallbackData(fmt.Sprintf("history:%s", id)),
 		})
 	}
 
 	rows = append(rows, []telego.InlineKeyboardButton{
-		tu.InlineKeyboardButton(b.T(chatID, btnMainMenu)).WithCallbackData("menu_main"),
+		tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),
 	})
 
-	params := tu.Message(tu.ID(chatID), b.T(chatID, "msgSelectHistory")).
-		WithParseMode(telego.ModeHTML).
-		WithReplyMarkup(tu.InlineKeyboard(rows...))
-	_, _ = b.api.SendMessage(context.Background(), params)
+	b.sendWithKeyboard(chatID, b.T(chatID, msgSelectHistory), tu.InlineKeyboard(rows...))
 }
+
 func (b *Bot) cmdSoundMenu(chatID int64, silent bool, editMsgID ...int) {
 	var templateKey string
 	if silent {
-		templateKey = "msgSilentAlerts"
+		templateKey = msgSilentAlerts
 	} else {
-		templateKey = "msgLoudAlerts"
+		templateKey = msgLoudAlerts
 	}
-	text := b.T(chatID, templateKey) + b.T(chatID, "msgSoundSettings")
+	text := b.T(chatID, templateKey) + b.T(chatID, msgSoundSettings)
 
 	kb := b.notificationSettingsKeyboard(chatID, silent)
 
@@ -386,38 +341,37 @@ func (b *Bot) cmdSoundMenu(chatID int64, silent bool, editMsgID ...int) {
 			WithReplyMarkup(kb)
 		_, _ = b.api.EditMessageText(context.Background(), params)
 	} else {
-		params := tu.Message(tu.ID(chatID), text).
-			WithParseMode(telego.ModeHTML).
-			WithReplyMarkup(kb)
-		_, _ = b.api.SendMessage(context.Background(), params)
+		b.clearLastPrompt(chatID)
+		b.sendWithKeyboard(chatID, text, kb)
 	}
 }
+
 func (b *Bot) cmdRename(chatID int64, deviceID string) {
 	b.setState(chatID, stateAwaitDeviceName)
 	b.renameIDMu.Lock()
 	b.renameIDs[chatID] = deviceID
 	b.renameIDMu.Unlock()
 
-	text := b.TDevice(chatID, "msgRenamePrompt", deviceID)
+	text := b.TDevice(chatID, msgRenamePrompt, deviceID)
 	keyboard := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, "msgRenameCancel")).WithCallbackData(fmt.Sprintf("rename_cancel:%s", deviceID)),
+			tu.InlineKeyboardButton(b.T(chatID, msgRenameCancel)).WithCallbackData(fmt.Sprintf("rename_cancel:%s", deviceID)),
 		),
 	)
 	b.sendWithKeyboard(chatID, text, keyboard)
 }
+
 func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	b.clearLastPrompt(chatID)
 	log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: cmdDeviceHistory start")
-	
+
 	_ = b.api.SendChatAction(context.Background(), &telego.SendChatActionParams{ChatID: tu.ID(chatID), Action: "upload_photo"})
-	
-	// Use GetHistoryByDuration which is now optimized (RAM first)
+
 	history := b.monitor.GetHistory(deviceID)
 	log.Debug().Int64("chat_id", chatID).Int("count", len(history)).Msg("tgbot: history loaded")
-	
+
 	if len(history) == 0 {
-		b.sendWithKeyboard(chatID, b.TDevice(chatID, "msgHistoryEmpty", deviceID), b.mainKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.TDevice(chatID, msgHistoryEmpty, deviceID), b.mainKeyboard(chatID))
 		return
 	}
 
@@ -425,7 +379,7 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	buffers, err := generateCharts(b, chatID, history, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize, chartSmoothingHistory)
 	if err != nil {
 		log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to generate charts")
-		b.sendWithKeyboard(chatID, b.T(chatID, "msgHistoryError"), b.mainKeyboard(chatID))
+		b.sendWithKeyboard(chatID, b.T(chatID, msgHistoryError), b.mainKeyboard(chatID))
 		return
 	}
 	log.Debug().Int64("chat_id", chatID).Int("charts", len(buffers)).Msg("tgbot: drawing charts end")
@@ -436,7 +390,7 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 			Reader: bytes.NewReader(buf),
 			name:   fmt.Sprintf("chart_%d.png", i),
 		}
-		
+
 		photo := &telego.InputMediaPhoto{
 			Type:  "photo",
 			Media: tu.File(nr),
@@ -469,17 +423,17 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	if deviceName == "" {
 		deviceName = deviceID
 	}
-	footer := b.T(chatID, "msgHistoryFooter", map[string]interface{}{
+	footer := b.T(chatID, msgHistoryFooter, map[string]interface{}{
 		"count": len(history), "deviceId": deviceID, "deviceName": deviceName,
 	})
 	b.sendWithKeyboard(chatID, footer, b.mainKeyboard(chatID))
 }
+
 func (b *Bot) cmdResetConfirm(chatID int64) {
+	b.clearLastPrompt(chatID)
 	d := b.defaults
 	std := strings.ToLower(d.AQIStandard)
 	stdLabel := b.T(chatID, "standard"+strings.Title(std))
-
-
 
 	unitT := b.T(chatID, "txtUnit"+strings.Title(strings.ToLower(b.cfg.DefaultUnitTemp)))
 	unitP := b.T(chatID, "txtUnit"+strings.Title(strings.ToLower(b.cfg.DefaultUnitPress)))
@@ -498,16 +452,15 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 
 	for _, a := range allAlerts {
 		if defNotifications[a.id] {
-			statusIcon := b.I("icoSilent")
+			statusIcon := b.I(kIcoSilent)
 			if defWarnings[a.id] {
-				statusIcon = b.I("icoLoud")
+				statusIcon = b.I(kIcoLoud)
 			}
-			// Atoms for templates
 			atoms := map[string]interface{}{
 				"statusIcon": statusIcon,
 				"pm":         a.pm,
 				"action":     a.action,
-				"icon":       a.actionIcon, // Trend icon (📈/📉)
+				"icon":       a.actionIcon,
 				"zone":       a.zone,
 				"zoneIcon":   a.zoneIcon,
 				"in":         b.T(chatID, "txtLabelIn"),
@@ -519,7 +472,6 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 				"isDiff":     strings.HasPrefix(a.id, "diff"),
 			}
 
-			// Pre-render 'name' (button label part) for use in parentheses
 			if atoms["isAqi"].(bool) {
 				atoms["name"] = fmt.Sprintf("%s: %s", a.aqiPrefix, a.aqiName)
 			} else if atoms["isVal"].(bool) {
@@ -534,22 +486,23 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 	}
 
 	text := b.T(chatID, "msgResetConfirm", map[string]interface{}{
-		"pm25G": d.PM25Green, "pm25Y": d.PM25Yellow, "pm25Dyn": d.PM25Diff,
-		"pm10G": d.PM10Green, "pm10Y": d.PM10Yellow, "pm10Dyn": d.PM10Diff,
-		"stdName": stdLabel, "aqiStandardFlag": "{icoFlag"+strings.ToUpper(std)+"}",
+		"pm25G": d.PM25L1, "pm25Y": d.PM25L2, "pm25Dyn": d.PM25Diff,
+		"pm10G": d.PM10L1, "pm10Y": d.PM10L2, "pm10Dyn": d.PM10Diff,
+		"stdName": stdLabel, "aqiStandardFlag": b.I("icoFlag" + strings.ToUpper(std)),
 		"unitT": unitT, "unitP": unitP,
 		"alertsList": alertsSB.String(),
 	})
 
 	b.sendWithKeyboard(chatID, text, b.resetDefaultsKeyboard(chatID))
 }
+
 func (b *Bot) cmdResetExecute(chatID int64) {
 	b.store.ResetSettings(chatID, b.defaults)
 
 	mcfg := b.store.GetSettings(chatID, b.defaults)
-	text := b.T(chatID, "msgResetDone", map[string]interface{}{
-		"pm25G": mcfg.PM25Green, "pm25Y": mcfg.PM25Yellow, "pm25Dyn": mcfg.PM25Diff,
-		"pm10G": mcfg.PM10Green, "pm10Y": mcfg.PM10Yellow, "pm10Dyn": mcfg.PM10Diff,
+	text := b.T(chatID, msgResetExecution, map[string]interface{}{
+		"pm25G": mcfg.PM25L1, "pm25Y": mcfg.PM25L2, "pm25Dyn": mcfg.PM25Diff,
+		"pm10G": mcfg.PM10L1, "pm10Y": mcfg.PM10L2, "pm10Dyn": mcfg.PM10Diff,
 	})
 
 	b.sendWithKeyboard(chatID, text, b.settingsKeyboard(chatID))
