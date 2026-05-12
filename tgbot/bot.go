@@ -356,7 +356,7 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 	params.DisableNotification = silent
 	_, err := b.api.SendMessage(context.Background(), params)
 	if err != nil {
-		log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to send alert")
+		log.Error().Err(err).Int64("chat_id", chatID).Str("msg", text).Msg("tgbot: failed to send alert")
 	}
 }
 
@@ -466,11 +466,11 @@ func (b *Bot) cleanupMessage(chatID int64, cq *telego.CallbackQuery) {
 
 func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 	parts := strings.Split(data, ":")
-	if len(parts) != 4 {
+	if len(parts) != 3 {
 		return
 	}
-	pmType := parts[2]
-	levelKey := parts[3]
+	pmType := parts[1]
+	levelKey := parts[2]
 
 	mcfg := b.GetUserSettings(chatID)
 
