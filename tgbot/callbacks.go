@@ -211,29 +211,25 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		return
 
 	case data == "menu_main":
-		if err := b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()}); err != nil {
-			log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to delete message on menu_main")
-		}
+		b.cleanupMessage(chatID, cq)
 		b.sendHelp(chatID)
 	case data == "menu_settings":
-		if err := b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()}); err != nil {
-			log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to delete message on menu_settings")
-		}
+		b.cleanupMessage(chatID, cq)
 		b.cmdSettings(chatID)
 	case data == "menu_status":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.cmdStatusMenu(chatID)
 	case data == "menu_charts":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.cmdChartsMenu(chatID)
 	case data == "menu_history":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.cmdHistoryMenu(chatID)
 	case data == "menu_list":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.cmdList(chatID)
 	case data == "menu_thresholds":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.cmdThresholdsMenu(chatID)
 	case data == "menu_aqi_cycle":
 		b.cmdAQICycleMenu(chatID, cq.Message.GetMessageID())
@@ -242,22 +238,22 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 	case data == "reset_defaults":
 		b.cmdResetConfirm(chatID)
 	case data == "reset_defaults_yes":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.cmdResetExecute(chatID)
 	case data == "menu_sound":
 		b.cmdSoundMenu(chatID, false)
 	case data == "menu_silent":
 		b.cmdSoundMenu(chatID, true)
 	case data == "menu_subscribe":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.promptDeviceID(chatID)
 	case data == "menu_unsubscribe":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.cmdUnsubscribeMenu(chatID)
 	case data == "menu_aqi":
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
 	case data == "menu_lang":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		b.cmdLangMenu(chatID)
 	case data == "aqi_std_toggle":
 		mcfg := b.GetUserSettings(chatID)
@@ -439,13 +435,13 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		return
 
 	case strings.HasPrefix(data, "status:"):
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		deviceID := strings.TrimPrefix(data, "status:")
 
 		b.sendWithKeyboard(chatID, b.formatDeviceShortInfo(chatID, deviceID), b.deviceInfoKeyboard(chatID, deviceID))
 
 	case strings.HasPrefix(data, "chart:"):
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		parts := strings.SplitN(strings.TrimPrefix(data, "chart:"), ":", 2)
 		if len(parts) == 2 {
 			chartType := parts[0]
@@ -454,7 +450,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		}
 
 	case strings.HasPrefix(data, "history:"):
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		b.cleanupMessage(chatID, cq)
 		deviceID := strings.TrimPrefix(data, "history:")
 		b.cmdDeviceHistory(chatID, deviceID)
 	}

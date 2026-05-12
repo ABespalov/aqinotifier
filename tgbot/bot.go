@@ -340,6 +340,37 @@ func (b *Bot) ensureReplyKeyboardRemoved(chatID int64) {
 	_, _ = b.api.SendMessage(context.Background(), params)
 }
 
+func (b *Bot) cleanupMessage(chatID int64, cq *telego.CallbackQuery) {
+	if cq == nil || cq.Message == nil {
+		return
+	}
+	msgID := cq.Message.GetMessageID()
+
+	b.lastPromptsMu.Lock()
+	isLastPrompt := false
+	if ids, ok := b.lastPrompts[chatID]; ok {
+		for _, id := range ids {
+			if id == msgID {
+				isLastPrompt = true
+				break
+			}
+		}
+	}
+	b.lastPromptsMu.Unlock()
+
+	if isLastPrompt {
+		// It's a tracked menu message, delete all related messages
+		b.clearLastPrompt(chatID)
+	} else {
+		// It's an untracked message (likely a notification), just remove keyboard
+		_ = b.api.EditMessageReplyMarkup(&telego.EditMessageReplyMarkupParams{
+			ChatID:      tu.ID(chatID),
+			MessageID:   msgID,
+			ReplyMarkup: nil,
+		})
+	}
+}
+
 func (b *Bot) SetDB(db *sql.DB) {
 	if b.store != nil {
 		b.store.SetDB(db)
