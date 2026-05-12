@@ -141,14 +141,6 @@ func resolveTemplateLocked(lang string, text string, argsMap map[string]interfac
 				idxClose := -1
 				stack := 0
 				for k := j; k < len(text); k++ {
-					if k+1 < len(text) && text[k:k+2] == "{{" {
-						k++
-						continue
-					}
-					if k+1 < len(text) && text[k:k+2] == "}}" {
-						k++
-						continue
-					}
 					if text[k] == '{' {
 						stack++
 					} else if text[k] == '}' {
@@ -164,7 +156,7 @@ func resolveTemplateLocked(lang string, text string, argsMap map[string]interfac
 					match := text[idxOpen : idxClose+1]
 					if strings.HasPrefix(match, "{?") || strings.HasPrefix(match, "{ ?") {
 						content := match[2 : len(match)-1]
-						parts := splitByTopLevelPercent(content)
+						parts := splitByTopLevelPercent(content, 3)
 						if len(parts) > 0 {
 							condition := strings.TrimPrefix(strings.TrimSpace(parts[0]), "?")
 							trueText := ""
@@ -373,7 +365,7 @@ func compareNumeric(val interface{}, rawVal string, target string) int {
 	return 0
 }
 
-func splitByTopLevelPercent(s string) []string {
+func splitByTopLevelPercent(s string, max int) []string {
 	var parts []string
 	var current strings.Builder
 	depth := 0
@@ -382,9 +374,11 @@ func splitByTopLevelPercent(s string) []string {
 			depth++
 			current.WriteByte('{')
 		} else if s[i] == '}' {
-			if depth > 0 { depth-- }
+			if depth > 0 {
+				depth--
+			}
 			current.WriteByte('}')
-		} else if s[i] == '%' && depth == 0 {
+		} else if s[i] == '%' && depth == 0 && (max <= 0 || len(parts) < max-1) {
 			parts = append(parts, current.String())
 			current.Reset()
 		} else {
