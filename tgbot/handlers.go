@@ -264,17 +264,17 @@ func (b *Bot) promptThreshold(chatID int64, param, levelKey string) {
 		case "level1":
 			b.setState(chatID, stateAwaitPM10Level1)
 			zoneLabel = b.T(chatID, "labelZoneGreen")
-			zoneIcon = icoPmLevel1
+			zoneIcon = b.I(kIcoPmLevel1)
 			currentVal = mcfg.PM10L1
 		case "level2":
 			b.setState(chatID, stateAwaitPM10Level2)
 			zoneLabel = b.T(chatID, "labelZoneYellow")
-			zoneIcon = icoPmLevel2
+			zoneIcon = b.I(kIcoPmLevel2)
 			currentVal = mcfg.PM10L2
 		case "diff":
 			b.setState(chatID, stateAwaitDiff10)
 			zoneLabel = b.T(chatID, "msgThresholdDiffTitle")
-			zoneIcon = icoPm10
+			zoneIcon = b.I(kIcoPm10)
 			currentVal = mcfg.PM10Diff
 		}
 	case "PM2.5":
@@ -283,17 +283,17 @@ func (b *Bot) promptThreshold(chatID int64, param, levelKey string) {
 		case "level1":
 			b.setState(chatID, stateAwaitPM25Level1)
 			zoneLabel = b.T(chatID, "labelZoneGreen")
-			zoneIcon = icoPmLevel1
+			zoneIcon = b.I(kIcoPmLevel1)
 			currentVal = mcfg.PM25L1
 		case "level2":
 			b.setState(chatID, stateAwaitPM25Level2)
 			zoneLabel = b.T(chatID, "labelZoneYellow")
-			zoneIcon = icoPmLevel2
+			zoneIcon = b.I(kIcoPmLevel2)
 			currentVal = mcfg.PM25L2
 		case "diff":
 			b.setState(chatID, stateAwaitDiff25)
 			zoneLabel = b.T(chatID, "msgThresholdDiffTitle")
-			zoneIcon = icoPm25
+			zoneIcon = b.I(kIcoPm25)
 			currentVal = mcfg.PM25Diff
 		}
 	}

@@ -150,9 +150,9 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 
 	stdLower := strings.ToLower(std)
 	for _, id := range aqiAlerts {
-		statusIcon := icoUnchecked
+		statusIcon := b.I(kIcoUnchecked)
 		if activeNotifications[id] {
-			statusIcon = icoChecked
+			statusIcon = b.I(kIcoChecked)
 		}
 		soundLabel := "btnWithoutSound"
 		if loudWarnings[id] {
@@ -214,9 +214,9 @@ func (b *Bot) notificationSettingsKeyboard(chatID int64, silent bool) *telego.In
 			continue
 		}
 
-		statusIcon := icoUnchecked
+		statusIcon := b.I(kIcoUnchecked)
 		if activeNotifications[a.id] {
-			statusIcon = icoChecked
+			statusIcon = b.I(kIcoChecked)
 		}
 
 		soundLabel := "btnWithoutSound"

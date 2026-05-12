@@ -67,7 +67,7 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 					}
 
 					id := fmt.Sprintf("val%s_l%s%s", pm, level, act)
-					
+
 					var pmLabel string
 					switch pm {
 					case "10":
@@ -78,19 +78,19 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 						pmLabel = b.T(chatID, "alertVsShort")
 					}
 
-					actIcon := icoTrendUp
+					actIcon := b.I(kIcoTrendUp)
 					if act == "d" {
-						actIcon = icoTrendDown
+						actIcon = b.I(kIcoTrendDown)
 					}
 
 					var zoneIcon string
 					switch level {
 					case "1":
-						zoneIcon = icoPmLevel1
+						zoneIcon = b.I(kIcoPmLevel1)
 					case "2":
-						zoneIcon = icoPmLevel2
+						zoneIcon = b.I(kIcoPmLevel2)
 					default:
-						zoneIcon = icoPmLevel3
+						zoneIcon = b.I(kIcoPmLevel3)
 					}
 
 					actName := b.T(chatID, "alertActionRise")
@@ -141,19 +141,19 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 						pmLabel = b.T(chatID, "alertVsShort")
 					}
 
-					actIcon := icoTrendUp
+					actIcon := b.I(kIcoTrendUp)
 					if act == "d" {
-						actIcon = icoTrendDown
+						actIcon = b.I(kIcoTrendDown)
 					}
 
 					var zoneIcon string
 					switch level {
 					case "1":
-						zoneIcon = icoPmLevel1
+						zoneIcon = b.I(kIcoPmLevel1)
 					case "2":
-						zoneIcon = icoPmLevel2
+						zoneIcon = b.I(kIcoPmLevel2)
 					default:
-						zoneIcon = icoPmLevel3
+						zoneIcon = b.I(kIcoPmLevel3)
 					}
 
 					actName := b.T(chatID, "alertActionRise")
@@ -314,8 +314,8 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		text := b.TDevice(chatID, msgUnsubConfirm, deviceID)
 		kb := tu.InlineKeyboard(
 			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton(b.T(chatID, btnYes, icoSuccess)).WithCallbackData(fmt.Sprintf("unsub_yes:%s", deviceID)),
-				tu.InlineKeyboardButton(b.T(chatID, btnNo, icoError)).WithCallbackData(fmt.Sprintf("unsub_no:%s", deviceID)),
+				tu.InlineKeyboardButton(b.T(chatID, btnYes, b.I(kIcoSuccess))).WithCallbackData(fmt.Sprintf("unsub_yes:%s", deviceID)),
+				tu.InlineKeyboardButton(b.T(chatID, btnNo, b.I(kIcoError))).WithCallbackData(fmt.Sprintf("unsub_no:%s", deviceID)),
 			),
 		)
 		b.sendWithKeyboard(chatID, text, kb)

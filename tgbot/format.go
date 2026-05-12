@@ -33,37 +33,37 @@ func (b *Bot) getAQIIcon(level sensor.AQILevel, standard string) string {
 	if strings.ToUpper(standard) == "US" {
 		switch level {
 		case sensor.LevelGood:
-			return icoAqiUSLevel1
+			return b.I(kIcoAqiUSLevel1)
 		case sensor.LevelModerate:
-			return icoAqiUSLevel2
+			return b.I(kIcoAqiUSLevel2)
 		case sensor.LevelSlightlyUnhealthy:
-			return icoAqiUSLevel3
+			return b.I(kIcoAqiUSLevel3)
 		case sensor.LevelUnhealthy:
-			return icoAqiUSLevel4
+			return b.I(kIcoAqiUSLevel4)
 		case sensor.LevelVeryUnhealthy:
-			return icoAqiUSLevel5
+			return b.I(kIcoAqiUSLevel5)
 		case sensor.LevelHazardous:
-			return icoAqiUSLevel6
+			return b.I(kIcoAqiUSLevel6)
 		case sensor.LevelExtremelyHazardous:
-			return icoAqiUSLevel7
+			return b.I(kIcoAqiUSLevel7)
 		}
 	} else {
 		switch level {
 		case sensor.LevelGood:
-			return icoAqiEULevel1
+			return b.I(kIcoAqiEULevel1)
 		case sensor.LevelModerate:
-			return icoAqiEULevel2
+			return b.I(kIcoAqiEULevel2)
 		case sensor.LevelSlightlyUnhealthy:
-			return icoAqiEULevel3
+			return b.I(kIcoAqiEULevel3)
 		case sensor.LevelUnhealthy:
-			return icoAqiEULevel4
+			return b.I(kIcoAqiEULevel4)
 		case sensor.LevelVeryUnhealthy:
-			return icoAqiEULevel5
+			return b.I(kIcoAqiEULevel5)
 		case sensor.LevelHazardous, sensor.LevelExtremelyHazardous:
-			return icoAqiEULevel6
+			return b.I(kIcoAqiEULevel6)
 		}
 	}
-	return icoUnknown
+	return b.I(kIcoUnknown)
 }
 func (b *Bot) formatDeviceStatus(chatID int64, deviceID string) string {
 	log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: formatDeviceStatus start")
@@ -153,32 +153,32 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 
 	diff25 := m.PM25 - m.PM25Prev
 	if diff25 > 0 {
-		args["trend25Icon"] = icoTrendUp
+		args["trend25Icon"] = b.I(kIcoTrendUp)
 	} else if diff25 < 0 {
-		args["trend25Icon"] = icoTrendDown
+		args["trend25Icon"] = b.I(kIcoTrendDown)
 	} else {
-		args["trend25Icon"] = icoTrendFlat
+		args["trend25Icon"] = b.I(kIcoTrendFlat)
 	}
 	args["diff25"] = diff25
 
 	diff10 := m.PM10 - m.PM10Prev
 	if diff10 > 0 {
-		args["trend10Icon"] = icoTrendUp
+		args["trend10Icon"] = b.I(kIcoTrendUp)
 	} else if diff10 < 0 {
-		args["trend10Icon"] = icoTrendDown
+		args["trend10Icon"] = b.I(kIcoTrendDown)
 	} else {
-		args["trend10Icon"] = icoTrendFlat
+		args["trend10Icon"] = b.I(kIcoTrendFlat)
 	}
 	args["diff10"] = diff10
 
 	getZoneIcon := func(v, g, y float64) string {
 		if v <= g {
-			return icoPmLevel1
+			return b.I(kIcoPmLevel1)
 		}
 		if v <= y {
-			return icoPmLevel2
+			return b.I(kIcoPmLevel2)
 		}
-		return icoPmLevel3
+		return b.I(kIcoPmLevel3)
 	}
 	args["zone25Icon"] = getZoneIcon(m.PM25, mcfg.PM25L1, mcfg.PM25L2)
 	args["zone10Icon"] = getZoneIcon(m.PM10, mcfg.PM10L1, mcfg.PM10L2)

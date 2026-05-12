@@ -21,6 +21,9 @@ var (
 func init() {
 	langDicts = make(map[string]map[string]string)
 	iconsMap = make(map[string]string)
+	for k, v := range defaultIcons {
+		iconsMap[k] = v
+	}
 
 	langDicts["en"] = make(map[string]string)
 	for k, v := range fallbackEN {
@@ -29,6 +32,74 @@ func init() {
 
 	loadExternalTranslations("lng")
 	loadIcons("lng")
+}
+
+var defaultIcons = map[string]string{
+	"icoAqi":          "🌬️",
+	"icoStatus":       "📊",
+	"icoSettings":     "⚙️",
+	"icoHistory":      "📜",
+	"icoChart":        "📈",
+	"icoSubscribe":    "➕",
+	"icoUnsubscribe":  "➖",
+	"icoBack":         "⬅️",
+	"icoBackSettings": "🛠️",
+	"icoReset":        "🔄",
+	"icoInfo":         "ℹ️",
+	"icoSuccess":      "✅",
+	"icoError":        "❌",
+	"icoWarning":      "⚠️",
+	"icoAlert":        "🚨",
+	"icoLoud":         "🔊",
+	"icoSilent":       "🔕",
+	"icoEmpty":        "📁",
+	"icoUnknown":      "❓",
+	"icoDate":         "📅",
+	"icoTime":         "🕒",
+	"icoTemp":         "🌡️",
+	"icoHum":          "💧",
+	"icoPress":        "⏲️",
+	"icoDewPoint":     "💦",
+	"icoPm10":         "💨",
+	"icoPm25":         "░",
+	"icoTrendUp":      "📈",
+	"icoTrendDown":    "📉",
+	"icoTrendFlat":    "➖",
+	"icoPollution":    "🌫️",
+	"icoChecked":      "☑️",
+	"icoUnchecked":    "🔳",
+	"icoBullet":       "•",
+	"icoThreshold":    "⚖️",
+	"icoSetByAQI":     "🧭",
+	"icoWrite":        "✍️",
+	"icoPlant":        "🌱",
+	"icoDevice":       "📡",
+	"icoList":         "📋",
+	"icoLang":         "🌐",
+	"icoDelete":       "🗑️",
+	"icoFlagEU":       "🇪🇺",
+	"icoFlagUS":       "🇺🇸",
+	"icoDynamics":     "↗️",
+	"icoLevels":       "📶",
+
+	"icoPmLevel1": "🟩",
+	"icoPmLevel2": "🟨",
+	"icoPmLevel3": "🟥",
+
+	"icoAqiUSLevel1": "🟢",
+	"icoAqiUSLevel2": "🟡",
+	"icoAqiUSLevel3": "🟠",
+	"icoAqiUSLevel4": "🔴",
+	"icoAqiUSLevel5": "🟣",
+	"icoAqiUSLevel6": "🟤",
+	"icoAqiUSLevel7": "⚫",
+
+	"icoAqiEULevel1": "🔵",
+	"icoAqiEULevel2": "🟢",
+	"icoAqiEULevel3": "🟡",
+	"icoAqiEULevel4": "🟠",
+	"icoAqiEULevel5": "🔴",
+	"icoAqiEULevel6": "🟣",
 }
 
 func loadExternalTranslations(dir string) {
@@ -85,7 +156,6 @@ func loadIcons(dir string) {
 			iconsMap[k] = v
 		}
 		i18nMu.Unlock()
-		updateicoVars(m)
 	} else {
 		fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
 	}
