@@ -211,10 +211,14 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		return
 
 	case data == "menu_main":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		if err := b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()}); err != nil {
+			log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to delete message on menu_main")
+		}
 		b.sendHelp(chatID)
 	case data == "menu_settings":
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
+		if err := b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()}); err != nil {
+			log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to delete message on menu_settings")
+		}
 		b.cmdSettings(chatID)
 	case data == "menu_status":
 		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
