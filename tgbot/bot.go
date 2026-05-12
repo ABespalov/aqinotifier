@@ -363,7 +363,7 @@ func (b *Bot) cleanupMessage(chatID int64, cq *telego.CallbackQuery) {
 		b.clearLastPrompt(chatID)
 	} else {
 		// It's an untracked message (likely a notification), just remove keyboard
-		_ = b.api.EditMessageReplyMarkup(&telego.EditMessageReplyMarkupParams{
+		_, _ = b.api.EditMessageReplyMarkup(context.Background(), &telego.EditMessageReplyMarkupParams{
 			ChatID:      tu.ID(chatID),
 			MessageID:   msgID,
 			ReplyMarkup: nil,
