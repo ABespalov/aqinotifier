@@ -3,6 +3,7 @@ package tgbot
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -259,7 +260,7 @@ func resolvePlaceholderLocked(lang, key, format string, argsMap map[string]inter
 			} else {
 				res = fmt.Sprintf("%v", val)
 			}
-			return res, true
+			return html.EscapeString(res), true
 		}
 	}
 

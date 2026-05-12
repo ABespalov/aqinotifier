@@ -12,7 +12,7 @@
   "txtAlertPm25": "{icoPm25} {?isPm25%<b>{labelPm25}: {val25%.2f} {unitPm}</b>%{labelPm25}: {val25%.2f} {unitPm}} {zone25Icon}\n    {trend25Icon}{?isPm25%<b>{diff25Percent%+.1f}%</b> (<b>{diff25%+.2f}</b>)%{diff25Percent%+.1f}% ({diff25%+.2f})} {prev25%.2f} → {curr25%.2f}",
   "txtAqi": "{aqiIcon} Уровень AQI: {aqiVal%.1f} — {aqiName} {aqiStandardFlag}",
   "txtDateTime": "{icoDate} {date%02.01.2006} {icoTime} {time%15:04:05}",
-  "txtDevice": "{icoDevice} {?{deviceName} isNotEmpty%{deviceName} (<code>{deviceId}</code>)%Устройство: <code>{deviceId}</code>}",
+  "txtDevice": "{icoDevice} {?deviceName isNotEmpty%{deviceName} (<code>{deviceId}</code>)%Устройство: <code>{deviceId}</code>}",
   "txtOtherUnits": "{icoTemp} {labelT}: {valT%+.1f} {unitT}\n{icoHum} {labelH}: {valH%.1f}%\n{icoPress} {labelP}: {valP%.1f} {unitP}\n{icoDewPoint} {labelDp}: {valDp%+.1f} {unitT}",
   "txtPm10": "{icoPm10} {labelPm10}: {val10%.2f} {unitPm} {zone10Icon}\n    {trend10Icon}{diff10Percent%+.1f}% ({diff10%+.2f}) {prev10%.2f} → {curr10%.2f}",
   "txtPm25": "{icoPm25} {labelPm25}: {val25%.2f} {unitPm} {zone25Icon}\n    {trend25Icon}{diff25Percent%+.1f}% ({diff25%+.2f}) {prev25%.2f} → {curr25%.2f}",

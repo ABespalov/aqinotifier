@@ -59,7 +59,7 @@ func main() {
 	// Database initialization with reconnection logic
 	var db *sql.DB
 	if cfg.Database.Type == "postgres" {
-		for i := 0; i < 5; i++ {
+		for i := 0; i < 20; i++ {
 			db, err = config.NewDB(cfg.Database)
 			if err == nil {
 				// Configure connection pool
@@ -68,8 +68,8 @@ func main() {
 				db.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
 				break
 			}
-			log.Warn().Err(err).Msgf("db: connection failed, retrying in 5s... (%d/5)", i+1)
-			time.Sleep(5 * time.Second)
+			log.Warn().Err(err).Msgf("db: connection failed, retrying in 10s... (%d/20)", i+1)
+			time.Sleep(10 * time.Second)
 		}
 		if err != nil {
 			log.Error().Err(err).Msg("db: failed to connect to postgres after retries, falling back to JSON")
@@ -189,9 +189,18 @@ func main() {
 					log.Error().Msg("tgbot.enabled is true but tgbot.token is not set")
 				} else {
 					var err error
-					bot, err = tgbot.NewBot(cfg, &cfg.Monitor, ms, BotVersion)
+					// Retry loop for bot startup (e.g. no internet/DNS at boot)
+					for i := 0; i < 30; i++ {
+						bot, err = tgbot.NewBot(cfg, &cfg.Monitor, ms, BotVersion)
+						if err == nil {
+							break
+						}
+						log.Warn().Err(err).Msgf("failed to start Telegram bot, retrying in 10s... (%d/30)", i+1)
+						time.Sleep(10 * time.Second)
+					}
+
 					if err != nil {
-						log.Error().Err(err).Msg("failed to start Telegram bot")
+						log.Error().Err(err).Msg("failed to start Telegram bot after retries")
 					} else {
 						if db != nil {
 							bot.SetDB(db)
