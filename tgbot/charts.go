@@ -14,25 +14,17 @@ import (
 	"github.com/go-analyze/charts"
 )
 
-var (
-	colorGreenZone  = charts.Color{R: 0, G: 255, B: 0, A: 85}
-	colorYellowZone = charts.Color{R: 255, G: 255, B: 0, A: 85}
-	colorRedZone    = charts.Color{R: 255, G: 0, B: 0, A: 85}
-
-	colorSeriesRed    = charts.ParseColor("#80090799")
-	colorSeriesBlue   = charts.ParseColor("#0c4c8084")
-	colorSeriesPurple = charts.ParseColor("#6d197c8c")
-	colorSeriesGrey   = charts.ParseColor("#505050")
-
-	colorAQIGood      = charts.ParseColor("#00E400")
-	colorAQILightBlue = charts.ParseColor("#52B6E6")
-	colorAQIModerate  = charts.ParseColor("#FFFF00")
-	colorAQISlightly  = charts.ParseColor("#FF7E00")
-	colorAQIUnhealthy = charts.ParseColor("#FF0000")
-	colorAQIVery      = charts.ParseColor("#8F3F97")
-	colorAQIHazardous = charts.ParseColor("#7E0023")
-	colorAQIExtreme   = charts.ParseColor("#505050")
-)
+func (b *Bot) getChartColor(key string) charts.Color {
+	hex := b.C(key)
+	if hex == "" {
+		// Fallback to defaultColors if key not found in colorsMap
+		if c, ok := defaultColors[key]; ok {
+			return charts.ParseColor(c)
+		}
+		return charts.Color{R: 0, G: 0, B: 0, A: 255}
+	}
+	return charts.ParseColor(hex)
+}
 
 const (
 	chartStrokeWidth      = 3.0
@@ -81,7 +73,6 @@ const (
 )
 
 var (
-	colorAxisLabel   = charts.Color{R: 31, G: 31, B: 31, A: chartLabelColorAlpha}
 	chartDashPattern = []float64{4, 4}
 )
 
@@ -412,7 +403,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		LabelCountAdjustment: 2,
 		LabelFontStyle: charts.FontStyle{
 			FontSize:  chartFontSize * 0.8,
-			FontColor: colorAxisLabel,
+			FontColor: b.getChartColor("colorAxisLabel"),
 		},
 	}
 	opt.YAxis = []charts.YAxisOption{
@@ -444,22 +435,22 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 
 	var theme = charts.GetDefaultTheme()
 	if isPM {
-		opt.Theme = theme.WithSeriesColors([]charts.Color{colorSeriesRed, colorSeriesBlue})
+		opt.Theme = theme.WithSeriesColors([]charts.Color{b.getChartColor("colorRed"), b.getChartColor("colorBlue")})
 		opt.Theme = opt.Theme.WithBackgroundColor(charts.ColorTransparent)
 		for i := 0; i < len(opt.SeriesList); i++ {
 			opt.SeriesList[i].Name = seriesNames[i]
 		}
 	} else if isAQI {
-		opt.Theme = theme.WithSeriesColors([]charts.Color{colorSeriesGrey})
+		opt.Theme = theme.WithSeriesColors([]charts.Color{b.getChartColor("colorGray")})
 		for i, name := range seriesNames {
 			opt.SeriesList[i].Name = name
 		}
 	} else {
-		colors := []charts.Color{colorSeriesBlue}
+		colors := []charts.Color{b.getChartColor("colorBlue")}
 		if strings.Contains(title, b.T(chatID, "msgTemp")) {
-			colors = []charts.Color{colorSeriesRed, colorSeriesBlue}
+			colors = []charts.Color{b.getChartColor("colorRed"), b.getChartColor("colorBlue")}
 		} else if strings.Contains(title, b.T(chatID, "msgPress")) {
-			colors = []charts.Color{colorSeriesPurple}
+			colors = []charts.Color{b.getChartColor("colorPurple")}
 		}
 		opt.Theme = theme.WithSeriesColors(colors)
 		for i, name := range seriesNames {
@@ -488,7 +479,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 	metaFontSize := chartFontSize * chartMetaFontSizeCoef
 	metaStyle := charts.FontStyle{
 		FontSize:  metaFontSize,
-		FontColor: colorAxisLabel,
+		FontColor: b.getChartColor("colorAxisLabel"),
 	}
 	deviceStr := b.formatDeviceIDPlain(chatID, deviceID)
 	timeStr := b.T(chatID, "msgChartTimestamp", map[string]interface{}{"date": time.Now(), "time": time.Now()})
@@ -546,11 +537,11 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		textHalfLen := int(chartFontSize * chartLabelFontCoef * chartTextHalfLenCoef)
 		styleLeft := charts.FontStyle{
 			FontSize:  chartFontSize * chartLabelFontCoef,
-			FontColor: colorSeriesRed,
+			FontColor: b.getChartColor("colorRed"),
 		}
 		styleRight := charts.FontStyle{
 			FontSize:  chartFontSize * chartLabelFontCoef,
-			FontColor: colorSeriesBlue,
+			FontColor: b.getChartColor("colorBlue"),
 		}
 		pureCp.Text(b.T(chatID, "txtChartScalePm25"), int(barWidth+chartFontSize*chartLabelXOffsetL), int(gridH/2)-textHalfLen, math.Pi/2, styleLeft)
 		pureCp.Text(b.T(chatID, "txtChartScalePm10"), int(gridW-barWidth-chartFontSize*chartLabelXOffsetR), int(gridH/2)+textHalfLen, -math.Pi/2, styleRight)
@@ -571,12 +562,12 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			}
 		}
 
-		drawBar(0, barWidth, 0, mcfg.PM25L1, colorGreenZone)
-		drawBar(0, barWidth, mcfg.PM25L1, mcfg.PM25L2, colorYellowZone)
-		drawBar(0, barWidth, mcfg.PM25L2, math.MaxFloat64, colorRedZone)
-		drawBar(gridW-barWidth, gridW, 0, mcfg.PM10L1, colorGreenZone)
-		drawBar(gridW-barWidth, gridW, mcfg.PM10L1, mcfg.PM10L2, colorYellowZone)
-		drawBar(gridW-barWidth, gridW, mcfg.PM10L2, math.MaxFloat64, colorRedZone)
+		drawBar(0, barWidth, 0, mcfg.PM25L1, b.getChartColor("colorGreenZone"))
+		drawBar(0, barWidth, mcfg.PM25L1, mcfg.PM25L2, b.getChartColor("colorYellowZone"))
+		drawBar(0, barWidth, mcfg.PM25L2, math.MaxFloat64, b.getChartColor("colorRedZone"))
+		drawBar(gridW-barWidth, gridW, 0, mcfg.PM10L1, b.getChartColor("colorGreenZone"))
+		drawBar(gridW-barWidth, gridW, mcfg.PM10L1, mcfg.PM10L2, b.getChartColor("colorYellowZone"))
+		drawBar(gridW-barWidth, gridW, mcfg.PM10L2, math.MaxFloat64, b.getChartColor("colorRedZone"))
 
 		dashWidth := chartStrokeWidth * chartDashWidthCoef
 		dashPattern := chartDashPattern
@@ -597,27 +588,27 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			pureCp.DashedLineStroke([]charts.Point{{X: int(tx1), Y: int(y)}, {X: int(tx2), Y: int(y)}}, color, dashWidth, dashPattern)
 		}
 
-		drawThreshold(mcfg.PM25L1, colorSeriesRed, true, 0)
-		drawDots(data[0], mcfg.PM25L1, colorSeriesRed, 0)
-		drawThreshold(mcfg.PM25L2, colorSeriesRed, true, 0)
-		drawDots(data[0], mcfg.PM25L2, colorSeriesRed, 0)
+		drawThreshold(mcfg.PM25L1, b.getChartColor("colorRed"), true, 0)
+		drawDots(data[0], mcfg.PM25L1, b.getChartColor("colorRed"), 0)
+		drawThreshold(mcfg.PM25L2, b.getChartColor("colorRed"), true, 0)
+		drawDots(data[0], mcfg.PM25L2, b.getChartColor("colorRed"), 0)
 
 		var g10Offset float64
 		if mcfg.PM10L1 == mcfg.PM25L1 || mcfg.PM10L1 == mcfg.PM25L2 {
 			g10Offset = dashWidth * 2
 		}
-		drawThreshold(mcfg.PM10L1, colorSeriesBlue, false, g10Offset)
-		drawDots(data[1], mcfg.PM10L1, colorSeriesBlue, g10Offset)
+		drawThreshold(mcfg.PM10L1, b.getChartColor("colorBlue"), false, g10Offset)
+		drawDots(data[1], mcfg.PM10L1, b.getChartColor("colorBlue"), g10Offset)
 
 		var y10Offset float64
 		if mcfg.PM10L2 == mcfg.PM25L1 || mcfg.PM10L2 == mcfg.PM25L2 {
 			y10Offset = dashWidth * 2
 		}
-		drawThreshold(mcfg.PM10L2, colorSeriesBlue, false, y10Offset)
-		drawDots(data[1], mcfg.PM10L2, colorSeriesBlue, y10Offset)
+		drawThreshold(mcfg.PM10L2, b.getChartColor("colorBlue"), false, y10Offset)
+		drawDots(data[1], mcfg.PM10L2, b.getChartColor("colorBlue"), y10Offset)
 
-		drawSeriesPoints(data[0], colorSeriesRed, 0)
-		drawSeriesPoints(data[1], colorSeriesBlue, g10Offset)
+		drawSeriesPoints(data[0], b.getChartColor("colorRed"), 0)
+		drawSeriesPoints(data[1], b.getChartColor("colorBlue"), g10Offset)
 	}
 
 	if isAQI {
@@ -626,13 +617,13 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			breakpoints = sensor.IndexPointsUS
 		}
 		colors := []charts.Color{
-			colorAQIGood, colorAQIModerate, colorAQISlightly,
-			colorAQIUnhealthy, colorAQIVery, colorAQIHazardous, colorAQIExtreme,
+			b.getChartColor("colorGreen"), b.getChartColor("colorYellow"), b.getChartColor("colorOrange"),
+			b.getChartColor("colorDarkRed"), b.getChartColor("colorViolet"), b.getChartColor("colorMaroon"), b.getChartColor("colorGray"),
 		}
 		if mcfg.AQIStandard == "EU" {
 			colors = []charts.Color{
-				colorAQILightBlue, colorAQIGood, colorAQIModerate,
-				colorAQISlightly, colorAQIUnhealthy, colorAQIHazardous,
+				b.getChartColor("colorLightBlue"), b.getChartColor("colorGreen"), b.getChartColor("colorYellow"),
+				b.getChartColor("colorOrange"), b.getChartColor("colorDarkRed"), b.getChartColor("colorMaroon"),
 			}
 		}
 		for i := 0; i < len(breakpoints)-1; i++ {
@@ -664,17 +655,17 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			}
 			y := yFunc(val)
 			pureCp.DashedLineStroke([]charts.Point{{X: 0, Y: int(y)}, {X: int(gridW), Y: int(y)}}, colors[i-1], dashWidth, dashPattern)
-			drawDots(data[0], val, colorSeriesGrey, 0)
+			drawDots(data[0], val, b.getChartColor("colorGray"), 0)
 		}
-		drawSeriesPoints(data[0], colorSeriesGrey, 0)
+		drawSeriesPoints(data[0], b.getChartColor("colorGray"), 0)
 	}
 
 	if !isPM && !isAQI {
-		colors := []charts.Color{colorSeriesBlue}
+		colors := []charts.Color{b.getChartColor("colorBlue")}
 		if strings.Contains(title, b.T(chatID, "msgTemp")) {
-			colors = []charts.Color{colorSeriesRed, colorSeriesBlue}
+			colors = []charts.Color{b.getChartColor("colorRed"), b.getChartColor("colorBlue")}
 		} else if strings.Contains(title, b.T(chatID, "msgPress")) {
-			colors = []charts.Color{colorSeriesPurple}
+			colors = []charts.Color{b.getChartColor("colorPurple")}
 		}
 		for i, c := range colors {
 			if i < len(data) {

@@ -6,7 +6,6 @@ import (
 	"html"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +14,7 @@ import (
 var (
 	langDicts map[string]map[string]string
 	iconsMap  map[string]string
+	colorsMap map[string]string
 	i18nMu    sync.RWMutex
 )
 
@@ -24,6 +24,10 @@ func init() {
 	for k, v := range defaultIcons {
 		iconsMap[k] = v
 	}
+	colorsMap = make(map[string]string)
+	for k, v := range defaultColors {
+		colorsMap[k] = v
+	}
 
 	langDicts["en"] = make(map[string]string)
 	for k, v := range fallbackEN {
@@ -32,6 +36,7 @@ func init() {
 
 	loadExternalTranslations("lng")
 	loadIcons("lng")
+	loadColors("lng")
 }
 
 var defaultIcons = map[string]string{
@@ -102,6 +107,23 @@ var defaultIcons = map[string]string{
 	"icoAqiEULevel6": "🟣",
 }
 
+var defaultColors = map[string]string{
+	"colorRed":        "#80090799",
+	"colorBlue":       "#0c4c8084",
+	"colorPurple":     "#6d197c8c",
+	"colorGray":       "#505050",
+	"colorGreen":      "#00E400",
+	"colorLightBlue":  "#52B6E6",
+	"colorYellow":     "#FFFF00",
+	"colorOrange":     "#FF7E00",
+	"colorDarkRed":    "#FF0000",
+	"colorViolet":     "#8F3F97",
+	"colorMaroon":     "#7E0023",
+	"colorGreenZone":  "#00FF0055",
+	"colorYellowZone": "#FFFF0055",
+	"colorRedZone":    "#FF000055",
+}
+
 func loadExternalTranslations(dir string) {
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -161,9 +183,30 @@ func loadIcons(dir string) {
 	}
 }
 
+func loadColors(dir string) {
+	path := filepath.Join(dir, "colors.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("i18n: failed to read %s: %v\n", path, err)
+		return
+	}
+
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err == nil {
+		i18nMu.Lock()
+		for k, v := range m {
+			colorsMap[k] = v
+		}
+		i18nMu.Unlock()
+	} else {
+		fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
+	}
+}
+
 func ReloadAll() {
 	loadExternalTranslations("lng")
 	loadIcons("lng")
+	loadColors("lng")
 }
 
 func AvailableLanguages() []string {
@@ -256,22 +299,35 @@ func resolveTemplateLocked(lang string, text string, argsMap map[string]interfac
 						}
 					}
 
-					innerRegex := regexp.MustCompile(`^\{([^{}%?]+)(?:%([^}]+))?\}$`)
-					submatch := innerRegex.FindStringSubmatch(match)
-					if submatch != nil {
-						key := strings.TrimSpace(submatch[1])
-						format := ""
-						if len(submatch) > 2 {
-							format = submatch[2]
+					// Placeholder with potential format and color
+					content := match[1 : len(match)-1]
+					sepIdx := -1
+					d := 0
+					for k := 0; k < len(content); k++ {
+						if content[k] == '{' {
+							d++
+						} else if content[k] == '}' {
+							d--
+						} else if content[k] == '%' && d == 0 {
+							sepIdx = k
+							break
 						}
+					}
 
-						resolved, ok := resolvePlaceholderLocked(lang, key, format, argsMap, depth)
-						if ok {
-							result.WriteString(resolved)
-							j = idxClose
-							resolvedSomething = true
-							continue
-						}
+					key := content
+					format := ""
+					if sepIdx != -1 {
+						key = strings.TrimSpace(content[:sepIdx])
+						format = content[sepIdx+1:]
+					}
+
+
+					resolved, ok := resolvePlaceholderLocked(lang, key, format, argsMap, depth)
+					if ok {
+						result.WriteString(resolved)
+						j = idxClose
+						resolvedSomething = true
+						continue
 					}
 				}
 			}
@@ -322,6 +378,7 @@ func resolvePlaceholderLocked(lang, key, format string, argsMap map[string]inter
 			} else {
 				res = fmt.Sprintf("%v", val)
 			}
+
 			return html.EscapeString(res), true
 		}
 	}
@@ -527,9 +584,21 @@ func (b *Bot) TLang(lang, key string, args ...interface{}) string {
 func (b *Bot) I(key string) string {
 	i18nMu.RLock()
 	defer i18nMu.RUnlock()
-	if v, ok := iconsMap[key]; ok { return v }
+	if v, ok := iconsMap[key]; ok {
+		return v
+	}
 	return ""
 }
+
+func (b *Bot) C(key string) string {
+	i18nMu.RLock()
+	defer i18nMu.RUnlock()
+	if v, ok := colorsMap[key]; ok {
+		return v
+	}
+	return ""
+}
+
 
 var fallbackEN = map[string]string{
 	"msgTemp": "Temperature",
