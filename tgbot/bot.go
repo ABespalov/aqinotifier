@@ -65,7 +65,7 @@ const (
 	btnNo             = "btnNo"
 	btnBack           = "btnBack"
 	btnLang           = "btnLang"
-	btnThresholdsBack = "btnThresholdsBack"
+	btnBackSettings   = "btnBackSettings"
 )
 
 const (

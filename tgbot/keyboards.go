@@ -86,7 +86,7 @@ func (b *Bot) thresholdsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 			tu.InlineKeyboardButton(b.T(chatID, btnSetByAQI)).WithCallbackData("menu_aqi_cycle"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, "btnBackSettings")).WithCallbackData(cmdSettings),
+			tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),
 		),
 	)
 }
@@ -97,7 +97,7 @@ func (b *Bot) subscriptionKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 			tu.InlineKeyboardButton(b.T(chatID, btnUnsubscribe)).WithCallbackData("menu_unsubscribe"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, "btnBackSettings")).WithCallbackData("menu_settings"),
+			tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData("menu_settings"),
 		),
 	)
 }

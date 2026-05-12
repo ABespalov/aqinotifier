@@ -57,7 +57,7 @@ func (b *Bot) cmdLangMenu(chatID int64) {
 			tu.InlineKeyboardButton(btnHPA).WithCallbackData("unit_set:press:hpa"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, "btnBackSettings")).WithCallbackData("menu_settings"),
+			tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData("menu_settings"),
 		),
 	)
 
