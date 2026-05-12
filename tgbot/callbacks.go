@@ -439,11 +439,13 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		return
 
 	case strings.HasPrefix(data, "status:"):
+		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
 		deviceID := strings.TrimPrefix(data, "status:")
 
 		b.sendWithKeyboard(chatID, b.formatDeviceShortInfo(chatID, deviceID), b.deviceInfoKeyboard(chatID, deviceID))
 
 	case strings.HasPrefix(data, "chart:"):
+		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
 		parts := strings.SplitN(strings.TrimPrefix(data, "chart:"), ":", 2)
 		if len(parts) == 2 {
 			chartType := parts[0]
@@ -452,6 +454,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		}
 
 	case strings.HasPrefix(data, "history:"):
+		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
 		deviceID := strings.TrimPrefix(data, "history:")
 		b.cmdDeviceHistory(chatID, deviceID)
 	}
