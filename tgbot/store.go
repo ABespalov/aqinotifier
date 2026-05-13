@@ -87,8 +87,8 @@ func (s *Store) loadFromSQL() {
 				if sub.Settings != nil {
 					sub.Settings.Validate()
 					log.Info().Int64("chat_id", chatID).
-						Float64("pm25_g", sub.Settings.PM25L1).
-						Float64("pm10_g", sub.Settings.PM10L1).
+						Float64("pm25_l1", sub.Settings.PM25L1).
+						Float64("pm10_l1", sub.Settings.PM10L1).
 						Msg("tgbot: loaded settings from sql")
 				} else {
 					log.Warn().Int64("chat_id", chatID).Msg("tgbot: loaded subscription from sql but settings are NULL")
@@ -204,8 +204,8 @@ func (s *Store) GetSettings(chatID int64, defaults *config.Monitor) *config.Moni
 
 	sub.Settings.Validate()
 	log.Debug().Int64("chat_id", chatID).
-		Float64("pm25_g", sub.Settings.PM25L1).
-		Float64("pm10_g", sub.Settings.PM10L1).
+		Float64("pm25_l1", sub.Settings.PM25L1).
+		Float64("pm10_l1", sub.Settings.PM10L1).
 		Msg("tgbot: returning existing settings")
 	return sub.Settings
 }
@@ -248,8 +248,8 @@ func (s *Store) UpdateSettings(chatID int64, settings *config.Monitor) {
 	}
 	sub.Settings = settings
 	log.Info().Int64("chat_id", chatID).
-		Float64("pm25_g", settings.PM25L1).
-		Float64("pm10_g", settings.PM10L1).
+		Float64("pm25_l1", settings.PM25L1).
+		Float64("pm10_l1", settings.PM10L1).
 		Msg("tgbot: UpdateSettings - memory updated, triggering save")
 	s.saveLocked()
 }

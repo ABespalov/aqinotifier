@@ -459,10 +459,11 @@ func (b *Bot) cleanupMessage(chatID int64, cq *telego.CallbackQuery) {
 	}
 	msgID := cq.Message.GetMessageID()
 
-	// Surgical delete: only the message that triggered the callback
-	_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
-		ChatID:    tu.ID(chatID),
-		MessageID: msgID,
+	// Remove only the keyboard, keep the message text
+	_, _ = b.api.EditMessageReplyMarkup(context.Background(), &telego.EditMessageReplyMarkupParams{
+		ChatID:      tu.ID(chatID),
+		MessageID:   msgID,
+		ReplyMarkup: nil,
 	})
 
 	// Remove only this message from lastPrompts

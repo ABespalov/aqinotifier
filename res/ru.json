@@ -5,7 +5,7 @@
   "alertActionRise": "Рост",
   "alertAqiBtn": "AQI: {icon} {label}",
   "alertAqiLong": "{prefix}: {name}",
-  "alertDiffBtn": "{delta} {pm} {icon} {in} {zone}",
+  "alertDiffBtn": "{icon}{delta} {pm} {in} {zone}",
   "alertDiffLong": "{delta} {action} {pm} {in} {zone}",
   "alertV10Short": "PM10",
   "alertV25Short": "PM2.5",

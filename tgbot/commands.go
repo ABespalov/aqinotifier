@@ -62,7 +62,7 @@ func (b *Bot) cmdStatusMenu(chatID int64) {
 		return
 	}
 	if len(devices) == 1 {
-		b.sendWithKeyboard(chatID, b.formatDeviceStatus(chatID, devices[0]), b.mainKeyboard(chatID, devices[0]))
+		b.sendPersistentWithKeyboard(chatID, b.formatDeviceStatus(chatID, devices[0]), b.mainKeyboard(chatID, devices[0]))
 		return
 	}
 
@@ -493,7 +493,7 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	footer := b.T(chatID, msgHistoryFooter, map[string]interface{}{
 		"count": len(history), "deviceId": deviceID, "deviceName": deviceName,
 	})
-	b.sendWithKeyboard(chatID, footer, b.mainKeyboard(chatID))
+	b.sendPersistentWithKeyboard(chatID, footer, b.mainKeyboard(chatID))
 }
 
 func (b *Bot) cmdResetConfirm(chatID int64) {
