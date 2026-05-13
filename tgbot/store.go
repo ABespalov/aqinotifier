@@ -28,9 +28,15 @@ type Store struct {
 	file             string
 	db               *sql.DB
 	subs             map[int64]*Subscription // keyed by chat_id
-	fileMu           sync.RWMutex            // protects JSON file from concurrent writes
+	fileMu           sync.Mutex              // protects JSON file from concurrent writes
 	defaultUnitTemp  string
 	defaultUnitPress string
+	saveChan         chan saveRequest
+}
+
+type saveRequest struct {
+	chatID int64
+	sub    *Subscription // cloned or marshaled
 }
 
 // NewStore creates a Store backed by the given file path.
@@ -40,8 +46,10 @@ func NewStore(file string, defaultUnitTemp, defaultUnitPress string) *Store {
 		subs:             make(map[int64]*Subscription),
 		defaultUnitTemp:  defaultUnitTemp,
 		defaultUnitPress: defaultUnitPress,
+		saveChan:         make(chan saveRequest, 100),
 	}
 	s.load()
+	go s.runSaveWorker()
 	return s
 }
 
@@ -60,6 +68,13 @@ func (s *Store) SetDB(db *sql.DB) {
 
 	log.Info().Msg("tgbot: sql table bot_subscriptions ready")
 	s.loadFromSQL()
+
+	// Initial sync of all subs to SQL if they were only in JSON
+	s.mu.RLock()
+	for id, sub := range s.subs {
+		s.saveChan <- saveRequest{chatID: id, sub: sub}
+	}
+	s.mu.RUnlock()
 }
 
 func (s *Store) loadFromSQL() {
@@ -90,8 +105,6 @@ func (s *Store) loadFromSQL() {
 						Float64("pm25_l1", sub.Settings.PM25L1).
 						Float64("pm10_l1", sub.Settings.PM10L1).
 						Msg("tgbot: loaded settings from sql")
-				} else {
-					log.Warn().Int64("chat_id", chatID).Msg("tgbot: loaded subscription from sql but settings are NULL")
 				}
 				s.mu.Lock()
 				s.subs[chatID] = &sub
@@ -122,62 +135,62 @@ func (s *Store) load() {
 	}
 }
 
-func (s *Store) saveLocked() {
-	s.fileMu.Lock()
-	defer s.fileMu.Unlock()
+func (s *Store) runSaveWorker() {
+	for req := range s.saveChan {
+		s.performSave(req)
+	}
+}
 
+func (s *Store) performSave(req saveRequest) {
+	// 1. Save to JSON (always save the whole state for consistency in JSON file)
+	s.mu.RLock()
 	list := make([]*Subscription, 0, len(s.subs))
 	for _, sub := range s.subs {
 		list = append(list, sub)
 	}
-	data, err := json.MarshalIndent(list, "", "  ")
-	if err != nil {
-		log.Error().Err(err).Msg("tgbot: failed to marshal store")
-		return
+	s.mu.RUnlock()
+
+	jsonData, err := json.MarshalIndent(list, "", "  ")
+	if err == nil {
+		s.fileMu.Lock()
+		if err := os.WriteFile(s.file, jsonData, 0644); err != nil {
+			log.Error().Err(err).Str("file", s.file).Msg("tgbot: failed to write store file")
+		}
+		s.fileMu.Unlock()
 	}
 
-	// Always sync to SQL if available
-	s.saveToSQLLocked()
-
-	if err := os.WriteFile(s.file, data, 0644); err != nil {
-		log.Error().Err(err).Str("file", s.file).Msg("tgbot: failed to write store file")
-	} else {
-		log.Debug().Str("file", s.file).Int("users", len(s.subs)).Msg("tgbot: store saved to file")
-	}
-}
-
-func (s *Store) saveToSQLLocked() {
-	if s.db == nil {
-		return
-	}
-	// We are already locked, but we want to do IO without lock.
-	// So we copy and then run IO.
-	copySubs := make(map[int64]*Subscription, len(s.subs))
-	for k, v := range s.subs {
-		copySubs[k] = v
-	}
+	// 2. Save specific user to SQL
+	s.mu.RLock()
 	db := s.db
+	s.mu.RUnlock()
 
-	// We can't easily drop s.mu here because of defer in caller.
-	// But saveToSQLLocked is only called from saveLocked which is called from
-	// methods that don't do much else.
-	// For settings updates, we want sync to ensure persistence
-	s.performSQLSync(db, copySubs)
+	if db != nil && req.chatID != 0 {
+		// We need to marshal the sub again or use a cloned one to avoid race if user is modified while saving
+		// Actually, req.sub is a snapshot if we cloned it.
+		// For now, let's just get it from s.subs under lock again to be sure
+		s.mu.RLock()
+		sub, ok := s.subs[req.chatID]
+		var subData []byte
+		if ok {
+			subData, _ = json.Marshal(sub)
+		}
+		s.mu.RUnlock()
+
+		if subData != nil {
+			_, err = db.Exec("INSERT INTO bot_subscriptions (chat_id, data) VALUES ($1, $2) ON CONFLICT (chat_id) DO UPDATE SET data = $2", req.chatID, subData)
+			if err != nil {
+				log.Error().Err(err).Int64("chat_id", req.chatID).Msg("tgbot: failed to sync user to SQL")
+			}
+		}
+	}
 }
 
-func (s *Store) performSQLSync(db *sql.DB, subs map[int64]*Subscription) {
-	for chatID, sub := range subs {
-		data, err := json.Marshal(sub)
-		if err != nil {
-			continue
-		}
-		log.Debug().Int64("chat_id", chatID).Msg("tgbot: saving subscription to sql")
-		_, err = db.Exec("INSERT INTO bot_subscriptions (chat_id, data) VALUES ($1, $2) ON CONFLICT (chat_id) DO UPDATE SET data = $2", chatID, data)
-		if err != nil {
-			log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to save to SQL")
-		} else {
-			log.Info().Int64("chat_id", chatID).Msg("tgbot: subscription successfully synced to sql")
-		}
+func (s *Store) saveLocked(chatID int64) {
+	// Push to background worker
+	select {
+	case s.saveChan <- saveRequest{chatID: chatID}:
+	default:
+		log.Warn().Msg("tgbot: save queue full, droping update")
 	}
 }
 
@@ -197,8 +210,7 @@ func (s *Store) GetSettings(chatID int64, defaults *config.Monitor) *config.Moni
 		} else {
 			sub.Settings = s.cloneMonitor(defaults)
 		}
-		log.Info().Int64("chat_id", chatID).Msg("tgbot: new user registered or settings missing")
-		s.saveLocked()
+		s.saveLocked(chatID)
 		return sub.Settings
 	}
 
@@ -220,7 +232,7 @@ func (s *Store) ResetSettings(chatID int64, defaults *config.Monitor) {
 		sub.UnitTemp = s.defaultUnitTemp
 		sub.UnitPress = s.defaultUnitPress
 		sub.Version = 1
-		s.saveLocked()
+		s.saveLocked(chatID)
 	}
 }
 
@@ -251,7 +263,7 @@ func (s *Store) UpdateSettings(chatID int64, settings *config.Monitor) {
 		Float64("pm25_l1", settings.PM25L1).
 		Float64("pm10_l1", settings.PM10L1).
 		Msg("tgbot: UpdateSettings - memory updated, triggering save")
-	s.saveLocked()
+	s.saveLocked(chatID)
 }
 
 // GetLanguage returns the language code for a chat.
@@ -277,7 +289,7 @@ func (s *Store) SetLanguage(chatID int64, lang string) {
 	}
 	if sub.Language != lang {
 		sub.Language = lang
-		s.saveLocked()
+		s.saveLocked(chatID)
 	}
 }
 
@@ -300,7 +312,7 @@ func (s *Store) SetUnitTemp(chatID int64, unit string) {
 	}
 	if sub.UnitTemp != unit {
 		sub.UnitTemp = unit
-		s.saveLocked()
+		s.saveLocked(chatID)
 	}
 }
 
@@ -323,7 +335,7 @@ func (s *Store) SetUnitPress(chatID int64, unit string) {
 	}
 	if sub.UnitPress != unit {
 		sub.UnitPress = unit
-		s.saveLocked()
+		s.saveLocked(chatID)
 	}
 }
 
@@ -336,14 +348,14 @@ func (s *Store) SyncLanguage(chatID int64, tgCode string, detected string) (chan
 		sub = &Subscription{ChatID: chatID, Language: detected, TGCode: tgCode}
 		s.subs[chatID] = sub
 		log.Info().Int64("chat_id", chatID).Msg("tgbot: new user registered")
-		s.saveLocked()
+		s.saveLocked(chatID)
 		return false, true
 	}
 	if sub.TGCode != tgCode {
 		oldLang := sub.Language
 		sub.TGCode = tgCode
 		sub.Language = detected
-		s.saveLocked()
+		s.saveLocked(chatID)
 		return oldLang != "" && oldLang != detected, false
 	}
 	return false, false
@@ -372,7 +384,7 @@ func (s *Store) Subscribe(chatID int64, deviceID string, defaults *config.Monito
 		}
 	}
 	sub.DeviceIDs = append(sub.DeviceIDs, deviceID)
-	s.saveLocked()
+	s.saveLocked(chatID)
 	return true
 }
 
@@ -397,7 +409,7 @@ func (s *Store) Unsubscribe(chatID int64, deviceID string) bool {
 		return false
 	}
 	sub.DeviceIDs = newIDs
-	s.saveLocked()
+	s.saveLocked(chatID)
 	return true
 }
 
