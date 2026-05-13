@@ -124,13 +124,20 @@ func (b *Bot) subscriptionKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 
 func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 	mcfg := b.GetUserSettings(chatID)
-	std := mcfg.AQIStandard
-	stdLabel := b.T(chatID, "standard"+strings.Title(strings.ToLower(std)))
-
-	aqiAlerts := []string{"aqi_l1", "aqi_l2", "aqi_l3", "aqi_l4", "aqi_l5", "aqi_l6"}
-	if std == "US" {
-		aqiAlerts = append(aqiAlerts, "aqi_l7")
+	std := strings.ToUpper(mcfg.AQIStandard)
+	stdData, ok := sensor.Standards[std]
+	if !ok {
+		// Fallback if standard not found
+		return nil
 	}
+
+	stdLabel := stdData.NameFull
+	// Try localization
+	stdLocKey := "standard" + strings.Title(strings.ToLower(std))
+	if loc := b.T(chatID, stdLocKey); !strings.HasPrefix(loc, "!!") {
+		stdLabel = loc
+	}
+
 	activeNotifications := make(map[string]bool)
 	for _, n := range mcfg.Notifications {
 		activeNotifications[n] = true
@@ -144,12 +151,12 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 
 	rows = append(rows, []telego.InlineKeyboardButton{
 		tu.InlineKeyboardButton(b.T(chatID, "btnAqiStandard", map[string]interface{}{
-			"std": stdLabel, "aqiStandardFlag": "{icoFlag" + strings.ToUpper(std) + "}",
+			"std": stdLabel, "aqiStandardFlag": stdData.Flag,
 		})).WithCallbackData("aqi_std_toggle"),
 	})
 
-	stdLower := strings.ToLower(std)
-	for _, id := range aqiAlerts {
+	for _, zone := range stdData.Zones {
+		id := fmt.Sprintf("aqi_l%d", zone.Level)
 		statusIcon := b.I(kIcoUnchecked)
 		if activeNotifications[id] {
 			statusIcon = b.I(kIcoChecked)
@@ -159,14 +166,13 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 			soundLabel = "btnWithSound"
 		}
 
-		levelChar := strings.TrimPrefix(id, "aqi_")
-		name := b.T(chatID, fmt.Sprintf("aqiName%s%s", strings.Title(levelChar), strings.Title(stdLower)))
+		name := zone.Name
+		nameKey := fmt.Sprintf("aqiNameL%d%s", zone.Level, strings.Title(strings.ToLower(std)))
+		if loc := b.T(chatID, nameKey); !strings.HasPrefix(loc, "!!") {
+			name = loc
+		}
 
-		levelInt := sensor.AQILevel(0)
-		fmt.Sscanf(levelChar, "l%d", &levelInt)
-		zoneIcon := b.getAQIIcon(levelInt, std)
-
-		btnText := b.T(chatID, "alertAqiBtn", map[string]interface{}{"icon": name, "label": zoneIcon})
+		btnText := b.T(chatID, "alertAqiBtn", map[string]interface{}{"icon": name, "label": zone.Icon})
 
 		soundLabelStr := b.T(chatID, soundLabel)
 		callbackData := fmt.Sprintf("aqi_sound:%s", id)

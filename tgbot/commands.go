@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 
 	"github.com/ABespalov/aqinotifier/sensor"
@@ -151,26 +153,81 @@ func (b *Bot) cmdChartsMenu(chatID int64) {
 	b.sendWithKeyboard(chatID, b.T(chatID, msgSelectDevice), tu.InlineKeyboard(rows...))
 }
 
-func (b *Bot) cmdLangMenu(chatID int64) {
-	b.clearLastPrompt(chatID)
+func (b *Bot) cmdLangMenu(chatID int64, editMsgID ...int) {
+	if len(editMsgID) == 0 {
+		b.clearLastPrompt(chatID)
+	}
+	
+	current := b.store.GetLanguage(chatID)
+	langLabel := b.T(chatID, "lang"+strings.Title(current))
+	
+	unitT := b.store.GetUnitTemp(chatID)
+	unitP := b.store.GetUnitPress(chatID)
+	
 	kb := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, "langRu")).WithCallbackData("lang_set:ru"),
-			tu.InlineKeyboardButton(b.T(chatID, "langEn")).WithCallbackData("lang_set:en"),
+			tu.InlineKeyboardButton(langLabel).WithCallbackData("lang_cycle"),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, "txtUnit"+strings.Title(b.store.GetUnitTemp(chatID)))).WithCallbackData("unit_set:temp:toggle"),
-			tu.InlineKeyboardButton(b.T(chatID, "txtUnit"+strings.Title(b.store.GetUnitPress(chatID)))).WithCallbackData("unit_set:press:toggle"),
+			tu.InlineKeyboardButton(b.T(chatID, "txtUnit"+strings.Title(unitT))).WithCallbackData("unit_set:temp:toggle"),
+			tu.InlineKeyboardButton(b.T(chatID, "txtUnit"+strings.Title(unitP))).WithCallbackData("unit_set:press:toggle"),
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),
 		),
 	)
-	b.sendWithKeyboard(chatID, b.T(chatID, msgSelectLang), kb)
+
+	text := b.T(chatID, msgSelectLang)
+	if len(editMsgID) > 0 {
+		params := tu.EditMessageText(tu.ID(chatID), editMsgID[0], text).
+			WithReplyMarkup(kb)
+		_, _ = b.api.EditMessageText(context.Background(), params)
+	} else {
+		b.sendWithKeyboard(chatID, text, kb)
+	}
 }
 
 func (b *Bot) cmdAqiMenu(chatID int64, editMsgID ...int) {
-	text := b.T(chatID, msgAqiSettings)
+	mcfg := b.GetUserSettings(chatID)
+	stdTag := strings.ToUpper(mcfg.AQIStandard)
+	std, ok := sensor.Standards[stdTag]
+
+	var details string
+	if ok {
+		stdName := std.NameFull
+		stdLocKey := "standard" + strings.Title(strings.ToLower(stdTag))
+		if loc := b.T(chatID, stdLocKey); !strings.HasPrefix(loc, "!!") {
+			stdName = loc
+		}
+
+		title := b.T(chatID, "txtAqiStandardTitle", map[string]interface{}{
+			"std":  stdName,
+			"flag": b.Resolve(std.Flag),
+		})
+
+		var zones []string
+		for _, z := range std.Zones {
+			var aqiVal float64
+			if z.Level < len(std.IndexPoints) {
+				aqiVal = std.IndexPoints[z.Level]
+			}
+
+			name := z.Name
+			key := fmt.Sprintf("aqiNameL%d%s", z.Level, strings.Title(strings.ToLower(stdTag)))
+			if loc := b.T(chatID, key); !strings.HasPrefix(loc, "!!") {
+				name = loc
+			}
+
+			zones = append(zones, b.T(chatID, "txtAqiStandardZone", map[string]interface{}{
+				"ico":  b.Resolve(z.Icon),
+				"name": name,
+				"bp":   aqiVal,
+			}))
+		}
+		details = title + "\n" + strings.Join(zones, "\n")
+	}
+
+	text := b.T(chatID, msgAqiSettings) + "\n\n" + details
 	kb := b.aqiSettingsKeyboard(chatID)
 
 	if len(editMsgID) > 0 {
@@ -187,108 +244,118 @@ func (b *Bot) cmdThresholdsMenu(chatID int64) {
 	b.clearLastPrompt(chatID)
 	mcfg := b.GetUserSettings(chatID)
 	text := b.T(chatID, msgThresholdsMenu, map[string]interface{}{
-		"vg1": mcfg.PM25L1, "vy1": mcfg.PM25L2, "vdyn1": mcfg.PM25Diff,
-		"vg2": mcfg.PM10L1, "vy2": mcfg.PM10L2, "vdyn2": mcfg.PM10Diff,
+		"l1_25": mcfg.PM25L1, "l2_25": mcfg.PM25L2, "dyn25": mcfg.PM25Diff,
+		"l1_10": mcfg.PM10L1, "l2_10": mcfg.PM10L2, "dyn10": mcfg.PM10Diff,
 		"labelPm25": b.T(chatID, "labelPm25"), "labelPm10": b.T(chatID, "labelPm10"),
-		"labelZoneGreen": b.T(chatID, "labelZoneGreen"), "labelZoneYellow": b.T(chatID, "labelZoneYellow"),
+		"labelL1": b.T(chatID, "labelL1"), "labelL2": b.T(chatID, "labelL2"),
 		"labelDynamics": b.T(chatID, "labelDynamics"),
 	})
 
 	b.sendWithKeyboard(chatID, text, b.thresholdsKeyboard(chatID))
 }
 
-func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID ...int) {
+func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[string]string) {
+	sTags := make(map[string]string)
+	if len(suggestedTags) > 0 {
+		sTags = suggestedTags[0]
+	}
 	mcfg := b.GetUserSettings(chatID)
-
-	text := b.T(chatID, msgAqiCycleMenu, map[string]interface{}{
-		"vg1": mcfg.PM25L1, "vy1": mcfg.PM25L2,
-		"vg2": mcfg.PM10L1, "vy2": mcfg.PM10L2,
-	})
-
-	getIcon := func(pmType string, val float64) (string, string) {
-		var eu, us []float64
-		if pmType == "PM10" {
-			eu, us = sensor.BreakpointsEU10, sensor.BreakpointsUS10
-		} else {
-			eu, us = sensor.BreakpointsEU25, sensor.BreakpointsUS25
-		}
-
-		active := strings.ToLower(mcfg.AQIStandard)
-		var std string
-		var flag string
-		found := false
-
-		if active == "eu" {
-			for _, v := range eu {
-				if v == val {
-					std = "EU"
-					flag = b.I(kIcoFlagEU)
-					found = true
-					break
-				}
-			}
-			if !found {
-				for _, v := range us {
-					if v == val {
-						std = "US"
-						flag = b.I(kIcoFlagUS)
-						found = true
-						break
-					}
-				}
-			}
-		} else {
-			for _, v := range us {
-				if v == val {
-					std = "US"
-					flag = b.I(kIcoFlagUS)
-					found = true
-					break
-				}
-			}
-			if !found {
-				for _, v := range eu {
-					if v == val {
-						std = "EU"
-						flag = b.I(kIcoFlagEU)
-						found = true
-						break
-					}
-				}
-			}
-		}
-
-		if found {
-			_, level := sensor.CalculateValueAQI(val, pmType, std)
-			return flag, b.getAQIIcon(level, std)
-		}
-		return b.I(kIcoWrite), ""
+	std := strings.ToUpper(mcfg.AQIStandard)
+	if _, ok := sensor.Standards[std]; !ok {
+		return
 	}
 
-	btnText := func(pmType, zoneIcon string, val float64) string {
-		flag, levelIcon := getIcon(pmType, val)
-		if levelIcon != "" {
-			return fmt.Sprintf("%s%s ⇐ %s%s %.1f", pmType, zoneIcon, flag, levelIcon, val)
+	text := b.T(chatID, msgAqiCycleMenu, map[string]interface{}{
+		"l1_25": mcfg.PM25L1, "l2_25": mcfg.PM25L2,
+		"l1_10": mcfg.PM10L1, "l2_10": mcfg.PM10L2,
+	})
+
+	getIcon := func(pmType string, val float64) (string, string, string) {
+		activeTag := strings.ToUpper(mcfg.AQIStandard)
+		
+		// Check active standard first
+		if stdData, ok := sensor.Standards[activeTag]; ok {
+			var bp []float64
+			if pmType == "PM10" {
+				bp = stdData.Breakpoints10
+			} else {
+				bp = stdData.Breakpoints25
+			}
+			for _, v := range bp {
+				if math.Abs(v-val) < 0.0001 {
+					_, level := sensor.CalculateValueAQI(val, pmType, activeTag)
+					return activeTag, b.Resolve(stdData.Flag), b.getAQIIcon(level, activeTag)
+				}
+			}
 		}
-		return fmt.Sprintf("%s%s ⇐ %s %.1f", pmType, zoneIcon, flag, val)
+
+		// Get other tags in sorted order
+		var otherTags []string
+		for tag := range sensor.Standards {
+			if tag != activeTag {
+				otherTags = append(otherTags, tag)
+			}
+		}
+		sort.Strings(otherTags)
+
+		// Check others
+		for _, tag := range otherTags {
+			stdData := sensor.Standards[tag]
+			var bp []float64
+			if pmType == "PM10" {
+				bp = stdData.Breakpoints10
+			} else {
+				bp = stdData.Breakpoints25
+			}
+			for _, v := range bp {
+				if math.Abs(v-val) < 0.0001 {
+					_, level := sensor.CalculateValueAQI(val, pmType, tag)
+					return tag, b.Resolve(stdData.Flag), b.getAQIIcon(level, tag)
+				}
+			}
+		}
+		return "", b.I(kIcoWrite), ""
+	}
+
+	btn := func(pmType, levelKey, zoneIcon string, val float64) telego.InlineKeyboardButton {
+		key := pmType + ":" + levelKey
+		var tag, flag, levelIcon string
+		if sTag, ok := sTags[key]; ok {
+			tag = sTag
+			if stdData, ok := sensor.Standards[tag]; ok {
+				flag = stdData.Flag
+				_, level := sensor.CalculateValueAQI(val, pmType, tag)
+				levelIcon = b.getAQIIcon(level, tag)
+			}
+		}
+		
+		if tag == "" {
+			tag, flag, levelIcon = getIcon(pmType, val)
+		}
+		
+		label := fmt.Sprintf("%s%s ⇐ %s%s %.1f", pmType, zoneIcon, flag, levelIcon, val)
+		if levelIcon == "" {
+			label = fmt.Sprintf("%s%s ⇐ %s %.1f", pmType, zoneIcon, flag, val)
+		}
+		return tu.InlineKeyboardButton(label).WithCallbackData(fmt.Sprintf("aqi_cycle:%s:%s:%s", pmType, levelKey, tag))
 	}
 
 	kb := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnText(b.T(chatID, "labelPm25"), b.I(kIcoPmLevel1), mcfg.PM25L1)).WithCallbackData("aqi_cycle:PM2.5:level1"),
-			tu.InlineKeyboardButton(btnText(b.T(chatID, "labelPm10"), b.I(kIcoPmLevel1), mcfg.PM10L1)).WithCallbackData("aqi_cycle:PM10:level1"),
+			btn("PM25", "level1", b.I(kIcoPmLevel1), mcfg.PM25L1),
+			btn("PM10", "level1", b.I(kIcoPmLevel1), mcfg.PM10L1),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(btnText(b.T(chatID, "labelPm25"), b.I(kIcoPmLevel2), mcfg.PM25L2)).WithCallbackData("aqi_cycle:PM2.5:level2"),
-			tu.InlineKeyboardButton(btnText(b.T(chatID, "labelPm10"), b.I(kIcoPmLevel2), mcfg.PM10L2)).WithCallbackData("aqi_cycle:PM10:level2"),
+			btn("PM25", "level2", b.I(kIcoPmLevel2), mcfg.PM25L2),
+			btn("PM10", "level2", b.I(kIcoPmLevel2), mcfg.PM10L2),
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(b.T(chatID, btnAqiBackToThresholds)).WithCallbackData(cmdThresholdsMenu),
 		),
 	)
 
-	if len(editMsgID) > 0 {
-		params := tu.EditMessageText(tu.ID(chatID), editMsgID[0], text).
+	if editMsgID > 0 {
+		params := tu.EditMessageText(tu.ID(chatID), editMsgID, text).
 			WithParseMode(telego.ModeHTML).
 			WithReplyMarkup(kb)
 		_, _ = b.api.EditMessageText(context.Background(), params)
@@ -486,8 +553,8 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 	}
 
 	text := b.T(chatID, "msgResetConfirm", map[string]interface{}{
-		"pm25G": d.PM25L1, "pm25Y": d.PM25L2, "pm25Dyn": d.PM25Diff,
-		"pm10G": d.PM10L1, "pm10Y": d.PM10L2, "pm10Dyn": d.PM10Diff,
+		"l1_25": d.PM25L1, "l2_25": d.PM25L2, "dyn25": d.PM25Diff,
+		"l1_10": d.PM10L1, "l2_10": d.PM10L2, "dyn10": d.PM10Diff,
 		"stdName": stdLabel, "aqiStandardFlag": b.I("icoFlag" + strings.ToUpper(std)),
 		"unitT": unitT, "unitP": unitP,
 		"alertsList": alertsSB.String(),
@@ -501,8 +568,8 @@ func (b *Bot) cmdResetExecute(chatID int64) {
 
 	mcfg := b.store.GetSettings(chatID, b.defaults)
 	text := b.T(chatID, msgResetExecution, map[string]interface{}{
-		"pm25G": mcfg.PM25L1, "pm25Y": mcfg.PM25L2, "pm25Dyn": mcfg.PM25Diff,
-		"pm10G": mcfg.PM10L1, "pm10Y": mcfg.PM10L2, "pm10Dyn": mcfg.PM10Diff,
+		"l1_25": mcfg.PM25L1, "l2_25": mcfg.PM25L2, "dyn25": mcfg.PM25Diff,
+		"l1_10": mcfg.PM10L1, "l2_10": mcfg.PM10L2, "dyn10": mcfg.PM10Diff,
 	})
 
 	b.sendWithKeyboard(chatID, text, b.settingsKeyboard(chatID))

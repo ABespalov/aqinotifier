@@ -18,7 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const BotVersion = "0.10.44"
+const BotVersion = "0.11.0a"
 
 func main() {
 	execPath, err := os.Executable()
@@ -55,7 +55,7 @@ func main() {
 
 	var bot *tgbot.Bot
 	ms := monitor.NewMonitorService(cfg)
-	
+
 	// Database initialization with reconnection logic
 	var db *sql.DB
 	if cfg.Database.Type == "postgres" {

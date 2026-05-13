@@ -186,16 +186,19 @@ func (s *Store) GetSettings(chatID int64, defaults *config.Monitor) *config.Moni
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sub, ok := s.subs[chatID]
-	if !ok {
-		sub = &Subscription{
-			ChatID:   chatID,
-			Settings: s.cloneMonitor(defaults),
-			Version:  1,
+	if !ok || sub.Settings == nil {
+		if !ok {
+			sub = &Subscription{
+				ChatID:   chatID,
+				Settings: s.cloneMonitor(defaults),
+				Version:  1,
+			}
+			s.subs[chatID] = sub
+		} else {
+			sub.Settings = s.cloneMonitor(defaults)
 		}
-		s.subs[chatID] = sub
-		log.Info().Int64("chat_id", chatID).Msg("tgbot: new user registered")
+		log.Info().Int64("chat_id", chatID).Msg("tgbot: new user registered or settings missing")
 		s.saveLocked()
-		log.Info().Int64("chat_id", chatID).Msg("tgbot: returning NEW default settings")
 		return sub.Settings
 	}
 

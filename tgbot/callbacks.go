@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
 	"github.com/rs/zerolog/log"
+	"sort"
 )
 
 type AlertItem struct {
@@ -34,20 +36,26 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 
 	if filter == "" || filter == "aqi" {
 		mcfg := b.GetUserSettings(chatID)
-		std := strings.ToLower(mcfg.AQIStandard)
-		for i := 1; i <= 7; i++ {
-			if i > 6 && std == "eu" {
-				continue
+		stdTag := strings.ToUpper(mcfg.AQIStandard)
+		stdData, ok := sensor.Standards[stdTag]
+		if ok {
+			for _, zone := range stdData.Zones {
+				id := fmt.Sprintf("aqi_l%d", zone.Level)
+				
+				name := zone.Name
+				nameKey := fmt.Sprintf("aqiNameL%d%s", zone.Level, strings.Title(strings.ToLower(stdTag)))
+				if loc := b.T(chatID, nameKey); !strings.HasPrefix(loc, "!!") {
+					name = loc
+				}
+
+				res = append(res, AlertItem{
+					id:        id,
+					aqiPrefix: b.T(chatID, "txtChartSubjectAqi"),
+					aqiName:   name,
+					zoneIcon:  zone.Icon,
+					loud:      defWarnings[id],
+				})
 			}
-			id := fmt.Sprintf("aqi_l%d", i)
-			zoneIcon := b.I("icoAqi" + strings.ToUpper(std) + "Level" + fmt.Sprint(i))
-			res = append(res, AlertItem{
-				id:        id,
-				aqiPrefix: b.T(chatID, "txtChartSubjectAqi"),
-				aqiName:   b.T(chatID, "aqiNameL"+fmt.Sprint(i)+strings.Title(std)),
-				zoneIcon:  zoneIcon,
-				loud:      defWarnings[id],
-			})
 		}
 	}
 
@@ -101,11 +109,11 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 					var zoneName string
 					switch level {
 					case "1":
-						zoneName = b.T(chatID, "labelZoneGreenAcc")
+						zoneName = b.T(chatID, "labelL1Acc")
 					case "2":
-						zoneName = b.T(chatID, "labelZoneYellowAcc")
+						zoneName = b.T(chatID, "labelL2Acc")
 					default:
-						zoneName = b.T(chatID, "labelZoneRedAcc")
+						zoneName = b.T(chatID, "labelL3Acc")
 					}
 
 					res = append(res, AlertItem{
@@ -164,11 +172,11 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 					var zoneName string
 					switch level {
 					case "1":
-						zoneName = b.T(chatID, "labelZoneGreenAcc")
+						zoneName = b.T(chatID, "labelL1Acc")
 					case "2":
-						zoneName = b.T(chatID, "labelZoneYellowAcc")
+						zoneName = b.T(chatID, "labelL2Acc")
 					default:
-						zoneName = b.T(chatID, "labelZoneRedAcc")
+						zoneName = b.T(chatID, "labelL3Acc")
 					}
 
 					res = append(res, AlertItem{
@@ -258,11 +266,22 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.setState(chatID, stateIdle)
 	case data == "aqi_std_toggle":
 		mcfg := b.GetUserSettings(chatID)
-		if mcfg.AQIStandard == "EU" {
-			mcfg.AQIStandard = "US"
-		} else {
-			mcfg.AQIStandard = "EU"
+		tags := make([]string, 0, len(sensor.Standards))
+		for tag := range sensor.Standards {
+			tags = append(tags, tag)
 		}
+		sort.Strings(tags)
+		
+		next := tags[0]
+		for i, tag := range tags {
+			if tag == mcfg.AQIStandard {
+				if i+1 < len(tags) {
+					next = tags[i+1]
+				}
+				break
+			}
+		}
+		mcfg.AQIStandard = next
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
 	case strings.HasPrefix(data, "aqi_toggle:"):
@@ -334,6 +353,40 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.handleAQIThresholdCycle(chatID, data, cq.Message.GetMessageID())
 		return
 
+	case data == "lang_cycle":
+		langs := AvailableLanguages()
+		current := b.store.GetLanguage(chatID)
+		next := langs[0]
+		for i, l := range langs {
+			if l == current {
+				if i+1 < len(langs) {
+					next = langs[i+1]
+				}
+				break
+			}
+		}
+		b.store.SetLanguage(chatID, next)
+		b.updateCommandsForUser(chatID, next)
+		b.cmdLangMenu(chatID, cq.Message.GetMessageID())
+
+	case data == "unit_set:temp:toggle":
+		curr := b.store.GetUnitTemp(chatID)
+		next := "c"
+		if curr == "c" {
+			next = "f"
+		}
+		b.store.SetUnitTemp(chatID, next)
+		b.cmdLangMenu(chatID, cq.Message.GetMessageID())
+
+	case data == "unit_set:press:toggle":
+		curr := b.store.GetUnitPress(chatID)
+		next := "mmhg"
+		if curr == "mmhg" {
+			next = "hpa"
+		}
+		b.store.SetUnitPress(chatID, next)
+		b.cmdLangMenu(chatID, cq.Message.GetMessageID())
+
 	case strings.HasPrefix(data, "unit_set:"):
 		parts := strings.Split(data, ":")
 		if len(parts) == 3 {
@@ -344,11 +397,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 			} else {
 				b.store.SetUnitPress(chatID, val)
 			}
-			_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
-				ChatID:    tu.ID(chatID),
-				MessageID: cq.Message.GetMessageID(),
-			})
-			b.cmdLangMenu(chatID)
+			b.cmdLangMenu(chatID, cq.Message.GetMessageID())
 		}
 
 	case strings.HasPrefix(data, "lang_set:"):
@@ -356,8 +405,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.store.SetLanguage(chatID, lang)
 		log.Debug().Int64("chat_id", chatID).Str("to", lang).Msg("tgbot: language changed via menu")
 		b.updateCommandsForUser(chatID, lang)
-		_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{ChatID: tu.ID(chatID), MessageID: cq.Message.GetMessageID()})
-		b.sendWithKeyboard(chatID, b.T(chatID, msgHelp), b.mainKeyboard(chatID))
+		b.cmdLangMenu(chatID, cq.Message.GetMessageID())
 
 	case strings.HasPrefix(data, "toggle:"):
 		parts := strings.Split(data, ":")

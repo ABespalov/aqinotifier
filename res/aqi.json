@@ -1,0 +1,55 @@
+[
+  {
+    "tag": "EU",
+    "nameShort": "EU",
+    "nameFull": "European (EU)",
+    "flag": "{icoFlagEU}",
+    "indexPoints": [0, 50, 100, 150, 200, 300, 500],
+    "breakpoints25": [10, 20, 25, 50, 75, 800],
+    "breakpoints10": [20, 40, 50, 100, 150, 1200],
+    "zones": [
+      { "level": 1, "name": "Very Good", "color": "{colorLightBlue}", "icon": "{icoCircleBlue}" },
+      { "level": 2, "name": "Good", "color": "{colorGreen}", "icon": "{icoCircleGreen}" },
+      { "level": 3, "name": "Fair", "color": "{colorYellow}", "icon": "{icoCircleYellow}" },
+      { "level": 4, "name": "Poor", "color": "{colorOrange}", "icon": "{icoCircleOrange}" },
+      { "level": 5, "name": "Very Poor", "color": "{colorRed}", "icon": "{icoCircleRed}" },
+      { "level": 6, "name": "Extremely Poor", "color": "{colorPurple}", "icon": "{icoCirclePurple}" }
+    ]
+  },
+  {
+    "tag": "US",
+    "nameShort": "US",
+    "nameFull": "American (US)",
+    "flag": "{icoFlagUS}",
+    "indexPoints": [0, 50, 100, 150, 200, 300, 400, 500],
+    "breakpoints25": [9.0, 35.4, 55.4, 125.4, 225.4, 325.4, 500.4],
+    "breakpoints10": [54, 154, 254, 354, 424, 504, 604],
+    "zones": [
+      { "level": 1, "name": "Good", "color": "{colorGreen}", "icon": "{icoCircleGreen}" },
+      { "level": 2, "name": "Moderate", "color": "{colorYellow}", "icon": "{icoCircleYellow}" },
+      { "level": 3, "name": "Unhealthy for Sensitive Groups", "color": "{colorOrange}", "icon": "{icoCircleOrange}" },
+      { "level": 4, "name": "Unhealthy", "color": "{colorDarkRed}", "icon": "{icoCircleRed}" },
+      { "level": 5, "name": "Very Unhealthy", "color": "{colorViolet}", "icon": "{icoCirclePurple}" },
+      { "level": 6, "name": "Hazardous", "color": "{colorMaroon}", "icon": "{icoCircleBrown}" },
+      { "level": 7, "name": "Extremely Hazardous", "color": "{colorGray}", "icon": "{icoCircleBlack}" }
+    ]
+  },
+  {
+    "tag": "CN",
+    "nameShort": "CN",
+    "nameFull": "China (CN)",
+    "flag": "{icoFlagCN}",
+    "indexPoints": [0, 50, 100, 150, 200, 300, 400, 500],
+    "breakpoints25": [35, 75, 115, 150, 250, 350, 500],
+    "breakpoints10": [50, 150, 250, 350, 420, 500, 600],
+    "zones": [
+      { "level": 1, "name": "Excellent", "color": "{colorGreen}", "icon": "{icoCircleGreen}" },
+      { "level": 2, "name": "Good", "color": "{colorYellow}", "icon": "{icoCircleYellow}" },
+      { "level": 3, "name": "Lightly Polluted", "color": "{colorOrange}", "icon": "{icoCircleOrange}" },
+      { "level": 4, "name": "Moderately Polluted", "color": "{colorDarkRed}", "icon": "{icoCircleRed}" },
+      { "level": 5, "name": "Heavily Polluted", "color": "{colorPurple}", "icon": "{icoCirclePurple}" },
+      { "level": 6, "name": "Severely Polluted", "color": "{colorMaroon}", "icon": "{icoCircleBrown}" },
+      { "level": 7, "name": "Extremely Polluted", "color": "{colorGray}", "icon": "{icoCircleBlack}" }
+    ]
+  }
+]

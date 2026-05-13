@@ -6,9 +6,13 @@ import (
 	"html"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ABespalov/aqinotifier/sensor"
 )
 
 var (
@@ -34,9 +38,10 @@ func init() {
 		langDicts["en"][k] = v
 	}
 
-	loadExternalTranslations("lng")
-	loadIcons("lng")
-	loadColors("lng")
+	loadExternalTranslations("res")
+	loadIcons("res")
+	loadColors("res")
+	loadAQIStandards("res")
 }
 
 var defaultIcons = map[string]string{
@@ -203,10 +208,66 @@ func loadColors(dir string) {
 	}
 }
 
+func loadAQIStandards(dir string) {
+	path := filepath.Join(dir, "aqi.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Printf("i18n: failed to read %s: %v\n", path, err)
+		return
+	}
+
+	if err := sensor.LoadStandards(data); err != nil {
+		fmt.Printf("i18n: failed to load AQI standards: %v\n", err)
+		return
+	}
+
+	// Localize standards from loaded translations/icons
+	i18nMu.Lock()
+	defer i18nMu.Unlock()
+
+	for tag, std := range sensor.Standards {
+		tagUpper := strings.ToUpper(tag)
+		
+		// 1. Localize Flag
+		flagKey := fmt.Sprintf("icoFlag%s", tagUpper)
+		if icon, ok := iconsMap[flagKey]; ok {
+			std.Flag = icon
+		}
+
+		// 2. Localize Standard Names
+		stdKey := "standard" + strings.Title(strings.ToLower(tag))
+		if name, ok := langDicts["en"][stdKey]; ok {
+			std.NameFull = name
+		}
+		shortKey := "txtStandard" + strings.Title(strings.ToLower(tag))
+		if name, ok := langDicts["en"][shortKey]; ok {
+			std.NameShort = name
+		}
+
+		// 3. Localize Zones
+		for i := range std.Zones {
+			level := std.Zones[i].Level
+			
+			// Zone Name (e.g. aqiNameL1Eu)
+			nameKey := fmt.Sprintf("aqiNameL%d%s", level, strings.Title(strings.ToLower(tag)))
+			if name, ok := langDicts["en"][nameKey]; ok {
+				std.Zones[i].Name = name
+			}
+
+			// Zone Icon (e.g. icoAqiEULevel1)
+			iconKey := fmt.Sprintf("icoAqi%sLevel%d", tagUpper, level)
+			if icon, ok := iconsMap[iconKey]; ok {
+				std.Zones[i].Icon = icon
+			}
+		}
+	}
+}
+
 func ReloadAll() {
-	loadExternalTranslations("lng")
-	loadIcons("lng")
-	loadColors("lng")
+	loadExternalTranslations("res")
+	loadIcons("res")
+	loadColors("res")
+	loadAQIStandards("res")
 }
 
 func AvailableLanguages() []string {
@@ -214,20 +275,28 @@ func AvailableLanguages() []string {
 	defer i18nMu.RUnlock()
 	seen := map[string]bool{"en": true}
 	langs := []string{"en"}
-	dir := "lng"
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	dir := "res"
+	
+	// Language code pattern: "xx" or "xx-XX"
+	langRegex := regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
+
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), ".json") && info.Name() != "ico.json" {
+		if !info.IsDir() && strings.HasSuffix(info.Name(), ".json") {
 			code := strings.TrimSuffix(info.Name(), ".json")
-			if !seen[code] {
-				seen[code] = true
-				langs = append(langs, code)
+			if langRegex.MatchString(code) {
+				if !seen[code] {
+					seen[code] = true
+					langs = append(langs, code)
+				}
 			}
 		}
 		return nil
 	})
+	
+	sort.Strings(langs)
 	return langs
 }
 
@@ -363,7 +432,7 @@ func resolvePlaceholderLocked(lang, key, format string, argsMap map[string]inter
 				if f == "" {
 					f = "2006-01-02 15:04:05"
 				}
-				res = t.Format(f)
+				res = t.Local().Format(f)
 			} else if format != "" {
 				switch format {
 				case "toUpper":
@@ -597,6 +666,12 @@ func (b *Bot) C(key string) string {
 		return v
 	}
 	return ""
+}
+
+func (b *Bot) Resolve(s string) string {
+	i18nMu.RLock()
+	defer i18nMu.RUnlock()
+	return resolveTemplateLocked("en", s, nil, 0)
 }
 
 

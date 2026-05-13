@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,10 +53,10 @@ const (
 	btnUnsubscribe         = "btnUnsubscribe"
 	btnMainMenu            = "btnMainMenu"
 	btnThresholds          = "btnThresholds"
-	btnPM10Level1          = "btnPm10Green"
-	btnPM25Level1          = "btnPm25Green"
-	btnPM10Level2          = "btnPm10Yellow"
-	btnPM25Level2          = "btnPm25Yellow"
+	btnPM10Level1          = "btnPm10L1"
+	btnPM25Level1          = "btnPm25L1"
+	btnPM10Level2          = "btnPm10L2"
+	btnPM25Level2          = "btnPm25L2"
 	btnPM10Diff            = "btnPm10Diff"
 	btnPM25Diff            = "btnPm25Diff"
 	btnCharts              = "btnCharts"
@@ -315,21 +317,37 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 	argsMap["winnerID"] = winnerID
 	if strings.HasPrefix(winnerID, "aqi_l") {
 		argsMap["isAqi"] = true
-		argsMap["isRise"] = strings.Contains(winnerID, "rise")
-		argsMap["isFall"] = strings.Contains(winnerID, "fall")
-		argsMap["isReturn"] = strings.Contains(winnerID, "return")
-		argsMap["isRed"] = strings.Contains(winnerID, "l4") || strings.Contains(winnerID, "l5") || strings.Contains(winnerID, "l6")
-		argsMap["isYellow"] = strings.Contains(winnerID, "l2") || strings.Contains(winnerID, "l3")
+
+		var level, prevLevel sensor.AQILevel
+		mcfg := b.GetUserSettings(chatID)
+		if mcfg.AQIStandard == "US" {
+			_, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
+			_, prevLevel = sensor.CalculateUS_AQI(m.PM25Prev, m.PM10Prev)
+		} else {
+			_, level = sensor.CalculateEU_AQI(m.PM25, m.PM10)
+			_, prevLevel = sensor.CalculateEU_AQI(m.PM25Prev, m.PM10Prev)
+		}
+
+		argsMap["isRise"] = level > prevLevel
+		argsMap["isFall"] = level < prevLevel
+		argsMap["isReturn"] = level == sensor.LevelGood
 	} else {
 		argsMap["isRise"] = strings.Contains(winnerID, "u") || strings.Contains(winnerID, "rise")
 		argsMap["isFall"] = strings.Contains(winnerID, "d") || strings.Contains(winnerID, "fall")
 		argsMap["isReturn"] = strings.Contains(winnerID, "l1d") || strings.Contains(winnerID, "l2d") || strings.Contains(winnerID, "clean") || strings.Contains(winnerID, "return")
 		argsMap["isSharp"] = strings.Contains(winnerID, "rise") || strings.Contains(winnerID, "fall")
 
-		argsMap["isBoth"] = strings.Contains(winnerID, "vals")
-		argsMap["isPm10"] = strings.Contains(winnerID, "val10") || strings.Contains(winnerID, "pm10") || argsMap["isBoth"].(bool)
-		argsMap["isPm25"] = strings.Contains(winnerID, "val25") || strings.Contains(winnerID, "pm25") || argsMap["isBoth"].(bool)
-		argsMap["isAqi"] = strings.Contains(winnerID, "aqi")
+		argsMap["isBoth"] = strings.Contains(winnerID, "vals") || strings.Contains(winnerID, "diffs")
+		argsMap["isPm10"] = strings.Contains(winnerID, "10") || argsMap["isBoth"].(bool)
+		argsMap["isPm25"] = strings.Contains(winnerID, "25") || argsMap["isBoth"].(bool)
+		argsMap["isAqi"] = strings.Contains(winnerID, "aqi") || strings.Contains(winnerID, "diffs")
+
+		isVal := strings.HasPrefix(winnerID, "val")
+		isDiff := strings.HasPrefix(winnerID, "diff")
+		argsMap["isPm10Val"] = argsMap["isPm10"].(bool) && isVal
+		argsMap["isPm10Diff"] = argsMap["isPm10"].(bool) && isDiff
+		argsMap["isPm25Val"] = argsMap["isPm25"].(bool) && isVal
+		argsMap["isPm25Diff"] = argsMap["isPm25"].(bool) && isDiff
 
 		argsMap["isRed"] = strings.Contains(winnerID, "l3")
 		argsMap["isYellow"] = strings.Contains(winnerID, "l2")
@@ -348,6 +366,7 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		argsMap[key] = true
 	}
 
+	argsMap["isSilent"] = silent
 	text := b.TDevice(chatID, "msgAlertNotify", m.DeviceID, argsMap)
 
 	params := tu.Message(tu.ID(chatID), text).
@@ -466,28 +485,44 @@ func (b *Bot) cleanupMessage(chatID int64, cq *telego.CallbackQuery) {
 
 func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 	parts := strings.Split(data, ":")
-	if len(parts) != 3 {
+	if len(parts) < 3 {
 		return
 	}
 	pmType := parts[1]
 	levelKey := parts[2]
+	currentTag := ""
+	if len(parts) >= 4 {
+		currentTag = parts[3]
+	}
 
 	mcfg := b.GetUserSettings(chatID)
 
-	std := mcfg.AQIStandard
-	var bp []float64
-	if pmType == "PM10" {
-		if std == "US" {
-			bp = sensor.BreakpointsUS10
+	var tags []string
+	for tag := range sensor.Standards {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+
+	type bpItem struct {
+		tag string
+		val float64
+	}
+	var fullList []bpItem
+	for _, tag := range tags {
+		stdData := sensor.Standards[tag]
+		var list []float64
+		if pmType == "PM10" {
+			list = stdData.Breakpoints10
 		} else {
-			bp = sensor.BreakpointsEU10
+			list = stdData.Breakpoints25
 		}
-	} else {
-		if std == "US" {
-			bp = sensor.BreakpointsUS25
-		} else {
-			bp = sensor.BreakpointsEU25
+		for _, v := range list {
+			fullList = append(fullList, bpItem{tag: tag, val: v})
 		}
+	}
+
+	if len(fullList) == 0 {
+		return
 	}
 
 	var current float64
@@ -505,17 +540,28 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 		}
 	}
 
-	next := bp[0]
-	for i, v := range bp {
-		if v == current {
-			if i+1 < len(bp) {
-				next = bp[i+1]
-			} else {
-				next = bp[0]
+	const eps = 0.0001
+	idx := -1
+	for i, item := range fullList {
+		if math.Abs(item.val-current) < eps {
+			if idx == -1 {
+				idx = i
 			}
-			break
+			if currentTag != "" && strings.EqualFold(item.tag, currentTag) {
+				idx = i
+				break
+			}
+			// Fallback: if no currentTag, try to match user's default standard
+			if currentTag == "" && strings.EqualFold(item.tag, mcfg.AQIStandard) {
+				idx = i
+				break
+			}
 		}
 	}
+
+	nextIdx := (idx + 1) % len(fullList)
+	next := fullList[nextIdx].val
+	nextTag := fullList[nextIdx].tag
 
 	if pmType == "PM10" {
 		if levelKey == "level1" {
@@ -532,7 +578,9 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 	}
 
 	b.store.UpdateSettings(chatID, mcfg)
-	b.cmdAQICycleMenu(chatID, msgID)
+	b.cmdAQICycleMenu(chatID, msgID, map[string]string{
+		pmType + ":" + levelKey: nextTag,
+	})
 }
 
 func (b *Bot) sendChartForDevice(chatID int64, deviceID, chartType string) {

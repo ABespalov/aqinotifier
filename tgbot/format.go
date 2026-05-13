@@ -30,40 +30,14 @@ func (b *Bot) getEventPriority(id string) int {
 	}
 }
 func (b *Bot) getAQIIcon(level sensor.AQILevel, standard string) string {
-	if strings.ToUpper(standard) == "US" {
-		switch level {
-		case sensor.LevelGood:
-			return b.I(kIcoAqiUSLevel1)
-		case sensor.LevelModerate:
-			return b.I(kIcoAqiUSLevel2)
-		case sensor.LevelSlightlyUnhealthy:
-			return b.I(kIcoAqiUSLevel3)
-		case sensor.LevelUnhealthy:
-			return b.I(kIcoAqiUSLevel4)
-		case sensor.LevelVeryUnhealthy:
-			return b.I(kIcoAqiUSLevel5)
-		case sensor.LevelHazardous:
-			return b.I(kIcoAqiUSLevel6)
-		case sensor.LevelExtremelyHazardous:
-			return b.I(kIcoAqiUSLevel7)
-		}
-	} else {
-		switch level {
-		case sensor.LevelGood:
-			return b.I(kIcoAqiEULevel1)
-		case sensor.LevelModerate:
-			return b.I(kIcoAqiEULevel2)
-		case sensor.LevelSlightlyUnhealthy:
-			return b.I(kIcoAqiEULevel3)
-		case sensor.LevelUnhealthy:
-			return b.I(kIcoAqiEULevel4)
-		case sensor.LevelVeryUnhealthy:
-			return b.I(kIcoAqiEULevel5)
-		case sensor.LevelHazardous, sensor.LevelExtremelyHazardous:
-			return b.I(kIcoAqiEULevel6)
-		}
+	std, ok := sensor.Standards[strings.ToUpper(standard)]
+	if ok && int(level) > 0 && int(level) <= len(std.Zones) {
+		return b.Resolve(std.Zones[level-1].Icon)
 	}
-	return b.I(kIcoUnknown)
+
+	// Fallback to old iconsMap if dynamic fails
+	key := fmt.Sprintf("icoAqi%sLevel%d", strings.ToUpper(standard), level)
+	return b.I(key)
 }
 func (b *Bot) formatDeviceStatus(chatID int64, deviceID string) string {
 	log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: formatDeviceStatus start")
@@ -115,7 +89,6 @@ func (b *Bot) unitPressLabel(chatID int64) string {
 
 func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[string]interface{} {
 	mcfg := b.GetUserSettings(chatID)
-	std := strings.ToLower(mcfg.AQIStandard)
 
 	args := map[string]interface{}{
 		"date": m.Timestamp,
@@ -185,19 +158,33 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 
 	var aqi float64
 	var level sensor.AQILevel
-	if mcfg.AQIStandard == "US" {
-		aqi, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
-	} else {
-		aqi, level = sensor.CalculateEU_AQI(m.PM25, m.PM10)
+	aqi, level = sensor.CalculateValueAQI(m.PM25, "PM2.5", mcfg.AQIStandard)
+	aqi10, level10 := sensor.CalculateValueAQI(m.PM10, "PM10", mcfg.AQIStandard)
+	if aqi10 > aqi {
+		aqi = aqi10
+		level = level10
 	}
 
 	levelChar := fmt.Sprintf("l%d", level)
 	args["aqiIcon"] = b.getAQIIcon(level, mcfg.AQIStandard)
 	args["aqiVal"] = aqi
 	args["aqiLevel"] = int(level)
-	key := fmt.Sprintf("aqiName%s%s", strings.Title(levelChar), strings.Title(std))
-	args["aqiName"] = b.T(chatID, key)
-	args["aqiStandardFlag"] = "{icoFlag" + strings.ToUpper(std) + "}"
+
+	stdTag := strings.ToUpper(mcfg.AQIStandard)
+	aqiName := ""
+	if s, ok := sensor.Standards[stdTag]; ok && int(level) > 0 && int(level) <= len(s.Zones) {
+		aqiName = s.Zones[level-1].Name
+	}
+	// Try localization if available
+	key := fmt.Sprintf("aqiName%s%s", strings.Title(levelChar), strings.Title(strings.ToLower(mcfg.AQIStandard)))
+	if localized := b.T(chatID, key); !strings.HasPrefix(localized, "!!") {
+		aqiName = localized
+	}
+	args["aqiName"] = aqiName
+	args["aqiStandardFlag"] = "{icoFlag" + stdTag + "}"
+	if s, ok := sensor.Standards[stdTag]; ok && s.Flag != "" {
+		args["aqiStandardFlag"] = s.Flag
+	}
 
 	log.Debug().Interface("args", args).Msg("tgbot: measurement args built")
 
