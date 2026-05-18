@@ -18,8 +18,9 @@ type Subscription struct {
 	Language  string          `json:"language,omitempty"`
 	TGCode    string          `json:"tg_code,omitempty"`
 	UnitTemp  string          `json:"unit_temp,omitempty"`  // "c", "f"
-	UnitPress string          `json:"unit_press,omitempty"` // "mmhg", "hpa"
-	Version   int             `json:"version,omitempty"`    // for migrations
+	UnitPress   string          `json:"unit_press,omitempty"` // "mmhg", "hpa"
+	Version     int             `json:"version,omitempty"`    // for migrations
+	LastPrompts []int           `json:"last_prompts,omitempty"`
 }
 
 // Store manages Telegram bot state persisted to a JSON file or Postgres.
@@ -440,4 +441,65 @@ func (s *Store) Subscribers(deviceID string) []int64 {
 		}
 	}
 	return chats
+}
+
+func (s *Store) GetLastPrompts(chatID int64) []int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sub, ok := s.subs[chatID]
+	if !ok || len(sub.LastPrompts) == 0 {
+		return nil
+	}
+	res := make([]int, len(sub.LastPrompts))
+	copy(res, sub.LastPrompts)
+	return res
+}
+
+func (s *Store) AddLastPrompt(chatID int64, msgID int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sub, ok := s.subs[chatID]
+	if !ok {
+		sub = &Subscription{ChatID: chatID}
+		s.subs[chatID] = sub
+	}
+	sub.LastPrompts = append(sub.LastPrompts, msgID)
+	s.saveLocked(chatID)
+}
+
+func (s *Store) ClearLastPrompts(chatID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sub, ok := s.subs[chatID]
+	if !ok || len(sub.LastPrompts) == 0 {
+		return
+	}
+	sub.LastPrompts = nil
+	s.saveLocked(chatID)
+}
+
+func (s *Store) RemoveLastPrompt(chatID int64, msgID int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sub, ok := s.subs[chatID]
+	if !ok || len(sub.LastPrompts) == 0 {
+		return
+	}
+	newIDs := make([]int, 0, len(sub.LastPrompts))
+	found := false
+	for _, id := range sub.LastPrompts {
+		if id != msgID {
+			newIDs = append(newIDs, id)
+		} else {
+			found = true
+		}
+	}
+	if found {
+		if len(newIDs) == 0 {
+			sub.LastPrompts = nil
+		} else {
+			sub.LastPrompts = newIDs
+		}
+		s.saveLocked(chatID)
+	}
 }

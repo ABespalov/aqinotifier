@@ -477,7 +477,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 	case strings.HasPrefix(data, "status:"):
 		b.cleanupMessage(chatID, cq)
 		deviceID := strings.TrimPrefix(data, "status:")
-		b.sendPersistentWithKeyboard(chatID, b.formatDeviceStatus(chatID, deviceID), b.mainKeyboard(chatID, deviceID))
+		b.sendWithKeyboard(chatID, b.formatDeviceStatus(chatID, deviceID), b.mainKeyboard(chatID, deviceID))
 
 	case strings.HasPrefix(data, "dev_settings:"):
 		b.cleanupMessage(chatID, cq)

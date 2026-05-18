@@ -309,6 +309,10 @@ func (b *Bot) sendWithKeyboard(chatID int64, text string, markup telego.ReplyMar
 		WithReplyMarkup(markup).
 		WithParseMode(telego.ModeHTML)
 
+	if markup != nil {
+		b.clearLastPrompt(chatID)
+	}
+
 	msg, err := b.api.SendMessage(context.Background(), params)
 	if err != nil {
 		log.Error().Err(err).Int64("chat_id", chatID).Str("text", text).Msg("tgbot: failed to send message")
@@ -317,13 +321,4 @@ func (b *Bot) sendWithKeyboard(chatID int64, text string, markup telego.ReplyMar
 	}
 }
 
-func (b *Bot) sendPersistentWithKeyboard(chatID int64, text string, markup telego.ReplyMarkup) {
-	params := tu.Message(tu.ID(chatID), text).
-		WithReplyMarkup(markup).
-		WithParseMode(telego.ModeHTML)
 
-	_, err := b.api.SendMessage(context.Background(), params)
-	if err != nil {
-		log.Error().Err(err).Int64("chat_id", chatID).Str("text", text).Msg("tgbot: failed to send persistent message")
-	}
-}

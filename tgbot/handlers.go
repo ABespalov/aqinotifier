@@ -244,9 +244,7 @@ func (b *Bot) promptDeviceID(chatID int64) {
 }
 
 func (b *Bot) setLastPrompt(chatID int64, msgID int) {
-	b.lastPromptsMu.Lock()
-	b.lastPrompts[chatID] = append(b.lastPrompts[chatID], msgID)
-	b.lastPromptsMu.Unlock()
+	b.store.AddLastPrompt(chatID, msgID)
 }
 
 func (b *Bot) promptThreshold(chatID int64, param, levelKey string) {

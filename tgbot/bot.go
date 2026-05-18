@@ -221,9 +221,6 @@ type Bot struct {
 	defaults *config.Monitor
 	version  string
 
-	lastPromptsMu sync.Mutex
-	lastPrompts   map[int64][]int
-
 	renameIDMu sync.Mutex
 	renameIDs  map[int64]string
 }
@@ -265,7 +262,6 @@ func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor
 		stopFunc:    cancel,
 		defaults:    monitorDefaults,
 		version:     version,
-		lastPrompts: make(map[int64][]int),
 		renameIDs:   make(map[int64]string),
 	}
 
@@ -373,9 +369,13 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		WithParseMode(telego.ModeHTML).
 		WithReplyMarkup(b.mainKeyboard(chatID, m.DeviceID))
 	params.DisableNotification = silent
-	_, err := b.api.SendMessage(context.Background(), params)
+
+	b.clearLastPrompt(chatID)
+	msg, err := b.api.SendMessage(context.Background(), params)
 	if err != nil {
 		log.Error().Err(err).Int64("chat_id", chatID).Str("msg", text).Msg("tgbot: failed to send alert")
+	} else {
+		b.setLastPrompt(chatID, msg.GetMessageID())
 	}
 }
 
@@ -436,20 +436,19 @@ func (b *Bot) Stop() {
 }
 
 func (b *Bot) clearLastPrompt(chatID int64) {
-	b.lastPromptsMu.Lock()
-	ids, ok := b.lastPrompts[chatID]
-	if ok {
-		delete(b.lastPrompts, chatID)
+	ids := b.store.GetLastPrompts(chatID)
+	if len(ids) == 0 {
+		return
 	}
-	b.lastPromptsMu.Unlock()
 
-	if ok {
-		for _, id := range ids {
-			_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
-				ChatID:    tu.ID(chatID),
-				MessageID: id,
-			})
-		}
+	b.store.ClearLastPrompts(chatID)
+
+	for _, id := range ids {
+		_, _ = b.api.EditMessageReplyMarkup(context.Background(), &telego.EditMessageReplyMarkupParams{
+			ChatID:      tu.ID(chatID),
+			MessageID:   id,
+			ReplyMarkup: nil,
+		})
 	}
 }
 
@@ -466,22 +465,7 @@ func (b *Bot) cleanupMessage(chatID int64, cq *telego.CallbackQuery) {
 		ReplyMarkup: nil,
 	})
 
-	// Remove only this message from lastPrompts
-	b.lastPromptsMu.Lock()
-	if ids, ok := b.lastPrompts[chatID]; ok {
-		newIDs := make([]int, 0, len(ids))
-		for _, id := range ids {
-			if id != msgID {
-				newIDs = append(newIDs, id)
-			}
-		}
-		if len(newIDs) == 0 {
-			delete(b.lastPrompts, chatID)
-		} else {
-			b.lastPrompts[chatID] = newIDs
-		}
-	}
-	b.lastPromptsMu.Unlock()
+	b.store.RemoveLastPrompt(chatID, msgID)
 }
 
 func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
@@ -604,6 +588,8 @@ func (b *Bot) sendChartForDevice(chatID int64, deviceID, chartType string) {
 		Photo:       tu.File(nr),
 		ReplyMarkup: b.chartsMenuKeyboard(chatID, deviceID),
 	}
+	
+	b.clearLastPrompt(chatID)
 	m, err := b.api.SendPhoto(context.Background(), params)
 	if err == nil {
 		b.setLastPrompt(chatID, m.GetMessageID())

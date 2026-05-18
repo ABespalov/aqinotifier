@@ -62,7 +62,7 @@ func (b *Bot) cmdStatusMenu(chatID int64) {
 		return
 	}
 	if len(devices) == 1 {
-		b.sendPersistentWithKeyboard(chatID, b.formatDeviceStatus(chatID, devices[0]), b.mainKeyboard(chatID, devices[0]))
+		b.sendWithKeyboard(chatID, b.formatDeviceStatus(chatID, devices[0]), b.mainKeyboard(chatID, devices[0]))
 		return
 	}
 
@@ -466,21 +466,14 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	}
 
 	params := tu.MediaGroup(tu.ID(chatID), media...)
-	msgs, err := b.api.SendMediaGroup(context.Background(), params)
-	if err == nil {
-		for _, m := range msgs {
-			b.setLastPrompt(chatID, m.GetMessageID())
-		}
-	} else {
+	_, err = b.api.SendMediaGroup(context.Background(), params)
+	if err != nil {
 		log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to send media group")
 		// Fallback to individual photos if media group fails
 		for i, buf := range buffers {
 			nr := &bytesNamedReader{Reader: bytes.NewReader(buf), name: fmt.Sprintf("chart_%d.png", i)}
 			p := &telego.SendPhotoParams{ChatID: tu.ID(chatID), Photo: tu.File(nr)}
-			m, err := b.api.SendPhoto(context.Background(), p)
-			if err == nil {
-				b.setLastPrompt(chatID, m.GetMessageID())
-			}
+			_, _ = b.api.SendPhoto(context.Background(), p)
 		}
 	}
 
@@ -493,7 +486,7 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	footer := b.T(chatID, msgHistoryFooter, map[string]interface{}{
 		"count": len(history), "deviceId": deviceID, "deviceName": deviceName,
 	})
-	b.sendPersistentWithKeyboard(chatID, footer, b.mainKeyboard(chatID))
+	b.sendWithKeyboard(chatID, footer, b.mainKeyboard(chatID))
 }
 
 func (b *Bot) cmdResetConfirm(chatID int64) {
