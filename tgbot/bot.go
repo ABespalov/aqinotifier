@@ -291,6 +291,10 @@ func (b *Bot) GetUserSettings(chatID int64) *config.Monitor {
 	return b.store.GetSettings(chatID, b.defaults)
 }
 
+func (b *Bot) GetDeviceType(deviceID string) string {
+	return b.store.GetDeviceType(deviceID)
+}
+
 func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.AlertEvent, clears []monitor.AlertEvent, silent bool) {
 	if len(alerts) == 0 && len(clears) == 0 {
 		return

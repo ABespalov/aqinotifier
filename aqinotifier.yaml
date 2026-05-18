@@ -83,6 +83,12 @@ log:
 
 # Monitoring and notification settings.
 monitor:
+  # Raw data correction formulas per device type
+  corrections:
+    ArmAQI:
+      pm25: "1.85 * pm25_raw + 4.5"
+      pm10: "?(1.75 * pm10_raw) < pm25:pm25:(1.75 * pm10_raw)"
+
   # Thresholds for PM2.5 and PM10 zones.
   # Green zone: [0, green]
   # Yellow zone: (green, yellow]

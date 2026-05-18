@@ -7,6 +7,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +21,8 @@ type Measurement struct {
 	Timestamp   time.Time `json:"timestamp"`
 	PM10        float64   `json:"pm10"`
 	PM25        float64   `json:"pm25"`
+	PM10Raw     float64   `json:"pm10_raw"`
+	PM25Raw     float64   `json:"pm25_raw"`
 	Temperature float64   `json:"temperature"`
 	Humidity    float64   `json:"humidity"`
 	Pressure    float64   `json:"pressure"`
@@ -47,15 +50,18 @@ type Notifier interface {
 	GetUserSettings(chatID int64) *config.Monitor
 	// Notify delivers a unified notification with appropriate styling based on events.
 	Notify(chatID int64, m *Measurement, alerts []AlertEvent, clears []AlertEvent, silent bool)
+	// GetDeviceType returns the device type string for a device.
+	GetDeviceType(deviceID string) string
 }
 
 type MonitorService struct {
 	cfg      *config.Config
 	history  map[string][]Measurement
 	mu       sync.RWMutex
-	notifier Notifier
-	db       *sql.DB
-	fileMu   sync.RWMutex // protects JSON file from concurrent writes
+	notifier   Notifier
+	db         *sql.DB
+	fileMu     sync.RWMutex // protects JSON file from concurrent writes
+	evaluators map[string]*DeviceEvaluator
 }
 
 // SetNotifier attaches a Notifier that will receive warning callbacks.
@@ -92,12 +98,38 @@ func (s *MonitorService) GetHistory(deviceID string) []Measurement {
 }
 
 func NewMonitorService(cfg *config.Config) *MonitorService {
+	evaluatorsMap := make(map[string]*DeviceEvaluator)
+	for devPrefix, corr := range cfg.Monitor.Corrections {
+		eval, err := buildEvaluator(corr)
+		if err != nil {
+			log.Fatal().Err(err).Str("device_prefix", devPrefix).Msg("Failed to build formula evaluator")
+		}
+		evaluatorsMap[devPrefix] = eval
+	}
+
 	s := &MonitorService{
-		cfg:     cfg,
-		history: make(map[string][]Measurement),
+		cfg:        cfg,
+		history:    make(map[string][]Measurement),
+		evaluators: evaluatorsMap,
 	}
 	s.loadHistory()
 	return s
+}
+
+// Reload rebuilds the formula evaluators when config changes.
+func (s *MonitorService) Reload() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	evaluatorsMap := make(map[string]*DeviceEvaluator)
+	for devPrefix, corr := range s.cfg.Monitor.Corrections {
+		eval, err := buildEvaluator(corr)
+		if err != nil {
+			log.Error().Err(err).Str("device_prefix", devPrefix).Msg("Failed to build formula evaluator on reload")
+			continue
+		}
+		evaluatorsMap[devPrefix] = eval
+	}
+	s.evaluators = evaluatorsMap
 }
 
 func (s *MonitorService) SetDB(db *sql.DB) {
@@ -112,6 +144,8 @@ func (s *MonitorService) SetDB(db *sql.DB) {
 		timestamp TIMESTAMPTZ,
 		pm10 DOUBLE PRECISION,
 		pm25 DOUBLE PRECISION,
+		pm10_raw DOUBLE PRECISION DEFAULT 0,
+		pm25_raw DOUBLE PRECISION DEFAULT 0,
 		temperature DOUBLE PRECISION,
 		humidity DOUBLE PRECISION,
 		pressure DOUBLE PRECISION
@@ -124,6 +158,14 @@ func (s *MonitorService) SetDB(db *sql.DB) {
 		log.Error().Err(err).Msg("failed to initialize SQL table")
 		return
 	}
+
+	// Migrate existing table by adding new columns if they do not exist
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm10_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm25_raw DOUBLE PRECISION DEFAULT 0")
+
+	// Backfill raw values for historical data (if raw is 0 but computed is not)
+	_, _ = s.db.Exec("UPDATE measurements SET pm10_raw = pm10 WHERE pm10_raw = 0 AND pm10 != 0")
+	_, _ = s.db.Exec("UPDATE measurements SET pm25_raw = pm25 WHERE pm25_raw = 0 AND pm25 != 0")
 
 	// Load last N values into RAM for each device
 	s.loadHistoryFromSQLLocked()
@@ -144,6 +186,16 @@ func (s *MonitorService) loadHistory() {
 	if err := json.Unmarshal(data, &all); err != nil {
 		log.Error().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("failed to unmarshal history")
 		return
+	}
+
+	// Backfill raw values for historical data
+	for i := range all {
+		if all[i].PM10Raw == 0 && all[i].PM10 != 0 {
+			all[i].PM10Raw = all[i].PM10
+		}
+		if all[i].PM25Raw == 0 && all[i].PM25 != 0 {
+			all[i].PM25Raw = all[i].PM25
+		}
 	}
 
 	s.mu.Lock()
@@ -186,7 +238,7 @@ func (s *MonitorService) loadHistoryFromSQLLocked() {
 
 	for _, id := range deviceIDs {
 		mRows, err := s.db.Query(`
-			SELECT device_id, timestamp, pm10, pm25, temperature, humidity, pressure 
+			SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure 
 			FROM measurements 
 			WHERE device_id = $1 
 			ORDER BY timestamp DESC 
@@ -199,7 +251,7 @@ func (s *MonitorService) loadHistoryFromSQLLocked() {
 		var sqlHist []Measurement
 		for mRows.Next() {
 			var m Measurement
-			if err := mRows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
+			if err := mRows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
 				sqlHist = append([]Measurement{m}, sqlHist...)
 			}
 		}
@@ -289,6 +341,17 @@ func (s *MonitorService) saveToJSON(m Measurement) {
 	if err == nil {
 		_ = json.Unmarshal(data, &all)
 	}
+
+	// Backfill old records to heal the JSON file
+	for i := range all {
+		if all[i].PM10Raw == 0 && all[i].PM10 != 0 {
+			all[i].PM10Raw = all[i].PM10
+		}
+		if all[i].PM25Raw == 0 && all[i].PM25 != 0 {
+			all[i].PM25Raw = all[i].PM25
+		}
+	}
+
 	all = append(all, m)
 
 	// Optional: keep total file size reasonable (max_values from config)
@@ -305,8 +368,8 @@ func (s *MonitorService) saveToJSON(m Measurement) {
 func (s *MonitorService) saveToSQL(m Measurement) {
 	go func(m Measurement) {
 		log.Debug().Str("device", m.DeviceID).Time("ts", m.Timestamp).Msg("db: saving measurement to sql")
-		query := "INSERT INTO measurements (device_id, timestamp, pm10, pm25, temperature, humidity, pressure) VALUES ($1, $2, $3, $4, $5, $6, $7)"
-		_, err := s.db.Exec(query, m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.Temperature, m.Humidity, m.Pressure)
+		query := "INSERT INTO measurements (device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+		_, err := s.db.Exec(query, m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.PM10Raw, m.PM25Raw, m.Temperature, m.Humidity, m.Pressure)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to save to SQL")
 		}
@@ -330,9 +393,11 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 		}
 		switch v.Type {
 		case "SDS_P1":
+			m.PM10Raw = val
 			m.PM10 = val
 			hasPM10 = true
 		case "SDS_P2":
+			m.PM25Raw = val
 			m.PM25 = val
 			hasPM25 = true
 		case "BME280_temperature":
@@ -341,6 +406,23 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 			m.Humidity = val
 		case "BME280_pressure":
 			m.Pressure = val / 100.0
+		}
+	}
+
+	// Apply formulas based on device prefix, mapped name, or global device type
+	devName := m.DeviceID
+	if n, ok := s.cfg.Monitor.DeviceNames[m.DeviceID]; ok {
+		devName = n
+	}
+	devType := "ArmAQI"
+	if s.notifier != nil {
+		devType = s.notifier.GetDeviceType(m.DeviceID)
+	}
+
+	for prefix, eval := range s.evaluators {
+		if strings.HasPrefix(m.DeviceID, prefix) || strings.HasPrefix(devName, prefix) || strings.HasPrefix(devType, prefix) {
+			eval.Evaluate(&m)
+			break
 		}
 	}
 
@@ -728,7 +810,7 @@ func (s *MonitorService) GetHistoryByDuration(deviceID string, duration time.Dur
 func (s *MonitorService) getHistoryFromSQL(deviceID string, duration time.Duration) []Measurement {
 	since := time.Now().UTC().Add(-duration)
 	log.Debug().Str("device", deviceID).Dur("duration", duration).Msg("db: querying sql history")
-	query := "SELECT device_id, timestamp, pm10, pm25, temperature, humidity, pressure FROM measurements WHERE device_id = $1 AND timestamp >= $2 ORDER BY timestamp ASC"
+	query := "SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure FROM measurements WHERE device_id = $1 AND timestamp >= $2 ORDER BY timestamp ASC"
 	rows, err := s.db.Query(query, deviceID, since)
 	if err != nil {
 		log.Error().Err(err).Msg("failed to query SQL history")
@@ -739,7 +821,7 @@ func (s *MonitorService) getHistoryFromSQL(deviceID string, duration time.Durati
 	var res []Measurement
 	for rows.Next() {
 		var m Measurement
-		if err := rows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
+		if err := rows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
 			res = append(res, m)
 		}
 	}

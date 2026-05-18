@@ -18,7 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const BotVersion = "0.11.5a"
+const BotVersion = "0.12.0a"
 
 func main() {
 	execPath, err := os.Executable()
@@ -159,7 +159,8 @@ func main() {
 					*cfg = *newCfg
 					updateModTimes(cfg)
 					tgbot.ReloadAll()
-					log.Info().Msg("config reload: success (including translations)")
+					ms.Reload()
+					log.Info().Msg("config reload: success (including translations & evaluators)")
 
 					if cfg.Log.Level != oldLogLevel || cfg.Log.LogFile != oldLogFile {
 						log.Info().Msg("config reload: updating logger...")

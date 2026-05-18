@@ -3,6 +3,7 @@ module github.com/ABespalov/aqinotifier
 go 1.25.7
 
 require (
+	github.com/expr-lang/expr v1.17.8
 	github.com/go-analyze/charts v0.5.27
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9

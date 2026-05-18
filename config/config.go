@@ -177,8 +177,9 @@ type Monitor struct {
 	PM25Diff      float64           `yaml:"pm25_diff" json:"pm25_diff"`
 	Notifications []string          `yaml:"notifications" json:"notifications"`
 	Warnings      []string          `yaml:"warnings" json:"warnings"`
-	AQIStandard   string            `yaml:"aqi_standard" json:"aqi_standard"`
-	DeviceNames   map[string]string `yaml:"device_names" json:"device_names"`
+	AQIStandard   string                       `yaml:"aqi_standard" json:"aqi_standard"`
+	DeviceNames   map[string]string            `yaml:"device_names" json:"device_names"`
+	Corrections   map[string]map[string]string `yaml:"corrections" json:"corrections"`
 }
 
 // NewMonitorConfig returns a Monitor pre-populated with default values
@@ -194,6 +195,7 @@ func NewMonitorConfig() *Monitor {
 		Warnings:      []string{"aqi_l1", "aqi_l2", "aqi_l3", "aqi_l4", "aqi_l5", "aqi_l6", "aqi_l7", "val25_l2u", "val25_l3u", "val25_l2d", "val25_l1d", "val10_l2u", "val10_l3u", "val10_l2d", "val10_l1d", "vals_l2u", "vals_l3u", "vals_l2d", "vals_l1d"},
 		AQIStandard:   "EU",
 		DeviceNames:   make(map[string]string),
+		Corrections:   make(map[string]map[string]string),
 	}
 }
 
@@ -226,6 +228,9 @@ func (m *Monitor) Validate() {
 	}
 	if m.Warnings == nil {
 		m.Warnings = defaults.Warnings
+	}
+	if m.Corrections == nil {
+		m.Corrections = defaults.Corrections
 	}
 }
 
