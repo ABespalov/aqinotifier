@@ -18,7 +18,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const BotVersion = "0.13.1a"
+const BotVersion = "0.13.2"
 
 func main() {
 	execPath, err := os.Executable()
@@ -76,18 +76,6 @@ func main() {
 		} else {
 			ms.SetDB(db)
 		}
-	}
-
-	// Database reconnection and background sync worker
-	if cfg.Database.Type == "postgres" && db != nil {
-		go func() {
-			ticker := time.NewTicker(1 * time.Minute)
-			for range ticker.C {
-				if err := db.Ping(); err != nil {
-					log.Warn().Err(err).Msg("db: connection lost, background ping failed")
-				}
-			}
-		}()
 	}
 
 	restartServer := make(chan struct{}, 1)
@@ -167,7 +155,12 @@ func main() {
 						if activeCleanup != nil {
 							activeCleanup()
 						}
-						_, activeCleanup, _ = config.NewLogger(cfg.Log)
+						_, newCleanup, logErr := config.NewLogger(cfg.Log)
+						if logErr != nil {
+							log.Error().Err(logErr).Msg("config reload: failed to reinitialize logger")
+						} else {
+							activeCleanup = newCleanup
+						}
 					}
 
 					if cfg.Server.Node() != oldNode || cfg.Server.Protocol != oldProto || cfg.Server.Url != oldUrl || cfg.Server.CertFile != oldCert || cfg.Server.KeyFile != oldKey {
@@ -253,7 +246,9 @@ func main() {
 		}()
 		<-restartServer
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = srv.Shutdown(ctx)
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Warn().Err(err).Msg("server: shutdown did not complete cleanly")
+		}
 		cancel()
 	}
 }

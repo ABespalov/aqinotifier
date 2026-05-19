@@ -300,7 +300,9 @@ func (s *MonitorService) loadHistoryFromSQLLocked() {
 			if err := mRows.Scan(
 				&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw, &m.Temperature, &m.Humidity, &m.Pressure, &m.DeviceType,
 				&m.PM03, &m.PM03Raw, &m.PM01, &m.PM01Raw, &m.CO2, &m.CO2Raw, &m.TVOC, &m.TVOCRaw, &m.Nox, &m.NoxRaw, &m.TemperatureRaw, &m.HumidityRaw, &m.PressureRaw,
-			); err == nil {
+			); err != nil {
+				log.Warn().Err(err).Str("device", id).Msg("monitor: failed to scan SQL history row")
+			} else {
 				sqlHist = append([]Measurement{m}, sqlHist...)
 			}
 		}
@@ -388,7 +390,10 @@ func (s *MonitorService) saveToJSON(m Measurement) {
 	data, err := os.ReadFile(s.cfg.Database.JsonFile)
 	var all []Measurement
 	if err == nil {
-		_ = json.Unmarshal(data, &all)
+		if jsonErr := json.Unmarshal(data, &all); jsonErr != nil {
+			log.Warn().Err(jsonErr).Str("file", s.cfg.Database.JsonFile).Msg("monitor: failed to unmarshal JSON history, starting fresh")
+			all = nil
+		}
 	}
 
 	// Backfill old records to heal the JSON file
@@ -412,8 +417,12 @@ func (s *MonitorService) saveToJSON(m Measurement) {
 	}
 
 	out, err := json.MarshalIndent(all, "", "  ")
-	if err == nil {
-		_ = os.WriteFile(s.cfg.Database.JsonFile, out, 0644)
+	if err != nil {
+		log.Error().Err(err).Msg("monitor: failed to marshal history to JSON")
+		return
+	}
+	if err := os.WriteFile(s.cfg.Database.JsonFile, out, 0644); err != nil {
+		log.Error().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("monitor: failed to write JSON history file")
 	}
 }
 
@@ -442,8 +451,6 @@ func (s *MonitorService) Process(data *sensor.SensorData) {
 	}
 	s.processArmAQI(data)
 }
-
-
 
 func (s *MonitorService) lastMeasurementLocked(deviceID string) *Measurement {
 	hist := s.history[deviceID]
@@ -794,10 +801,18 @@ func (s *MonitorService) GetHistoryByDuration(deviceID string, duration time.Dur
 func (s *MonitorService) getHistoryFromSQL(deviceID string, duration time.Duration) []Measurement {
 	since := time.Now().UTC().Add(-duration)
 	log.Debug().Str("device", deviceID).Dur("duration", duration).Msg("db: querying sql history")
-	query := "SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure FROM measurements WHERE device_id = $1 AND timestamp >= $2 ORDER BY timestamp ASC"
+	// Select all fields to avoid losing CO2, TVOC, NOx and other extended sensor data.
+	query := `SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw,
+		temperature, humidity, pressure, COALESCE(device_type, 'ArmAQI'),
+		pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw,
+		tvoc, tvoc_raw, nox, nox_raw,
+		temperature_raw, humidity_raw, pressure_raw
+		FROM measurements
+		WHERE device_id = $1 AND timestamp >= $2
+		ORDER BY timestamp ASC`
 	rows, err := s.db.Query(query, deviceID, since)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to query SQL history")
+		log.Error().Err(err).Str("device", deviceID).Msg("db: failed to query SQL history")
 		return nil
 	}
 	defer rows.Close()
@@ -805,7 +820,15 @@ func (s *MonitorService) getHistoryFromSQL(deviceID string, duration time.Durati
 	var res []Measurement
 	for rows.Next() {
 		var m Measurement
-		if err := rows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
+		if err := rows.Scan(
+			&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw,
+			&m.Temperature, &m.Humidity, &m.Pressure, &m.DeviceType,
+			&m.PM03, &m.PM03Raw, &m.PM01, &m.PM01Raw, &m.CO2, &m.CO2Raw,
+			&m.TVOC, &m.TVOCRaw, &m.Nox, &m.NoxRaw,
+			&m.TemperatureRaw, &m.HumidityRaw, &m.PressureRaw,
+		); err != nil {
+			log.Warn().Err(err).Str("device", deviceID).Msg("db: failed to scan SQL history row")
+		} else {
 			res = append(res, m)
 		}
 	}
@@ -821,7 +844,10 @@ func (s *MonitorService) getHistoryFromJSON(deviceID string, duration time.Durat
 		return nil
 	}
 	var all []Measurement
-	json.Unmarshal(data, &all)
+	if err := json.Unmarshal(data, &all); err != nil {
+		log.Warn().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("monitor: failed to unmarshal JSON history")
+		return nil
+	}
 
 	since := time.Now().UTC().Add(-duration)
 	var res []Measurement
@@ -833,6 +859,7 @@ func (s *MonitorService) getHistoryFromJSON(deviceID string, duration time.Durat
 	return res
 }
 
-func (s *MonitorService) Close() {
-	// Add cleanup if needed
-}
+// Close performs any cleanup needed when the MonitorService is shutting down.
+// Currently a no-op but kept for interface compatibility and future use
+// (e.g. closing DB connections managed here).
+func (s *MonitorService) Close() {}

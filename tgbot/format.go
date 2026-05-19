@@ -9,21 +9,24 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// getEventPriority returns a priority score for a given alert event ID.
+// Higher score = shown as the "winner" (most prominent event) in a notification.
+// Event IDs use underscores, e.g. "vals_l2u", "val25_l3u", "aqi_l1".
 func (b *Bot) getEventPriority(id string) int {
 	switch {
 	case strings.HasPrefix(id, "aqi_"):
 		return 70
-	case strings.HasPrefix(id, "vals-"):
+	case strings.HasPrefix(id, "vals_"):
 		return 60
-	case strings.HasPrefix(id, "val25-"):
+	case strings.HasPrefix(id, "val25_"):
 		return 50
-	case strings.HasPrefix(id, "val10-"):
+	case strings.HasPrefix(id, "val10_"):
 		return 40
-	case strings.HasPrefix(id, "diffs-"):
+	case strings.HasPrefix(id, "diffs_"):
 		return 30
-	case strings.HasPrefix(id, "diff25-"):
+	case strings.HasPrefix(id, "diff25_"):
 		return 20
-	case strings.HasPrefix(id, "diff10-"):
+	case strings.HasPrefix(id, "diff10_"):
 		return 10
 	default:
 		return 0

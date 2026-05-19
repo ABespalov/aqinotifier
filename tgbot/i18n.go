@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ABespalov/aqinotifier/sensor"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -143,7 +144,7 @@ func loadExternalTranslations(dir string) {
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
-				fmt.Printf("i18n: failed to read %s: %v\n", path, err)
+				log.Warn().Err(err).Str("path", path).Msg("i18n: failed to read translation file")
 				return nil
 			}
 			var dict map[string]string
@@ -158,13 +159,13 @@ func loadExternalTranslations(dir string) {
 				}
 				i18nMu.Unlock()
 			} else {
-				fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
+				log.Warn().Err(err).Str("path", path).Msg("i18n: failed to unmarshal translation file")
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		fmt.Printf("i18n: failed to walk lng directory %s: %v\n", dir, err)
+		log.Warn().Err(err).Str("dir", dir).Msg("i18n: failed to walk translations directory")
 	}
 }
 
@@ -172,7 +173,7 @@ func loadIcons(dir string) {
 	path := filepath.Join(dir, "ico.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Printf("i18n: failed to read %s: %v\n", path, err)
+		log.Warn().Err(err).Str("path", path).Msg("i18n: failed to read icons file")
 		return
 	}
 
@@ -184,7 +185,7 @@ func loadIcons(dir string) {
 		}
 		i18nMu.Unlock()
 	} else {
-		fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
+		log.Warn().Err(err).Str("path", path).Msg("i18n: failed to unmarshal icons file")
 	}
 }
 
@@ -192,7 +193,7 @@ func loadColors(dir string) {
 	path := filepath.Join(dir, "colors.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Printf("i18n: failed to read %s: %v\n", path, err)
+		log.Warn().Err(err).Str("path", path).Msg("i18n: failed to read colors file")
 		return
 	}
 
@@ -204,7 +205,7 @@ func loadColors(dir string) {
 		}
 		i18nMu.Unlock()
 	} else {
-		fmt.Printf("i18n: failed to unmarshal %s: %v\n", path, err)
+		log.Warn().Err(err).Str("path", path).Msg("i18n: failed to unmarshal colors file")
 	}
 }
 
@@ -212,12 +213,12 @@ func loadAQIStandards(dir string) {
 	path := filepath.Join(dir, "aqi.json")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Printf("i18n: failed to read %s: %v\n", path, err)
+		log.Warn().Err(err).Str("path", path).Msg("i18n: failed to read AQI standards file")
 		return
 	}
 
 	if err := sensor.LoadStandards(data); err != nil {
-		fmt.Printf("i18n: failed to load AQI standards: %v\n", err)
+		log.Error().Err(err).Msg("i18n: failed to load AQI standards")
 		return
 	}
 

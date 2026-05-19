@@ -155,11 +155,18 @@ func (d Database) String() string {
 	return fmt.Sprintf("%s://%s:%s@%s:%d/%s", d.Type, d.User, d.Password, d.Host, d.Port, d.Db)
 }
 
+// System holds application-level operational settings that control in-memory
+// caching and configuration hot-reload behaviour.
 type System struct {
-	ValuesInRam      int `yaml:"values_in_ram"`
+	// ValuesInRam is the maximum number of measurements kept in memory per device.
+	// Older values are dropped; they are still queryable from the persistent store.
+	ValuesInRam int `yaml:"values_in_ram"`
+	// ConfigReloadTime is the polling interval (in seconds) for detecting changes
+	// in the config file and related resource files. Set to 0 to disable reloading.
 	ConfigReloadTime int `yaml:"config_reload_time"`
 }
 
+// NewSystemConfig returns a System populated with sensible defaults.
 func NewSystemConfig() *System {
 	return &System{
 		ValuesInRam:      10,

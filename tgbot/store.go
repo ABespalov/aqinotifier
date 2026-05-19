@@ -152,7 +152,9 @@ func (s *Store) performSave(req saveRequest) {
 	s.mu.RUnlock()
 
 	jsonData, err := json.MarshalIndent(list, "", "  ")
-	if err == nil {
+	if err != nil {
+		log.Error().Err(err).Msg("tgbot: failed to marshal store to JSON")
+	} else {
 		s.fileMu.Lock()
 		if err := os.WriteFile(s.file, jsonData, 0644); err != nil {
 			log.Error().Err(err).Str("file", s.file).Msg("tgbot: failed to write store file")
@@ -191,7 +193,7 @@ func (s *Store) saveLocked(chatID int64) {
 	select {
 	case s.saveChan <- saveRequest{chatID: chatID}:
 	default:
-		log.Warn().Msg("tgbot: save queue full, droping update")
+		log.Warn().Msg("tgbot: save queue full, dropping update")
 	}
 }
 
@@ -504,5 +506,3 @@ func (s *Store) RemoveLastPrompt(chatID int64, msgID int) {
 		s.saveLocked(chatID)
 	}
 }
-
-
