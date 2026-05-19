@@ -6,8 +6,6 @@ import (
 	"math"
 	"os"
 	"sort"
-	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -17,20 +15,34 @@ import (
 )
 
 type Measurement struct {
-	DeviceID    string    `json:"device_id"`
-	Timestamp   time.Time `json:"timestamp"`
-	PM10        float64   `json:"pm10"`
-	PM25        float64   `json:"pm25"`
-	PM10Raw     float64   `json:"pm10_raw"`
-	PM25Raw     float64   `json:"pm25_raw"`
-	Temperature float64   `json:"temperature"`
-	Humidity    float64   `json:"humidity"`
-	Pressure    float64   `json:"pressure"`
-	PM10Diff    *float64  `json:"pm10_diff"`
-	PM25Diff    *float64  `json:"pm25_diff"`
-	PM10Prev    float64   `json:"pm10_prev"`
-	PM25Prev    float64   `json:"pm25_prev"`
-	DiffTime    int       `json:"diff_time"`
+	DeviceID       string    `json:"device_id"`
+	Timestamp      time.Time `json:"timestamp"`
+	PM10           float64   `json:"pm10"`
+	PM25           float64   `json:"pm25"`
+	PM10Raw        float64   `json:"pm10_raw"`
+	PM25Raw        float64   `json:"pm25_raw"`
+	Temperature    float64   `json:"temperature"`
+	Humidity       float64   `json:"humidity"`
+	Pressure       float64   `json:"pressure"`
+	PM10Diff       *float64  `json:"pm10_diff"`
+	PM25Diff       *float64  `json:"pm25_diff"`
+	PM10Prev       float64   `json:"pm10_prev"`
+	PM25Prev       float64   `json:"pm25_prev"`
+	DiffTime       int       `json:"diff_time"`
+	DeviceType     string    `json:"device_type"`
+	PM03           float64   `json:"pm03"`
+	PM03Raw        float64   `json:"pm03_raw"`
+	PM01           float64   `json:"pm01"`
+	PM01Raw        float64   `json:"pm01_raw"`
+	CO2            float64   `json:"co2"`
+	CO2Raw         float64   `json:"co2_raw"`
+	TVOC           float64   `json:"tvoc"`
+	TVOCRaw        float64   `json:"tvoc_raw"`
+	Nox            float64   `json:"nox"`
+	NoxRaw         float64   `json:"nox_raw"`
+	TemperatureRaw float64   `json:"temperature_raw"`
+	HumidityRaw    float64   `json:"humidity_raw"`
+	PressureRaw    float64   `json:"pressure_raw"`
 }
 
 // AlertEvent represents a specific monitoring event that triggered a notification.
@@ -55,9 +67,9 @@ type Notifier interface {
 }
 
 type MonitorService struct {
-	cfg      *config.Config
-	history  map[string][]Measurement
-	mu       sync.RWMutex
+	cfg        *config.Config
+	history    map[string][]Measurement
+	mu         sync.RWMutex
 	notifier   Notifier
 	db         *sql.DB
 	fileMu     sync.RWMutex // protects JSON file from concurrent writes
@@ -134,8 +146,8 @@ func (s *MonitorService) Reload() {
 
 func (s *MonitorService) SetDB(db *sql.DB) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.db = db
+	s.mu.Unlock()
 
 	// Initialize table
 	query := `
@@ -148,7 +160,21 @@ func (s *MonitorService) SetDB(db *sql.DB) {
 		pm25_raw DOUBLE PRECISION DEFAULT 0,
 		temperature DOUBLE PRECISION,
 		humidity DOUBLE PRECISION,
-		pressure DOUBLE PRECISION
+		pressure DOUBLE PRECISION,
+		device_type TEXT DEFAULT 'ArmAQI',
+		pm03 DOUBLE PRECISION DEFAULT 0,
+		pm03_raw DOUBLE PRECISION DEFAULT 0,
+		pm01 DOUBLE PRECISION DEFAULT 0,
+		pm01_raw DOUBLE PRECISION DEFAULT 0,
+		co2 DOUBLE PRECISION DEFAULT 0,
+		co2_raw DOUBLE PRECISION DEFAULT 0,
+		tvoc DOUBLE PRECISION DEFAULT 0,
+		tvoc_raw DOUBLE PRECISION DEFAULT 0,
+		nox DOUBLE PRECISION DEFAULT 0,
+		nox_raw DOUBLE PRECISION DEFAULT 0,
+		temperature_raw DOUBLE PRECISION DEFAULT 0,
+		humidity_raw DOUBLE PRECISION DEFAULT 0,
+		pressure_raw DOUBLE PRECISION DEFAULT 0
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_measurements_unique ON measurements (device_id, timestamp);
 	CREATE INDEX IF NOT EXISTS idx_measurements_device_time ON measurements (device_id, timestamp);
@@ -162,13 +188,29 @@ func (s *MonitorService) SetDB(db *sql.DB) {
 	// Migrate existing table by adding new columns if they do not exist
 	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm10_raw DOUBLE PRECISION DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm25_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN device_type TEXT DEFAULT 'ArmAQI'")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm03 DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm03_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm01 DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm01_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN co2 DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN co2_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN tvoc DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN tvoc_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN nox DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN nox_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN temperature_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN humidity_raw DOUBLE PRECISION DEFAULT 0")
+	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pressure_raw DOUBLE PRECISION DEFAULT 0")
 
 	// Backfill raw values for historical data (if raw is 0 but computed is not)
 	_, _ = s.db.Exec("UPDATE measurements SET pm10_raw = pm10 WHERE pm10_raw = 0 AND pm10 != 0")
 	_, _ = s.db.Exec("UPDATE measurements SET pm25_raw = pm25 WHERE pm25_raw = 0 AND pm25 != 0")
 
 	// Load last N values into RAM for each device
+	s.mu.Lock()
 	s.loadHistoryFromSQLLocked()
+	s.mu.Unlock()
 }
 
 func (s *MonitorService) loadHistory() {
@@ -188,13 +230,16 @@ func (s *MonitorService) loadHistory() {
 		return
 	}
 
-	// Backfill raw values for historical data
+	// Backfill raw values and device types for historical data
 	for i := range all {
 		if all[i].PM10Raw == 0 && all[i].PM10 != 0 {
 			all[i].PM10Raw = all[i].PM10
 		}
 		if all[i].PM25Raw == 0 && all[i].PM25 != 0 {
 			all[i].PM25Raw = all[i].PM25
+		}
+		if all[i].DeviceType == "" {
+			all[i].DeviceType = "ArmAQI"
 		}
 	}
 
@@ -238,7 +283,8 @@ func (s *MonitorService) loadHistoryFromSQLLocked() {
 
 	for _, id := range deviceIDs {
 		mRows, err := s.db.Query(`
-			SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure 
+			SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, COALESCE(device_type, 'ArmAQI'),
+			       pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw
 			FROM measurements 
 			WHERE device_id = $1 
 			ORDER BY timestamp DESC 
@@ -251,7 +297,10 @@ func (s *MonitorService) loadHistoryFromSQLLocked() {
 		var sqlHist []Measurement
 		for mRows.Next() {
 			var m Measurement
-			if err := mRows.Scan(&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw, &m.Temperature, &m.Humidity, &m.Pressure); err == nil {
+			if err := mRows.Scan(
+				&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw, &m.Temperature, &m.Humidity, &m.Pressure, &m.DeviceType,
+				&m.PM03, &m.PM03Raw, &m.PM01, &m.PM01Raw, &m.CO2, &m.CO2Raw, &m.TVOC, &m.TVOCRaw, &m.Nox, &m.NoxRaw, &m.TemperatureRaw, &m.HumidityRaw, &m.PressureRaw,
+			); err == nil {
 				sqlHist = append([]Measurement{m}, sqlHist...)
 			}
 		}
@@ -350,6 +399,9 @@ func (s *MonitorService) saveToJSON(m Measurement) {
 		if all[i].PM25Raw == 0 && all[i].PM25 != 0 {
 			all[i].PM25Raw = all[i].PM25
 		}
+		if all[i].DeviceType == "" {
+			all[i].DeviceType = "ArmAQI"
+		}
 	}
 
 	all = append(all, m)
@@ -368,8 +420,15 @@ func (s *MonitorService) saveToJSON(m Measurement) {
 func (s *MonitorService) saveToSQL(m Measurement) {
 	go func(m Measurement) {
 		log.Debug().Str("device", m.DeviceID).Time("ts", m.Timestamp).Msg("db: saving measurement to sql")
-		query := "INSERT INTO measurements (device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
-		_, err := s.db.Exec(query, m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.PM10Raw, m.PM25Raw, m.Temperature, m.Humidity, m.Pressure)
+		query := `
+			INSERT INTO measurements (
+				device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, device_type,
+				pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`
+		_, err := s.db.Exec(query,
+			m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.PM10Raw, m.PM25Raw, m.Temperature, m.Humidity, m.Pressure, m.DeviceType,
+			m.PM03, m.PM03Raw, m.PM01, m.PM01Raw, m.CO2, m.CO2Raw, m.TVOC, m.TVOCRaw, m.Nox, m.NoxRaw, m.TemperatureRaw, m.HumidityRaw, m.PressureRaw,
+		)
 		if err != nil {
 			log.Error().Err(err).Msg("failed to save to SQL")
 		}
@@ -377,89 +436,14 @@ func (s *MonitorService) saveToSQL(m Measurement) {
 }
 
 func (s *MonitorService) Process(data *sensor.SensorData) {
-	s.mu.Lock()
-
-	m := Measurement{
-		DeviceID:  data.ParentID,
-		Timestamp: data.DateTime,
-	}
-
-	hasPM10, hasPM25 := false, false
-	for _, v := range data.Values {
-		val, err := strconv.ParseFloat(v.Value, 64)
-		if err != nil {
-			log.Warn().Err(err).Str("device", data.ParentID).Str("type", v.Type).Str("value", v.Value).Msg("failed to parse sensor value")
-			continue
-		}
-		switch v.Type {
-		case "SDS_P1":
-			m.PM10Raw = val
-			m.PM10 = val
-			hasPM10 = true
-		case "SDS_P2":
-			m.PM25Raw = val
-			m.PM25 = val
-			hasPM25 = true
-		case "BME280_temperature":
-			m.Temperature = val
-		case "BME280_humidity":
-			m.Humidity = val
-		case "BME280_pressure":
-			m.Pressure = val / 100.0
-		}
-	}
-
-	// Apply formulas based on device prefix, mapped name, or global device type
-	devName := m.DeviceID
-	if n, ok := s.cfg.Monitor.DeviceNames[m.DeviceID]; ok {
-		devName = n
-	}
-	devType := "ArmAQI"
-	if s.notifier != nil {
-		devType = s.notifier.GetDeviceType(m.DeviceID)
-	}
-
-	for prefix, eval := range s.evaluators {
-		if strings.HasPrefix(m.DeviceID, prefix) || strings.HasPrefix(devName, prefix) || strings.HasPrefix(devType, prefix) {
-			eval.Evaluate(&m)
-			break
-		}
-	}
-
-	// Safety: don't process measurements without any PM data
-	if !hasPM10 && !hasPM25 {
-		s.mu.Unlock()
-		log.Debug().Str("device", data.ParentID).Msg("skipping measurement with no PM data")
+	if data.DeviceType == "AirGradient" {
+		s.processAirGradient(data)
 		return
 	}
-
-	// Safety: Glitch filter for phantom zeros
-	last := s.lastMeasurementLocked(m.DeviceID)
-	if last != nil && m.PM10 == 0 && m.PM25 == 0 && (last.PM10 > 0.5 || last.PM25 > 0.5) {
-		s.mu.Unlock()
-		log.Warn().Str("device", data.ParentID).Float64("prev10", last.PM10).Float64("prev25", last.PM25).Msg("ignoring phantom zero measurement")
-		return
-	}
-
-	// Calculate diff BEFORE adding to history
-	s.calculateDiffLocked(&m)
-
-	// Add to history
-	hist := s.history[m.DeviceID]
-	hist = append(hist, m)
-	s.history[m.DeviceID] = hist
-
-	// Trim history
-	s.trimHistoryInternal()
-
-	// Copy measurement for async processing
-	mCopy := m
-	s.mu.Unlock()
-
-	// Save and notify OUTSIDE of lock
-	s.saveHistory(mCopy)
-	s.notify(&mCopy)
+	s.processArmAQI(data)
 }
+
+
 
 func (s *MonitorService) lastMeasurementLocked(deviceID string) *Measurement {
 	hist := s.history[deviceID]

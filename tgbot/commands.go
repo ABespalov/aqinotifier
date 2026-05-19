@@ -157,13 +157,13 @@ func (b *Bot) cmdLangMenu(chatID int64, editMsgID ...int) {
 	if len(editMsgID) == 0 {
 		b.clearLastPrompt(chatID)
 	}
-	
+
 	current := b.store.GetLanguage(chatID)
 	langLabel := b.T(chatID, "lang"+strings.Title(current))
-	
+
 	unitT := b.store.GetUnitTemp(chatID)
 	unitP := b.store.GetUnitPress(chatID)
-	
+
 	kb := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(langLabel).WithCallbackData("lang_cycle"),
@@ -272,7 +272,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 
 	getIcon := func(pmType string, val float64) (string, string, string) {
 		activeTag := strings.ToUpper(mcfg.AQIStandard)
-		
+
 		// Check active standard first
 		if stdData, ok := sensor.Standards[activeTag]; ok {
 			var bp []float64
@@ -328,11 +328,11 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 				levelIcon = b.getAQIIcon(level, tag)
 			}
 		}
-		
+
 		if tag == "" {
 			tag, flag, levelIcon = getIcon(pmType, val)
 		}
-		
+
 		label := fmt.Sprintf("%s%s ⇐ %s%s %.1f", pmType, zoneIcon, flag, levelIcon, val)
 		if levelIcon == "" {
 			label = fmt.Sprintf("%s%s ⇐ %s %.1f", pmType, zoneIcon, flag, val)

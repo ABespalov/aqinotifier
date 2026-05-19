@@ -45,7 +45,7 @@ func buildEvaluator(corrections map[string]string) (*DeviceEvaluator, error) {
 		}
 		formula = parseTernary(formula)
 		matches := identRegex.FindAllStringSubmatch(formula, -1)
-		
+
 		var dependsOn []string
 		for _, m := range matches {
 			v := m[1]
@@ -97,13 +97,26 @@ func buildEvaluator(corrections map[string]string) (*DeviceEvaluator, error) {
 
 	// 3. Compile formulas in sorted order
 	env := map[string]interface{}{
-		"pm10":       0.0,
-		"pm25":       0.0,
-		"pm10_raw":   0.0,
-		"pm25_raw":   0.0,
-		"temperature": 0.0,
-		"humidity":   0.0,
-		"pressure":   0.0,
+		"pm10":            0.0,
+		"pm25":            0.0,
+		"pm10_raw":        0.0,
+		"pm25_raw":        0.0,
+		"temperature":     0.0,
+		"humidity":        0.0,
+		"pressure":        0.0,
+		"pm03":            0.0,
+		"pm03_raw":        0.0,
+		"pm01":            0.0,
+		"pm01_raw":        0.0,
+		"co2":             0.0,
+		"co2_raw":         0.0,
+		"tvoc":            0.0,
+		"tvoc_raw":        0.0,
+		"nox":             0.0,
+		"nox_raw":         0.0,
+		"temperature_raw": 0.0,
+		"humidity_raw":    0.0,
+		"pressure_raw":    0.0,
 	}
 
 	var compiled []CompiledFormula
@@ -132,13 +145,26 @@ func (e *DeviceEvaluator) Evaluate(m *Measurement) {
 	}
 
 	env := map[string]interface{}{
-		"pm10":        m.PM10,
-		"pm25":        m.PM25,
-		"pm10_raw":    m.PM10Raw,
-		"pm25_raw":    m.PM25Raw,
-		"temperature": m.Temperature,
-		"humidity":    m.Humidity,
-		"pressure":    m.Pressure,
+		"pm10":            m.PM10,
+		"pm25":            m.PM25,
+		"pm10_raw":        m.PM10Raw,
+		"pm25_raw":        m.PM25Raw,
+		"temperature":     m.Temperature,
+		"humidity":        m.Humidity,
+		"pressure":        m.Pressure,
+		"pm03":            m.PM03,
+		"pm03_raw":        m.PM03Raw,
+		"pm01":            m.PM01,
+		"pm01_raw":        m.PM01Raw,
+		"co2":             m.CO2,
+		"co2_raw":         m.CO2Raw,
+		"tvoc":            m.TVOC,
+		"tvoc_raw":        m.TVOCRaw,
+		"nox":             m.Nox,
+		"nox_raw":         m.NoxRaw,
+		"temperature_raw": m.TemperatureRaw,
+		"humidity_raw":    m.HumidityRaw,
+		"pressure_raw":    m.PressureRaw,
 	}
 
 	for _, f := range e.Formulas {
@@ -151,8 +177,10 @@ func (e *DeviceEvaluator) Evaluate(m *Measurement) {
 		if !ok {
 			// Try type conversion just in case
 			switch v := out.(type) {
-			case int: val = float64(v)
-			case float32: val = float64(v)
+			case int:
+				val = float64(v)
+			case float32:
+				val = float64(v)
 			default:
 				log.Error().Str("target", f.Target).Msgf("formula result is not a number: %T", out)
 				continue
@@ -171,6 +199,16 @@ func (e *DeviceEvaluator) Evaluate(m *Measurement) {
 			m.Humidity = val
 		case "pressure":
 			m.Pressure = val
+		case "pm03":
+			m.PM03 = val
+		case "pm01":
+			m.PM01 = val
+		case "co2":
+			m.CO2 = val
+		case "tvoc":
+			m.TVOC = val
+		case "nox":
+			m.Nox = val
 		}
 		env[f.Target] = val
 	}

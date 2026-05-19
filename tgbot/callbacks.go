@@ -41,7 +41,7 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 		if ok {
 			for _, zone := range stdData.Zones {
 				id := fmt.Sprintf("aqi_l%d", zone.Level)
-				
+
 				name := zone.Name
 				nameKey := fmt.Sprintf("aqiNameL%d%s", zone.Level, strings.Title(strings.ToLower(stdTag)))
 				if loc := b.T(chatID, nameKey); !strings.HasPrefix(loc, "!!") {
@@ -79,9 +79,9 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 					var pmLabel string
 					switch pm {
 					case "10":
-						pmLabel = b.T(chatID, "alertV10Short")
+						pmLabel = b.T(chatID, "labelField_pm10")
 					case "25":
-						pmLabel = b.T(chatID, "alertV25Short")
+						pmLabel = b.T(chatID, "labelField_pm25")
 					default:
 						pmLabel = b.T(chatID, "alertVsShort")
 					}
@@ -138,13 +138,13 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 			for _, act := range actions {
 				for _, level := range levels {
 					id := fmt.Sprintf("diff%s_l%s%s", pm, level, act)
-					
+
 					var pmLabel string
 					switch pm {
 					case "10":
-						pmLabel = b.T(chatID, "alertV10Short")
+						pmLabel = b.T(chatID, "labelField_pm10")
 					case "25":
-						pmLabel = b.T(chatID, "alertV25Short")
+						pmLabel = b.T(chatID, "labelField_pm25")
 					default:
 						pmLabel = b.T(chatID, "alertVsShort")
 					}
@@ -273,7 +273,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 			tags = append(tags, tag)
 		}
 		sort.Strings(tags)
-		
+
 		next := tags[0]
 		for i, tag := range tags {
 			if tag == mcfg.AQIStandard {
@@ -457,6 +457,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdSoundMenu(chatID, silent, cq.Message.GetMessageID())
 
+
 	case strings.HasPrefix(data, "rename:"):
 		deviceID := strings.TrimPrefix(data, "rename:")
 		b.cmdRename(chatID, deviceID)
@@ -486,9 +487,7 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 	case strings.HasPrefix(data, "dev_settings:"):
 		b.cleanupMessage(chatID, cq)
 		deviceID := strings.TrimPrefix(data, "dev_settings:")
-		text := b.TDevice(chatID, "msgDeviceSettingsTitle", deviceID) +
-			"\n\n" + b.TDevice(chatID, "txtDevice", deviceID) +
-			"\n\n" + b.T(chatID, "msgDeviceSettingsHint")
+		text := b.buildDeviceSettingsText(chatID, deviceID)
 		b.sendWithKeyboard(chatID, text, b.deviceSettingsKeyboard(chatID, deviceID))
 
 	case strings.HasPrefix(data, "info:"):

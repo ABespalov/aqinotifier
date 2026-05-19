@@ -9,7 +9,6 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-
 // Server holds HTTP server binding settings and the URL path used by the
 // application to receive POST requests from sensors.
 type Server struct {
@@ -169,14 +168,14 @@ func NewSystemConfig() *System {
 }
 
 type Monitor struct {
-	PM10L1        float64           `yaml:"pm10_l1" json:"pm10_l1"`
-	PM25L1        float64           `yaml:"pm25_l1" json:"pm25_l1"`
-	PM10L2        float64           `yaml:"pm10_l2" json:"pm10_l2"`
-	PM25L2        float64           `yaml:"pm25_l2" json:"pm25_l2"`
-	PM10Diff      float64           `yaml:"pm10_diff" json:"pm10_diff"`
-	PM25Diff      float64           `yaml:"pm25_diff" json:"pm25_diff"`
-	Notifications []string          `yaml:"notifications" json:"notifications"`
-	Warnings      []string          `yaml:"warnings" json:"warnings"`
+	PM10L1        float64                      `yaml:"pm10_l1" json:"pm10_l1"`
+	PM25L1        float64                      `yaml:"pm25_l1" json:"pm25_l1"`
+	PM10L2        float64                      `yaml:"pm10_l2" json:"pm10_l2"`
+	PM25L2        float64                      `yaml:"pm25_l2" json:"pm25_l2"`
+	PM10Diff      float64                      `yaml:"pm10_diff" json:"pm10_diff"`
+	PM25Diff      float64                      `yaml:"pm25_diff" json:"pm25_diff"`
+	Notifications []string                     `yaml:"notifications" json:"notifications"`
+	Warnings      []string                     `yaml:"warnings" json:"warnings"`
 	AQIStandard   string                       `yaml:"aqi_standard" json:"aqi_standard"`
 	DeviceNames   map[string]string            `yaml:"device_names" json:"device_names"`
 	Corrections   map[string]map[string]string `yaml:"corrections" json:"corrections"`
@@ -262,14 +261,14 @@ type TgBot struct {
 func NewTgBotConfig() *TgBot {
 	app := getAppName()
 	return &TgBot{
-		Enabled:       true,
-		Token:         "",
-		TokenFile:     app + ".tgbot.token",
-		JsonFile:      app + ".tgbot.json",
-		Debug:         false,
-		ChartWidth:    1024,
-		ChartHeight:   768,
-		ChartFontSize: 12.0,
+		Enabled:          true,
+		Token:            "",
+		TokenFile:        app + ".tgbot.token",
+		JsonFile:         app + ".tgbot.json",
+		Debug:            false,
+		ChartWidth:       1024,
+		ChartHeight:      768,
+		ChartFontSize:    12.0,
 		DefaultUnitTemp:  "c",
 		DefaultUnitPress: "mmhg",
 	}

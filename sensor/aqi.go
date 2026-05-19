@@ -39,14 +39,14 @@ type AQIZone struct {
 }
 
 type AQIStandard struct {
-	Tag           string     `json:"tag"`
-	NameShort     string     `json:"nameShort"`
-	NameFull      string     `json:"nameFull"`
-	Flag          string     `json:"flag"`
-	IndexPoints   []float64  `json:"indexPoints"`
-	Breakpoints25 []float64  `json:"breakpoints25"`
-	Breakpoints10 []float64  `json:"breakpoints10"`
-	Zones         []AQIZone  `json:"zones"`
+	Tag           string    `json:"tag"`
+	NameShort     string    `json:"nameShort"`
+	NameFull      string    `json:"nameFull"`
+	Flag          string    `json:"flag"`
+	IndexPoints   []float64 `json:"indexPoints"`
+	Breakpoints25 []float64 `json:"breakpoints25"`
+	Breakpoints10 []float64 `json:"breakpoints10"`
+	Zones         []AQIZone `json:"zones"`
 }
 
 func LoadStandards(data []byte) error {
@@ -163,7 +163,7 @@ func calculateAQI_Piecewise(c float64, breakpoints []float64, indexPoints []floa
 			return ((iHigh-iLow)/(cHigh-cLow))*(c-cLow) + iLow
 		}
 	}
-	
+
 	// Cap at the maximum index point if above max breakpoint
 	return indexPoints[len(indexPoints)-1]
 }

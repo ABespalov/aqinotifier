@@ -12,16 +12,15 @@ import (
 
 // Subscription holds per-chat subscriptions and personalized settings.
 type Subscription struct {
-	ChatID    int64           `json:"chat_id"`
-	DeviceIDs []string        `json:"device_ids"`
-	Settings  *config.Monitor `json:"settings,omitempty"`
-	Language  string          `json:"language,omitempty"`
-	TGCode    string          `json:"tg_code,omitempty"`
-	UnitTemp  string          `json:"unit_temp,omitempty"`  // "c", "f"
-	UnitPress   string          `json:"unit_press,omitempty"` // "mmhg", "hpa"
+	ChatID      int64             `json:"chat_id"`
+	DeviceIDs   []string          `json:"device_ids"`
+	Settings    *config.Monitor   `json:"settings,omitempty"`
+	Language    string            `json:"language,omitempty"`
+	TGCode      string            `json:"tg_code,omitempty"`
+	UnitTemp    string            `json:"unit_temp,omitempty"`  // "c", "f"
+	UnitPress   string            `json:"unit_press,omitempty"` // "mmhg", "hpa"
 	Version     int               `json:"version,omitempty"`    // for migrations
 	LastPrompts []int             `json:"last_prompts,omitempty"`
-	DeviceTypes map[string]string `json:"device_types,omitempty"`
 }
 
 // Store manages Telegram bot state persisted to a JSON file or Postgres.
@@ -386,12 +385,6 @@ func (s *Store) Subscribe(chatID int64, deviceID string, defaults *config.Monito
 		}
 	}
 	sub.DeviceIDs = append(sub.DeviceIDs, deviceID)
-	
-	if sub.DeviceTypes == nil {
-		sub.DeviceTypes = make(map[string]string)
-	}
-	// Default new subscriptions to ArmAQI
-	sub.DeviceTypes[deviceID] = "ArmAQI"
 
 	s.saveLocked(chatID)
 	return true
@@ -512,13 +505,4 @@ func (s *Store) RemoveLastPrompt(chatID int64, msgID int) {
 	}
 }
 
-func (s *Store) GetDeviceType(deviceID string) string {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, sub := range s.subs {
-		if t, ok := sub.DeviceTypes[deviceID]; ok && t != "" {
-			return t
-		}
-	}
-	return "ArmAQI" // Default if not found
-}
+

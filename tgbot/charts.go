@@ -207,7 +207,6 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 		}
 	}
 
-
 	return buffers, nil
 }
 
@@ -506,7 +505,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 	}
 
 	drawSeriesPoints := func(seriesData []float64, color charts.Color, yOffset float64) {
-		// Dots on data points are now disabled globally. 
+		// Dots on data points are now disabled globally.
 		// Threshold crossing dots are handled by drawDots function.
 	}
 

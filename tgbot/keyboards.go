@@ -283,7 +283,7 @@ func (b *Bot) deviceSettingsKeyboard(chatID int64, deviceID string) *telego.Inli
 			tu.InlineKeyboardButton(b.T(chatID, btnUnsubscribe)).WithCallbackData(fmt.Sprintf("unsub:%s", deviceID)),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(b.T(chatID, btnList)).WithCallbackData(cmdList),
+			tu.InlineKeyboardButton(b.T(chatID, btnBackDevices)).WithCallbackData(cmdList),
 		),
 	)
 }
@@ -320,5 +320,3 @@ func (b *Bot) sendWithKeyboard(chatID int64, text string, markup telego.ReplyMar
 		b.setLastPrompt(chatID, msg.GetMessageID())
 	}
 }
-
-

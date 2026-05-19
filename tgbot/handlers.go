@@ -165,7 +165,7 @@ func (b *Bot) handleThresholdUpdate(chatID int64, pmType, level, text string) {
 	mcfg := b.GetUserSettings(chatID)
 	var old float64
 	titleKey := "msgThresholdTitleFmt"
-	
+
 	switch pmType {
 	case "PM10":
 		switch level {

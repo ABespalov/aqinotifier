@@ -227,7 +227,7 @@ func loadAQIStandards(dir string) {
 
 	for tag, std := range sensor.Standards {
 		tagUpper := strings.ToUpper(tag)
-		
+
 		// 1. Localize Flag
 		flagKey := fmt.Sprintf("icoFlag%s", tagUpper)
 		if icon, ok := iconsMap[flagKey]; ok {
@@ -247,7 +247,7 @@ func loadAQIStandards(dir string) {
 		// 3. Localize Zones
 		for i := range std.Zones {
 			level := std.Zones[i].Level
-			
+
 			// Zone Name (e.g. aqiNameL1Eu)
 			nameKey := fmt.Sprintf("aqiNameL%d%s", level, strings.Title(strings.ToLower(tag)))
 			if name, ok := langDicts["en"][nameKey]; ok {
@@ -276,7 +276,7 @@ func AvailableLanguages() []string {
 	seen := map[string]bool{"en": true}
 	langs := []string{"en"}
 	dir := "res"
-	
+
 	// Language code pattern: "xx" or "xx-XX"
 	langRegex := regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
 
@@ -295,12 +295,10 @@ func AvailableLanguages() []string {
 		}
 		return nil
 	})
-	
+
 	sort.Strings(langs)
 	return langs
 }
-
-
 
 func resolveTemplateLocked(lang string, text string, argsMap map[string]interface{}, depth int) string {
 	if depth > 50 {
@@ -390,7 +388,6 @@ func resolveTemplateLocked(lang string, text string, argsMap map[string]interfac
 						format = content[sepIdx+1:]
 					}
 
-
 					resolved, ok := resolvePlaceholderLocked(lang, key, format, argsMap, depth)
 					if ok {
 						result.WriteString(resolved)
@@ -441,6 +438,8 @@ func resolvePlaceholderLocked(lang, key, format string, argsMap map[string]inter
 					res = strings.ToLower(fmt.Sprintf("%v", val))
 				case "toTitle":
 					res = strings.Title(strings.ToLower(fmt.Sprintf("%v", val)))
+				case "raw":
+					return fmt.Sprintf("%v", val), true
 				default:
 					res = fmt.Sprintf("%"+format, val)
 				}
@@ -546,18 +545,26 @@ func compareNumeric(val interface{}, rawVal string, target string) int {
 	var f1 float64
 	if val != nil {
 		switch v := val.(type) {
-		case float64: f1 = v
-		case int: f1 = float64(v)
-		case int64: f1 = float64(v)
-		default: fmt.Sscanf(fmt.Sprintf("%v", val), "%f", &f1)
+		case float64:
+			f1 = v
+		case int:
+			f1 = float64(v)
+		case int64:
+			f1 = float64(v)
+		default:
+			fmt.Sscanf(fmt.Sprintf("%v", val), "%f", &f1)
 		}
 	} else {
 		fmt.Sscanf(rawVal, "%f", &f1)
 	}
 	var f2 float64
 	fmt.Sscanf(target, "%f", &f2)
-	if f1 > f2 { return 1 }
-	if f1 < f2 { return -1 }
+	if f1 > f2 {
+		return 1
+	}
+	if f1 < f2 {
+		return -1
+	}
 	return 0
 }
 
@@ -599,7 +606,7 @@ func (b *Bot) TDevice(chatID int64, key string, deviceID string, args ...map[str
 	}
 	mcfg := b.GetUserSettings(chatID)
 	m["deviceId"] = deviceID
-	m["deviceName"] = "" 
+	m["deviceName"] = ""
 	if name, ok := mcfg.DeviceNames[deviceID]; ok {
 		m["deviceName"] = name
 	}
@@ -674,8 +681,7 @@ func (b *Bot) Resolve(s string) string {
 	return resolveTemplateLocked("en", s, nil, 0)
 }
 
-
 var fallbackEN = map[string]string{
-	"msgTemp": "Temperature",
+	"msgTemp":     "Temperature",
 	"msgDewPoint": "Dew point",
 }

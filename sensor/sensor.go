@@ -5,9 +5,9 @@
 package sensor
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,12 +45,13 @@ func (s SensorValueType) String() string {
 //   - Version:  software version of the sending device;
 //   - Values:   slice of SensorValueType representing the reported readings.
 type SensorData struct {
-	ID       uuid.UUID         `json:"-" db:"id;primary_key"`
-	ClientIP string            `json:"-" db:"ip"`
-	DateTime time.Time         `json:"-" db:"utc"`
-	ParentID string            `json:"esp8266id" db:"sid"`
-	Version  string            `json:"software_version" db:"ver"`
-	Values   []SensorValueType `json:"sensordatavalues"`
+	ID         uuid.UUID         `json:"-" db:"id;primary_key"`
+	ClientIP   string            `json:"-" db:"ip"`
+	DateTime   time.Time         `json:"-" db:"utc"`
+	ParentID   string            `json:"esp8266id" db:"sid"`
+	Version    string            `json:"software_version" db:"ver"`
+	Values     []SensorValueType `json:"sensordatavalues"`
+	DeviceType string            `json:"-"`
 }
 
 // String returns a multi-line human-readable representation of SensorData.
@@ -90,18 +91,42 @@ func (sd SensorData) String() string {
 //
 // Returns the populated SensorData pointer or an error if JSON decoding fails.
 func Parse(addr string, body []byte) (*SensorData, error) {
-	var data SensorData
-	err := json.Unmarshal(body, &data)
-	if err != nil {
-		return nil, fmt.Errorf("parsing error: %w", err)
+	bodyStr := string(body)
+
+	var isAirGradient bool
+	if !strings.Contains(bodyStr, "sensordatavalues") &&
+		(strings.Contains(bodyStr, "pm02") || strings.Contains(bodyStr, "rco2") || strings.Contains(bodyStr, "atmp") || strings.Contains(bodyStr, "rhum")) {
+		isAirGradient = true
 	}
-	data.ClientIP = addr
-	data.DateTime = time.Now().UTC()
-	data.ID = uuid.New()
-	for i := range data.Values {
-		// give each value its own UUID and set ParentID to the sensor data ID
-		data.Values[i].ID = uuid.New()
-		data.Values[i].SensorID = data.ID
+
+	if isAirGradient {
+		return parseAirGradient(addr, body)
 	}
-	return &data, nil
+	return parseArmAQI(addr, body)
+}
+
+// DeviceStandard represents the standard type of the sensor hardware.
+type DeviceStandard string
+
+const (
+	StandardArmAQI      DeviceStandard = "ArmAQI"
+	StandardAirGradient DeviceStandard = "AirGradient"
+)
+
+// DeviceStandards lists all available sensor hardware standards.
+var DeviceStandards = []DeviceStandard{
+	StandardArmAQI,
+	StandardAirGradient,
+}
+
+// DisplayName returns a human-readable name for the device standard.
+func (ds DeviceStandard) DisplayName() string {
+	switch ds {
+	case StandardArmAQI:
+		return "ArmAQI (SDS011)"
+	case StandardAirGradient:
+		return "AirGradient"
+	default:
+		return string(ds)
+	}
 }

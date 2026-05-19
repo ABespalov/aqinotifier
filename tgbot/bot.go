@@ -74,6 +74,7 @@ const (
 	btnNo                  = "btnNo"
 	btnLang                = "btnLang"
 	btnBackSettings        = "btnBackSettings"
+	btnBackDevices         = "btnBackDevices"
 	btnAqiBackToThresholds = "btnAqiBackToThresholds"
 	btnRename              = "btnRename"
 	btnCancel              = "btnCancel"
@@ -252,17 +253,17 @@ func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor
 	}
 
 	b := &Bot{
-		api:         api,
-		handler:     handler,
-		store:       NewStore(cfg.JsonFile, cfg.DefaultUnitTemp, cfg.DefaultUnitPress),
-		monitor:     ms,
-		cfg:         cfg,
-		sys:         &fullCfg.System,
-		states:      make(map[int64]chatState),
-		stopFunc:    cancel,
-		defaults:    monitorDefaults,
-		version:     version,
-		renameIDs:   make(map[int64]string),
+		api:       api,
+		handler:   handler,
+		store:     NewStore(cfg.JsonFile, cfg.DefaultUnitTemp, cfg.DefaultUnitPress),
+		monitor:   ms,
+		cfg:       cfg,
+		sys:       &fullCfg.System,
+		states:    make(map[int64]chatState),
+		stopFunc:  cancel,
+		defaults:  monitorDefaults,
+		version:   version,
+		renameIDs: make(map[int64]string),
 	}
 
 	b.registerHandlers()
@@ -292,7 +293,12 @@ func (b *Bot) GetUserSettings(chatID int64) *config.Monitor {
 }
 
 func (b *Bot) GetDeviceType(deviceID string) string {
-	return b.store.GetDeviceType(deviceID)
+	if b.monitor != nil {
+		if lm := b.monitor.LastMeasurement(deviceID); lm != nil && lm.DeviceType != "" {
+			return lm.DeviceType
+		}
+	}
+	return "ArmAQI" // Default fallback
 }
 
 func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.AlertEvent, clears []monitor.AlertEvent, silent bool) {
@@ -604,7 +610,7 @@ func (b *Bot) sendChartForDevice(chatID int64, deviceID, chartType string) {
 		Photo:       tu.File(nr),
 		ReplyMarkup: b.chartsMenuKeyboard(chatID, deviceID),
 	}
-	
+
 	b.clearLastPrompt(chatID)
 	m, err := b.api.SendPhoto(context.Background(), params)
 	if err == nil {
@@ -616,4 +622,75 @@ func (b *Bot) SetDB(db *sql.DB) {
 	if b.store != nil {
 		b.store.SetDB(db)
 	}
+}
+
+func (b *Bot) formatFormula(chatID int64, f string) string {
+	f = strings.TrimSpace(f)
+	if strings.HasPrefix(f, "?") {
+		parts := strings.Split(f[1:], ":")
+		if len(parts) == 3 {
+			cond := strings.TrimSpace(parts[0])
+			trueVal := strings.TrimSpace(parts[1])
+			falseVal := strings.TrimSpace(parts[2])
+
+			// Strip outer parentheses if any
+			if strings.HasPrefix(cond, "(") && strings.HasSuffix(cond, ")") {
+				cond = cond[1 : len(cond)-1]
+			}
+			if strings.HasPrefix(trueVal, "(") && strings.HasSuffix(trueVal, ")") {
+				trueVal = trueVal[1 : len(trueVal)-1]
+			}
+			if strings.HasPrefix(falseVal, "(") && strings.HasSuffix(falseVal, ")") {
+				falseVal = falseVal[1 : len(falseVal)-1]
+			}
+
+			return b.T(chatID, "msgFormulaTernary", map[string]interface{}{
+				"cond":     cond,
+				"trueVal":  trueVal,
+				"falseVal": falseVal,
+			})
+		}
+	}
+	return f
+}
+
+func (b *Bot) buildDeviceSettingsText(chatID int64, deviceID string) string {
+	devType := b.GetDeviceType(deviceID)
+	stdDisplay := sensor.DeviceStandard(devType).DisplayName()
+
+	var correctionsList string
+	var hasCorrections bool
+	if b.defaults != nil && b.defaults.Corrections != nil {
+		if corrs, ok := b.defaults.Corrections[devType]; ok && len(corrs) > 0 {
+			var keys []string
+			for k := range corrs {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			var lines []string
+			for _, k := range keys {
+				formatted := b.formatFormula(chatID, corrs[k])
+				fieldName := b.T(chatID, "labelField_"+k)
+				if strings.HasPrefix(fieldName, "!!") {
+					fieldName = k
+				}
+				line := b.T(chatID, "msgDeviceSettingsCorrItem", map[string]interface{}{
+					"key":     fieldName,
+					"formula": formatted,
+				})
+				lines = append(lines, line)
+			}
+			correctionsList = strings.Join(lines, "\n")
+			hasCorrections = len(lines) > 0
+		}
+	}
+
+	args := map[string]interface{}{
+		"type":            stdDisplay,
+		"hasCorrections":  hasCorrections,
+		"correctionsList": correctionsList,
+	}
+
+	return b.TDevice(chatID, "msgDeviceSettings", deviceID, args)
 }
