@@ -62,28 +62,7 @@ Highly granular Telegram notifications for:
 
 ## Architecture
 
-```
-┌─────────────────────┐     POST /aqi      ┌─────────────────────┐
-│  ArmAQI / AirGradient│ ────────────────▶  │   HTTP Server       │
-│  sensor (ESP8266)   │                    │   (Go net/http)     │
-└─────────────────────┘                    └──────────┬──────────┘
-                                                       │
-                                            ┌──────────▼──────────┐
-                                            │  Monitor Service    │
-                                            │  - Parse & correct  │
-                                            │  - AQI calculation  │
-                                            │  - Alert detection  │
-                                            └──────┬───────┬──────┘
-                                                   │       │
-                                       ┌───────────▼─┐  ┌──▼──────────┐
-                                       │  PostgreSQL  │  │  JSON file  │
-                                       └─────────────┘  └─────────────┘
-                                                   │
-                                            ┌──────▼──────────────┐
-                                            │   Telegram Bot      │
-                                            │   (telego library)  │
-                                            └─────────────────────┘
-```
+![Architecture](res/architecture.png)
 
 ---
 
