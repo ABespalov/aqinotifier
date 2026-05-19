@@ -105,6 +105,10 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 		"curr10":    m.PM10,
 		"labelPm25": b.T(chatID, "labelPm25"),
 		"labelPm10": b.T(chatID, "labelPm10"),
+		"l1_25":     mcfg.PM25L1,
+		"l2_25":     mcfg.PM25L2,
+		"l1_10":     mcfg.PM10L1,
+		"l2_10":     mcfg.PM10L2,
 	}
 
 	if name, ok := mcfg.DeviceNames[m.DeviceID]; ok && name != "" {
