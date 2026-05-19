@@ -255,7 +255,7 @@ All UI text, icons, and AQI definitions are in the `res/` directory:
 | `res/ico.json` | Icon definitions (emoji placeholders) |
 | `res/colors.json` | Color mappings |
 | `res/aqi.json` | AQI breakpoints per standard |
-| `res/readme.en.md` | [Template engine documentation](res/readme.en.md) |
+| `res/readme.en.md` | [Template engine documentation](res/README.md) |
 
 ---
 

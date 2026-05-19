@@ -255,7 +255,7 @@ monitor:
 | `res/ico.json` | Определения иконок (emoji-плейсхолдеры) |
 | `res/colors.json` | Цветовые маппинги |
 | `res/aqi.json` | Точки перехода AQI по стандартам |
-| `res/readme.ru.md` | [Документация по шаблонизатору](res/readme.ru.md) |
+| `res/readme.ru.md` | [Документация по шаблонизатору](res/README.ru.md) |
 
 ---
 
