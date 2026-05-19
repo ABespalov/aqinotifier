@@ -85,6 +85,8 @@
   "labelPm10": "PM10",
   "labelPm25": "PM2.5",
   "labelThreshold": "Threshold",
+  "labelZoneGreen": "Green",
+  "labelZoneYellow": "Yellow",
   "labelZoneSuffix": "zone",
   "langCn": "Chinese {icoFlagCN}",
   "langEn": "English {icoFlagGB}",

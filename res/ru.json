@@ -92,6 +92,8 @@
   "labelPm10": "PM10",
   "labelPm25": "PM2.5",
   "labelThreshold": "Порог",
+  "labelZoneGreen": "Зеленая",
+  "labelZoneYellow": "Желтая",
   "labelZoneSuffix": "зона",
   "langCn": "Китайский {icoFlagCN}",
   "langEn": "English {icoFlagGB}",

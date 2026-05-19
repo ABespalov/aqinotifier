@@ -472,6 +472,18 @@ func (b *Bot) cleanupMessage(chatID int64, cq *telego.CallbackQuery) {
 	b.store.RemoveLastPrompt(chatID, msgID)
 }
 
+func (b *Bot) deleteMessage(chatID int64, cq *telego.CallbackQuery) {
+	if cq == nil || cq.Message == nil {
+		return
+	}
+	msgID := cq.Message.GetMessageID()
+	_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
+		ChatID:    tu.ID(chatID),
+		MessageID: msgID,
+	})
+	b.store.RemoveLastPrompt(chatID, msgID)
+}
+
 func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 	parts := strings.Split(data, ":")
 	if len(parts) < 3 {

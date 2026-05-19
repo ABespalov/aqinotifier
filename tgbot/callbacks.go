@@ -259,11 +259,13 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.cleanupMessage(chatID, cq)
 		b.cmdLangMenu(chatID)
 	case data == cmdCancelThreshold:
-		b.cleanupMessage(chatID, cq)
+		b.deleteMessage(chatID, cq)
 		b.setState(chatID, stateIdle)
+		b.cmdThresholdsMenu(chatID)
 	case data == cmdCancelSub:
-		b.cleanupMessage(chatID, cq)
+		b.deleteMessage(chatID, cq)
 		b.setState(chatID, stateIdle)
+		b.sendHelp(chatID)
 	case data == "aqi_std_toggle":
 		mcfg := b.GetUserSettings(chatID)
 		tags := make([]string, 0, len(sensor.Standards))
@@ -464,14 +466,16 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.renameIDMu.Lock()
 		delete(b.renameIDs, chatID)
 		b.renameIDMu.Unlock()
-		b.cleanupMessage(chatID, cq)
+		b.deleteMessage(chatID, cq)
+		b.cmdList(chatID)
 		return
 	case data == "rename_cancel":
 		b.setState(chatID, stateIdle)
 		b.renameIDMu.Lock()
 		delete(b.renameIDs, chatID)
 		b.renameIDMu.Unlock()
-		b.cleanupMessage(chatID, cq)
+		b.deleteMessage(chatID, cq)
+		b.cmdList(chatID)
 		return
 
 	case strings.HasPrefix(data, "status:"):
