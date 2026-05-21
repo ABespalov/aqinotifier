@@ -237,7 +237,8 @@ func (b *Bot) handleDeviceRename(chatID int64, msg *telego.Message) {
 	b.renameIDMu.Unlock()
 
 	b.sendWithKeyboard(chatID, b.T(chatID, "msgDeviceRenamed", map[string]interface{}{
-		"name": name, "txtDevice": deviceID,
+		"deviceId":   deviceID,
+		"deviceName": name,
 	}), nil)
 	b.cmdList(chatID)
 }

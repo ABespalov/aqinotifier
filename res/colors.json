@@ -1,18 +1,17 @@
 {
-  "colorRed": "#80090799",
+  "colorAxisLabel": "#1f1f1fff",
   "colorBlue": "#0c4c8084",
-  "colorPurple": "#6d197c8c",
+  "colorDarkRed": "#FF0000",
   "colorGray": "#505050",
   "colorGreen": "#00E400",
-  "colorLightBlue": "#52B6E6",
-  "colorYellow": "#FFFF00",
-  "colorOrange": "#FF7E00",
-  "colorDarkRed": "#FF0000",
-  "colorViolet": "#8F3F97",
-  "colorMaroon": "#7E0023",
-
   "colorGreenZone": "#00FF0055",
-  "colorYellowZone": "#FFFF0055",
+  "colorLightBlue": "#52B6E6",
+  "colorMaroon": "#7E0023",
+  "colorOrange": "#FF7E00",
+  "colorPurple": "#6d197c8c",
+  "colorRed": "#80090799",
   "colorRedZone": "#FF000055",
-  "colorAxisLabel": "#1f1f1fff"
+  "colorViolet": "#8F3F97",
+  "colorYellow": "#FFFF00",
+  "colorYellowZone": "#FFFF0055"
 }
