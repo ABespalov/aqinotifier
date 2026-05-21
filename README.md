@@ -74,36 +74,36 @@ flowchart TD
     classDef tg fill:#2980B9,stroke:#3498DB,stroke-width:2px,color:#fff;
 
     %% Nodes
-    Sensor["📡 Sensors<br/>(ArmAQI / AirGradient)"]:::device
-    HTTP["🌐 HTTP Server<br/>(POST /aqi)"]:::server
+    Sensor["📡 Sensors (ArmAQI / AirGradient)"]:::device
+    HTTP["🌐 HTTP Server"]:::server
     
     subgraph Core ["Application Core"]
-        Monitor["📊 MonitorService<br/>(Parse, Calibrate, AQI)"]:::module
-        Bot["🤖 Telegram Bot<br/>(UI, Settings, Alerts)"]:::module
+        Monitor["📊 MonitorService"]:::module
+        Bot["🤖 Telegram Bot"]:::module
     end
     
     subgraph Persistence ["Persistence Layer"]
-        Storage["💾 Storage Manager<br/>(Dual, PG-only, JSON-only)"]:::storage
-        PG[("🐘 PostgreSQL<br/>(Primary)")]:::db
-        JSON["📄 JSON File<br/>(Fallback or Primary)"]:::file
+        Storage["💾 Storage Manager"]:::storage
+        PG[("🐘 PostgreSQL")]:::db
+        JSON["📄 JSON File"]:::file
     end
     
     TG["📱 Telegram Users"]:::tg
 
     %% Connections
-    Sensor -- "JSON Payload" --> HTTP
-    HTTP -- "Parsed Data" --> Monitor
-    Monitor -- "Alerts" --> Bot
+    Sensor -->|JSON Payload| HTTP
+    HTTP -->|Parsed Data| Monitor
+    Monitor -->|Alerts| Bot
     
-    Monitor -- "Save/Load History" --> Storage
-    Bot -- "Save/Load Subs" --> Storage
+    Monitor -->|Save/Load History| Storage
+    Bot -->|Save/Load Subs| Storage
     
-    Storage -- "Write / Read" --> PG
-    Storage -- "Write / Read" --> JSON
-    JSON -. "Auto-sync on PG reconnect" .-> PG
+    Storage -->|Write / Read| PG
+    Storage -->|Write / Read| JSON
+    JSON -.->|Auto-sync| PG
     
-    Bot -- "Notifications & UI" --> TG
-    TG -- "Commands & Settings" --> Bot
+    Bot -->|Notifications & UI| TG
+    TG -->|Commands & Settings| Bot
 ```
 
 ---

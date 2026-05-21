@@ -74,36 +74,36 @@ flowchart TD
     classDef tg fill:#2980B9,stroke:#3498DB,stroke-width:2px,color:#fff;
 
     %% Nodes
-    Sensor["📡 Датчики<br/>(ArmAQI / AirGradient)"]:::device
-    HTTP["🌐 HTTP Сервер<br/>(POST /aqi)"]:::server
+    Sensor["📡 Датчики (ArmAQI / AirGradient)"]:::device
+    HTTP["🌐 HTTP Сервер"]:::server
     
     subgraph Core ["Ядро приложения"]
-        Monitor["📊 MonitorService<br/>(Парсинг, Калибровка, AQI)"]:::module
-        Bot["🤖 Telegram Бот<br/>(UI, Настройки, Уведомления)"]:::module
+        Monitor["📊 MonitorService"]:::module
+        Bot["🤖 Telegram Бот"]:::module
     end
     
     subgraph Persistence ["Слой хранения данных"]
-        Storage["💾 Менеджер хранения<br/>(Dual, PG-only, JSON-only)"]:::storage
-        PG[("🐘 PostgreSQL<br/>(Основной)")]:::db
-        JSON["📄 JSON Файл<br/>(Резервный или Основной)"]:::file
+        Storage["💾 Менеджер хранения"]:::storage
+        PG[("🐘 PostgreSQL")]:::db
+        JSON["📄 JSON Файл"]:::file
     end
     
     TG["📱 Пользователи Telegram"]:::tg
 
     %% Connections
-    Sensor -- "JSON Данные" --> HTTP
-    HTTP -- "Разобранные данные" --> Monitor
-    Monitor -- "Уведомления (Алерты)" --> Bot
+    Sensor -->|JSON Данные| HTTP
+    HTTP -->|Разобранные данные| Monitor
+    Monitor -->|Уведомления| Bot
     
-    Monitor -- "Сохранение/Загрузка истории" --> Storage
-    Bot -- "Сохранение/Загрузка подписок" --> Storage
+    Monitor -->|Сохранение/Загрузка истории| Storage
+    Bot -->|Сохранение/Загрузка подписок| Storage
     
-    Storage -- "Запись / Чтение" --> PG
-    Storage -- "Запись / Чтение" --> JSON
-    JSON -. "Авто-синхронизация при реконнекте" .-> PG
+    Storage -->|Запись / Чтение| PG
+    Storage -->|Запись / Чтение| JSON
+    JSON -.->|Авто-синхронизация| PG
     
-    Bot -- "Меню, Графики и Уведомления" --> TG
-    TG -- "Команды и Настройки" --> Bot
+    Bot -->|Меню и Уведомления| TG
+    TG -->|Команды и Настройки| Bot
 ```
 
 ---
