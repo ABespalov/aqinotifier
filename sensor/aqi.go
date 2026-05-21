@@ -1,3 +1,6 @@
+// Package sensor defines data structures and parsing for incoming sensor
+// payloads (JSON) received from ESP8266-based sensors.
+// This file implements the calculations for US and EU Air Quality Indexes (AQI).
 package sensor
 
 import (

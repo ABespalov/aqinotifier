@@ -1,3 +1,7 @@
+// Package tgbot implements the Telegram bot logic, command handlers, keyboards,
+// and state storage.
+// This file registers Telegram message and callback query handlers, maintains
+// the user conversation state machine, and processes text inputs.
 package tgbot
 
 import (

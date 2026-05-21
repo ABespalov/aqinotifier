@@ -1,3 +1,7 @@
+// Package config defines the configuration structures, default configurations,
+// and file loading functions for the AQI Notifier Bot.
+// It handles parsing and unmarshalling of yaml configuration files (e.g. aqinotifier.yaml),
+// path resolution relative to the application binary, and loading secret tokens from files.
 package config
 
 import (
@@ -105,25 +109,39 @@ func (s Server) String() string {
 // Database contains settings required to open a connection to the SQL
 // database and tune the connection pool.
 type Database struct {
-	// Supported types: "postgres", "json".
-	// Logic: data is always written to JSON (if json_file is set).
-	// If type is "json", data is ONLY written to JSON.
-	// If type is "postgres", data is written to Postgres AND JSON (for stability).
-	Type string `yaml:"type"`
-	// JSON file settings (always used for persistence and stability).
-	// If json_file is not set, the application cannot function.
-	JsonFile        string `yaml:"json_file"`
-	PgsqlFile       string `yaml:"pgsql_file"`
-	MaxValues       int    `yaml:"max_values"`
-	Host            string `yaml:"host"`
-	Port            int    `yaml:"port"`
-	Db              string `yaml:"db"`
-	User            string `yaml:"user"`
-	Password        string `yaml:"password"`
-	SslMode         string `yaml:"sslmode"`
-	MaxOpenConns    int    `yaml:"max_open_conns"`
-	MaxIdleConns    int    `yaml:"max_idle_conns"`
-	ConnMaxLifetime int    `yaml:"conn_max_lifetime"`
+	Use             []string `yaml:"use"`
+	JsonFile        string   `yaml:"json_file"`
+	PgsqlFile       string   `yaml:"pgsql_file"`
+	MaxValues       int      `yaml:"max_values"`
+	Host            string   `yaml:"host"`
+	Port            int      `yaml:"port"`
+	Db              string   `yaml:"db"`
+	User            string   `yaml:"user"`
+	Password        string   `yaml:"password"`
+	SslMode         string   `yaml:"sslmode"`
+	MaxOpenConns    int      `yaml:"max_open_conns"`
+	MaxIdleConns    int      `yaml:"max_idle_conns"`
+	ConnMaxLifetime int      `yaml:"conn_max_lifetime"`
+}
+
+// HasUse returns true if the specified mode is present in Use configuration.
+func (d Database) HasUse(mode string) bool {
+	for _, u := range d.Use {
+		if strings.EqualFold(u, mode) {
+			return true
+		}
+	}
+	return false
+}
+
+// DBProvider returns the database provider string if configured (any value in Use other than "json").
+func (d Database) DBProvider() string {
+	for _, u := range d.Use {
+		if !strings.EqualFold(u, "json") {
+			return u
+		}
+	}
+	return ""
 }
 
 // NewDatabaseConfig returns a Database populated with conservative defaults
@@ -132,7 +150,7 @@ type Database struct {
 func NewDatabaseConfig() *Database {
 	app := getAppName()
 	return &Database{
-		Type:            "postgres",
+		Use:             []string{"postgres", "json"},
 		JsonFile:        app + ".data.json",
 		PgsqlFile:       app + ".pgsql",
 		MaxValues:       1500,
@@ -152,7 +170,11 @@ func NewDatabaseConfig() *Database {
 // Note: it embeds the password in the output — avoid logging this in
 // production. Use this primarily for diagnostics in trusted contexts.
 func (d Database) String() string {
-	return fmt.Sprintf("%s://%s:%s@%s:%d/%s", d.Type, d.User, d.Password, d.Host, d.Port, d.Db)
+	provider := d.DBProvider()
+	if provider == "" {
+		return "json"
+	}
+	return fmt.Sprintf("%s://%s:%s@%s:%d/%s", provider, d.User, d.Password, d.Host, d.Port, d.Db)
 }
 
 // System holds application-level operational settings that control in-memory

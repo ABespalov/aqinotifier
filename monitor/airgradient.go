@@ -1,3 +1,7 @@
+// Package monitor handles device measurement ingestion, evaluation, alert transitions,
+// history management (both in-memory caching and persistent storage via JSON / SQL database),
+// and notification triggers.
+// This file implements processing logic for AirGradient sensor measurements.
 package monitor
 
 import (

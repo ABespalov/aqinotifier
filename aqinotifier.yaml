@@ -30,20 +30,23 @@ server:
 
 # Database settings used for storing received sensor data.
 database:
-  # Supported types: "postgres", "json".
-  # Logic: data is always written to JSON (if json_file is set).
-  # If type is "json", data is ONLY written to JSON.
-  # If type is "postgres", data is written to Postgres AND JSON (for stability).
-  # If json_file is not set, the application cannot function.
-  type: "postgres"
+  # Supported persistence modes: "postgres" (or other SQL provider), "json".
+  # You can specify multiple values.
+  # - If only "json" is specified, the application uses a JSON file for persistence.
+  # - If only a database provider (e.g. "postgres") is specified, only the SQL database is used.
+  # - If both are specified, the application uses SQL as primary storage, and falls back
+  #   to JSON if the SQL database is unavailable, synchronizing and clearing JSON once connection is restored.
+  use:
+    - postgres
+    - json
   # JSON file settings (always used for persistence and stability).
   # {app} will be replaced with the executable name.
   # If no directory is specified, the executable's directory is used.
   json_file: "{app}.data.json"
-  # PostgreSQL sub-config file (for type: "postgres")
+  # PostgreSQL sub-config file (for database provider)
   # If specified and exists, settings will be loaded from this file.
   pgsql_file: "{app}.pgsql"
-  # Maximum number of values to keep in the JSON file
+  # Maximum number of values to keep in the JSON file per device ID (only enforced if only "json" is used).
   # Use 0 for no limit.
   max_values: 1500
 
@@ -86,8 +89,8 @@ monitor:
   # Raw data correction formulas per device type
   corrections:
     ArmAQI:
-      pm25: "1.85 * pm25_raw + 4.5"
-      pm10: "?(1.9 * pm10_raw) < pm25:pm25:(1.9 * pm10_raw)"
+      pm25: "1.80 * pm25_raw + 2.5"
+      pm10: "?(1.85 * pm10_raw) < pm25:pm25:(1.85 * pm10_raw)"
 
   # Thresholds for PM2.5 and PM10 zones.
   # Green zone: [0, green]

@@ -1,9 +1,11 @@
+// Package tgbot implements the Telegram bot logic, command handlers, keyboards,
+// and state storage.
+// This file implements the main Bot lifecycle, authorization, startup, and messaging routines.
 package tgbot
 
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"math"
@@ -226,7 +228,7 @@ type Bot struct {
 	renameIDs  map[int64]string
 }
 
-func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor.MonitorService, version string) (*Bot, error) {
+func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor.MonitorService, store SubscriptionStore, version string) (*Bot, error) {
 	cfg := &fullCfg.TgBot
 	var opts []telego.BotOption
 	if cfg.Debug {
@@ -255,7 +257,7 @@ func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor
 	b := &Bot{
 		api:       api,
 		handler:   handler,
-		store:     NewStore(cfg.JsonFile, cfg.DefaultUnitTemp, cfg.DefaultUnitPress),
+		store:     NewStore(store, cfg.DefaultUnitTemp, cfg.DefaultUnitPress),
 		monitor:   ms,
 		cfg:       cfg,
 		sys:       &fullCfg.System,
@@ -365,11 +367,12 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 
 	for _, e := range allEvents {
 		parts := strings.FieldsFunc(e.ID, func(r rune) bool { return r == '-' || r == '_' })
-		key := "evt"
+		var sb strings.Builder
+		sb.WriteString("evt")
 		for _, p := range parts {
-			key += strings.Title(p)
+			sb.WriteString(strings.Title(p))
 		}
-		argsMap[key] = true
+		argsMap[sb.String()] = true
 	}
 
 	argsMap["isSilent"] = silent
@@ -615,12 +618,6 @@ func (b *Bot) sendChartForDevice(chatID int64, deviceID, chartType string) {
 	m, err := b.api.SendPhoto(context.Background(), params)
 	if err == nil {
 		b.setLastPrompt(chatID, m.GetMessageID())
-	}
-}
-
-func (b *Bot) SetDB(db *sql.DB) {
-	if b.store != nil {
-		b.store.SetDB(db)
 	}
 }
 

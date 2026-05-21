@@ -63,14 +63,15 @@ func (sd SensorData) String() string {
 		host = h
 	}
 
-	s := fmt.Sprintf("  date: %s;\n  ip: %s;\n  values:\n",
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("  date: %s;\n  ip: %s;\n  values:\n",
 		sd.DateTime.Format("2006/01/02 15:04:05"),
 		host,
-	)
+	))
 	for _, v := range sd.Values {
-		s += v.String()
+		sb.WriteString(v.String())
 	}
-	return s
+	return sb.String()
 }
 
 // Parse decodes the incoming JSON payload (body) into SensorData and fills

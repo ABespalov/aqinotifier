@@ -1,3 +1,7 @@
+// Package config defines the configuration structures, default configurations,
+// and file loading functions for the AQI Notifier Bot.
+// This bootstrap file implements helpers to initialize system components like
+// structured logger (zerolog + lumberjack rotation) and DB connections (sql.DB).
 package config
 
 import (
@@ -84,24 +88,25 @@ func NewLogger(cfg Log) (zerolog.Logger, func(), error) {
 }
 
 // NewDB creates a *sql.DB according to the Database config and applies pool
-// tuning parameters. The function supports Postgres via the lib/pq driver.
+// tuning parameters. The function supports SQL providers (such as Postgres) via registered drivers.
 func NewDB(cfg Database) (*sql.DB, error) {
-	if cfg.Type != "postgres" {
-		return nil, fmt.Errorf("unsupported database type: %s", cfg.Type)
+	provider := cfg.DBProvider()
+	if provider == "" {
+		return nil, fmt.Errorf("no database provider specified in use settings")
 	}
 
 	dsn := fmt.Sprintf(
 		"host=%s port=%d user=%s password=xxxx dbname=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.User, cfg.Db, cfg.SslMode,
 	)
-	log.Info().Str("dsn", dsn).Msg("db: connecting to postgres...")
+	log.Info().Str("provider", provider).Str("dsn", dsn).Msg("db: connecting to database...")
 
 	realDSN := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Db, cfg.SslMode,
 	)
 
-	db, err := sql.Open("postgres", realDSN)
+	db, err := sql.Open(provider, realDSN)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
@@ -123,6 +128,6 @@ func NewDB(cfg Database) (*sql.DB, error) {
 		return nil, fmt.Errorf("pinging database: %w", err)
 	}
 
-	log.Info().Msg("db: postgres connected successfully")
+	log.Info().Str("provider", provider).Msg("db: database connected successfully")
 	return db, nil
 }

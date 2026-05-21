@@ -1,11 +1,10 @@
+// Package monitor handles device measurement ingestion, evaluation, alert transitions,
+// history management (both in-memory caching and persistent storage via JSON / SQL database),
+// and notification triggers.
 package monitor
 
 import (
-	"database/sql"
-	"encoding/json"
 	"math"
-	"os"
-	"sort"
 	"sync"
 	"time"
 
@@ -52,6 +51,12 @@ type AlertEvent struct {
 	Value float64
 }
 
+type MeasurementStore interface {
+	SaveMeasurement(m Measurement)
+	LoadMeasurements(limit int) map[string][]Measurement
+	GetMeasurementsByDuration(deviceID string, duration time.Duration) []Measurement
+}
+
 // Notifier is implemented by anything that can deliver warning messages
 // (e.g. the Telegram bot). Using an interface keeps the monitor package
 // decoupled from the tgbot package.
@@ -71,8 +76,7 @@ type MonitorService struct {
 	history    map[string][]Measurement
 	mu         sync.RWMutex
 	notifier   Notifier
-	db         *sql.DB
-	fileMu     sync.RWMutex // protects JSON file from concurrent writes
+	store      MeasurementStore
 	evaluators map[string]*DeviceEvaluator
 }
 
@@ -109,7 +113,7 @@ func (s *MonitorService) GetHistory(deviceID string) []Measurement {
 	return res
 }
 
-func NewMonitorService(cfg *config.Config) *MonitorService {
+func NewMonitorService(cfg *config.Config, store MeasurementStore) *MonitorService {
 	evaluatorsMap := make(map[string]*DeviceEvaluator)
 	for devPrefix, corr := range cfg.Monitor.Corrections {
 		eval, err := buildEvaluator(corr)
@@ -119,12 +123,26 @@ func NewMonitorService(cfg *config.Config) *MonitorService {
 		evaluatorsMap[devPrefix] = eval
 	}
 
+	hist := make(map[string][]Measurement)
+	if store != nil {
+		max := cfg.System.ValuesInRam
+		if max <= 0 {
+			max = 10
+		}
+		hist = store.LoadMeasurements(max)
+	}
+
 	s := &MonitorService{
 		cfg:        cfg,
-		history:    make(map[string][]Measurement),
+		history:    hist,
 		evaluators: evaluatorsMap,
+		store:      store,
 	}
-	s.loadHistory()
+
+	for id := range s.history {
+		s.recalculateDiffsLocked(id)
+	}
+
 	return s
 }
 
@@ -142,197 +160,6 @@ func (s *MonitorService) Reload() {
 		evaluatorsMap[devPrefix] = eval
 	}
 	s.evaluators = evaluatorsMap
-}
-
-func (s *MonitorService) SetDB(db *sql.DB) {
-	s.mu.Lock()
-	s.db = db
-	s.mu.Unlock()
-
-	// Initialize table
-	query := `
-	CREATE TABLE IF NOT EXISTS measurements (
-		device_id TEXT,
-		timestamp TIMESTAMPTZ,
-		pm10 DOUBLE PRECISION,
-		pm25 DOUBLE PRECISION,
-		pm10_raw DOUBLE PRECISION DEFAULT 0,
-		pm25_raw DOUBLE PRECISION DEFAULT 0,
-		temperature DOUBLE PRECISION,
-		humidity DOUBLE PRECISION,
-		pressure DOUBLE PRECISION,
-		device_type TEXT DEFAULT 'ArmAQI',
-		pm03 DOUBLE PRECISION DEFAULT 0,
-		pm03_raw DOUBLE PRECISION DEFAULT 0,
-		pm01 DOUBLE PRECISION DEFAULT 0,
-		pm01_raw DOUBLE PRECISION DEFAULT 0,
-		co2 DOUBLE PRECISION DEFAULT 0,
-		co2_raw DOUBLE PRECISION DEFAULT 0,
-		tvoc DOUBLE PRECISION DEFAULT 0,
-		tvoc_raw DOUBLE PRECISION DEFAULT 0,
-		nox DOUBLE PRECISION DEFAULT 0,
-		nox_raw DOUBLE PRECISION DEFAULT 0,
-		temperature_raw DOUBLE PRECISION DEFAULT 0,
-		humidity_raw DOUBLE PRECISION DEFAULT 0,
-		pressure_raw DOUBLE PRECISION DEFAULT 0
-	);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_measurements_unique ON measurements (device_id, timestamp);
-	CREATE INDEX IF NOT EXISTS idx_measurements_device_time ON measurements (device_id, timestamp);
-	`
-	_, err := s.db.Exec(query)
-	if err != nil {
-		log.Error().Err(err).Msg("failed to initialize SQL table")
-		return
-	}
-
-	// Migrate existing table by adding new columns if they do not exist
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm10_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm25_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN device_type TEXT DEFAULT 'ArmAQI'")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm03 DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm03_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm01 DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm01_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN co2 DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN co2_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN tvoc DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN tvoc_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN nox DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN nox_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN temperature_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN humidity_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pressure_raw DOUBLE PRECISION DEFAULT 0")
-
-	// Backfill raw values for historical data (if raw is 0 but computed is not)
-	_, _ = s.db.Exec("UPDATE measurements SET pm10_raw = pm10 WHERE pm10_raw = 0 AND pm10 != 0")
-	_, _ = s.db.Exec("UPDATE measurements SET pm25_raw = pm25 WHERE pm25_raw = 0 AND pm25 != 0")
-
-	// Load last N values into RAM for each device
-	s.mu.Lock()
-	s.loadHistoryFromSQLLocked()
-	s.mu.Unlock()
-}
-
-func (s *MonitorService) loadHistory() {
-	if s.cfg.Database.Type != "json" || s.cfg.Database.JsonFile == "" {
-		return
-	}
-	data, err := os.ReadFile(s.cfg.Database.JsonFile)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Error().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("failed to read history file")
-		}
-		return
-	}
-	var all []Measurement
-	if err := json.Unmarshal(data, &all); err != nil {
-		log.Error().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("failed to unmarshal history")
-		return
-	}
-
-	// Backfill raw values and device types for historical data
-	for i := range all {
-		if all[i].PM10Raw == 0 && all[i].PM10 != 0 {
-			all[i].PM10Raw = all[i].PM10
-		}
-		if all[i].PM25Raw == 0 && all[i].PM25 != 0 {
-			all[i].PM25Raw = all[i].PM25
-		}
-		if all[i].DeviceType == "" {
-			all[i].DeviceType = "ArmAQI"
-		}
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, m := range all {
-		s.history[m.DeviceID] = append(s.history[m.DeviceID], m)
-	}
-	for id := range s.history {
-		s.recalculateDiffsLocked(id)
-	}
-	s.trimHistoryInternal()
-	log.Info().Int("records", len(all)).Msg("monitor: history loaded from JSON")
-}
-
-func (s *MonitorService) loadHistoryFromSQLLocked() {
-	if s.db == nil {
-		return
-	}
-
-	// 1. Get unique device IDs
-	rows, err := s.db.Query("SELECT DISTINCT device_id FROM measurements")
-	if err != nil {
-		log.Error().Err(err).Msg("monitor: failed to query device IDs for history load")
-		return
-	}
-	defer rows.Close()
-
-	var deviceIDs []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err == nil {
-			deviceIDs = append(deviceIDs, id)
-		}
-	}
-
-	max := s.cfg.System.ValuesInRam
-	if max <= 0 {
-		max = 10
-	}
-
-	for _, id := range deviceIDs {
-		mRows, err := s.db.Query(`
-			SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, COALESCE(device_type, 'ArmAQI'),
-			       pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw
-			FROM measurements 
-			WHERE device_id = $1 
-			ORDER BY timestamp DESC 
-			LIMIT $2`, id, max)
-		if err != nil {
-			log.Error().Err(err).Str("device", id).Msg("monitor: failed to query history for device")
-			continue
-		}
-
-		var sqlHist []Measurement
-		for mRows.Next() {
-			var m Measurement
-			if err := mRows.Scan(
-				&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw, &m.Temperature, &m.Humidity, &m.Pressure, &m.DeviceType,
-				&m.PM03, &m.PM03Raw, &m.PM01, &m.PM01Raw, &m.CO2, &m.CO2Raw, &m.TVOC, &m.TVOCRaw, &m.Nox, &m.NoxRaw, &m.TemperatureRaw, &m.HumidityRaw, &m.PressureRaw,
-			); err != nil {
-				log.Warn().Err(err).Str("device", id).Msg("monitor: failed to scan SQL history row")
-			} else {
-				sqlHist = append([]Measurement{m}, sqlHist...)
-			}
-		}
-		mRows.Close()
-
-		// Merge with existing (JSON) history
-		existing := s.history[id]
-		merged := append(existing, sqlHist...)
-
-		// Deduplicate and sort
-		unique := make(map[int64]Measurement)
-		for _, m := range merged {
-			unique[m.Timestamp.Unix()] = m
-		}
-
-		var final []Measurement
-		for _, m := range unique {
-			final = append(final, m)
-		}
-		sort.Slice(final, func(i, j int) bool {
-			return final[i].Timestamp.Before(final[j].Timestamp)
-		})
-
-		if len(final) > max {
-			final = final[len(final)-max:]
-		}
-		s.history[id] = final
-		s.recalculateDiffsLocked(id)
-	}
-	log.Info().Int("devices", len(deviceIDs)).Int("limit_per_device", max).Msg("monitor: history loaded and merged from SQL")
 }
 
 func (s *MonitorService) recalculateDiffsLocked(deviceID string) {
@@ -372,76 +199,9 @@ func (s *MonitorService) trimHistoryInternal() {
 }
 
 func (s *MonitorService) saveHistory(m Measurement) {
-	// 1. JSON Persistence (Always write to JSON if json_file is set)
-	if s.cfg.Database.JsonFile != "" {
-		s.saveToJSON(m)
+	if s.store != nil {
+		s.store.SaveMeasurement(m)
 	}
-
-	// 2. SQL Persistence (Write to Postgres only if configured)
-	if s.db != nil && s.cfg.Database.Type == "postgres" {
-		s.saveToSQL(m)
-	}
-}
-
-func (s *MonitorService) saveToJSON(m Measurement) {
-	s.fileMu.Lock()
-	defer s.fileMu.Unlock()
-
-	data, err := os.ReadFile(s.cfg.Database.JsonFile)
-	var all []Measurement
-	if err == nil {
-		if jsonErr := json.Unmarshal(data, &all); jsonErr != nil {
-			log.Warn().Err(jsonErr).Str("file", s.cfg.Database.JsonFile).Msg("monitor: failed to unmarshal JSON history, starting fresh")
-			all = nil
-		}
-	}
-
-	// Backfill old records to heal the JSON file
-	for i := range all {
-		if all[i].PM10Raw == 0 && all[i].PM10 != 0 {
-			all[i].PM10Raw = all[i].PM10
-		}
-		if all[i].PM25Raw == 0 && all[i].PM25 != 0 {
-			all[i].PM25Raw = all[i].PM25
-		}
-		if all[i].DeviceType == "" {
-			all[i].DeviceType = "ArmAQI"
-		}
-	}
-
-	all = append(all, m)
-
-	// Optional: keep total file size reasonable (max_values from config)
-	if s.cfg.Database.MaxValues > 0 && len(all) > s.cfg.Database.MaxValues {
-		all = all[len(all)-s.cfg.Database.MaxValues:]
-	}
-
-	out, err := json.MarshalIndent(all, "", "  ")
-	if err != nil {
-		log.Error().Err(err).Msg("monitor: failed to marshal history to JSON")
-		return
-	}
-	if err := os.WriteFile(s.cfg.Database.JsonFile, out, 0644); err != nil {
-		log.Error().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("monitor: failed to write JSON history file")
-	}
-}
-
-func (s *MonitorService) saveToSQL(m Measurement) {
-	go func(m Measurement) {
-		log.Debug().Str("device", m.DeviceID).Time("ts", m.Timestamp).Msg("db: saving measurement to sql")
-		query := `
-			INSERT INTO measurements (
-				device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, device_type,
-				pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`
-		_, err := s.db.Exec(query,
-			m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.PM10Raw, m.PM25Raw, m.Temperature, m.Humidity, m.Pressure, m.DeviceType,
-			m.PM03, m.PM03Raw, m.PM01, m.PM01Raw, m.CO2, m.CO2Raw, m.TVOC, m.TVOCRaw, m.Nox, m.NoxRaw, m.TemperatureRaw, m.HumidityRaw, m.PressureRaw,
-		)
-		if err != nil {
-			log.Error().Err(err).Msg("failed to save to SQL")
-		}
-	}(m)
 }
 
 func (s *MonitorService) Process(data *sensor.SensorData) {
@@ -779,87 +539,15 @@ func (s *MonitorService) GetHistoryByDuration(deviceID string, duration time.Dur
 		}
 	}
 
-	// 2. Try SQL if RAM is empty or insufficient
-	if s.db != nil {
-		res = s.getHistoryFromSQL(deviceID, duration)
+	// 2. Try SQL/JSON via store
+	if s.store != nil {
+		res = s.store.GetMeasurementsByDuration(deviceID, duration)
 		if len(res) > 0 {
-			log.Debug().Str("device", deviceID).Int("count", len(res)).Msg("monitor: history fetched from SQL")
-			return res
-		}
-	}
-	// 3. Try JSON
-	if s.cfg.Database.JsonFile != "" {
-		res = s.getHistoryFromJSON(deviceID, duration)
-		if len(res) > 0 {
-			log.Debug().Str("device", deviceID).Int("count", len(res)).Msg("monitor: history fetched from JSON")
+			log.Debug().Str("device", deviceID).Int("count", len(res)).Msg("monitor: history fetched from persistent store")
 			return res
 		}
 	}
 	return nil
 }
 
-func (s *MonitorService) getHistoryFromSQL(deviceID string, duration time.Duration) []Measurement {
-	since := time.Now().UTC().Add(-duration)
-	log.Debug().Str("device", deviceID).Dur("duration", duration).Msg("db: querying sql history")
-	// Select all fields to avoid losing CO2, TVOC, NOx and other extended sensor data.
-	query := `SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw,
-		temperature, humidity, pressure, COALESCE(device_type, 'ArmAQI'),
-		pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw,
-		tvoc, tvoc_raw, nox, nox_raw,
-		temperature_raw, humidity_raw, pressure_raw
-		FROM measurements
-		WHERE device_id = $1 AND timestamp >= $2
-		ORDER BY timestamp ASC`
-	rows, err := s.db.Query(query, deviceID, since)
-	if err != nil {
-		log.Error().Err(err).Str("device", deviceID).Msg("db: failed to query SQL history")
-		return nil
-	}
-	defer rows.Close()
-
-	var res []Measurement
-	for rows.Next() {
-		var m Measurement
-		if err := rows.Scan(
-			&m.DeviceID, &m.Timestamp, &m.PM10, &m.PM25, &m.PM10Raw, &m.PM25Raw,
-			&m.Temperature, &m.Humidity, &m.Pressure, &m.DeviceType,
-			&m.PM03, &m.PM03Raw, &m.PM01, &m.PM01Raw, &m.CO2, &m.CO2Raw,
-			&m.TVOC, &m.TVOCRaw, &m.Nox, &m.NoxRaw,
-			&m.TemperatureRaw, &m.HumidityRaw, &m.PressureRaw,
-		); err != nil {
-			log.Warn().Err(err).Str("device", deviceID).Msg("db: failed to scan SQL history row")
-		} else {
-			res = append(res, m)
-		}
-	}
-	return res
-}
-
-func (s *MonitorService) getHistoryFromJSON(deviceID string, duration time.Duration) []Measurement {
-	s.fileMu.RLock()
-	defer s.fileMu.RUnlock()
-
-	data, err := os.ReadFile(s.cfg.Database.JsonFile)
-	if err != nil {
-		return nil
-	}
-	var all []Measurement
-	if err := json.Unmarshal(data, &all); err != nil {
-		log.Warn().Err(err).Str("file", s.cfg.Database.JsonFile).Msg("monitor: failed to unmarshal JSON history")
-		return nil
-	}
-
-	since := time.Now().UTC().Add(-duration)
-	var res []Measurement
-	for _, m := range all {
-		if m.DeviceID == deviceID && m.Timestamp.After(since) {
-			res = append(res, m)
-		}
-	}
-	return res
-}
-
-// Close performs any cleanup needed when the MonitorService is shutting down.
-// Currently a no-op but kept for interface compatibility and future use
-// (e.g. closing DB connections managed here).
 func (s *MonitorService) Close() {}

@@ -1,8 +1,12 @@
+// Package main is the entry point of the AQI Notifier Bot application.
+// It initializes the configuration, logger, monitor service, Telegram bot,
+// and starts the HTTPS server to receive sensor data. It also manages the
+// database connection manager (including auto-reconnect and health checks)
+// and handles configuration hot-reloading at runtime.
 package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,11 +18,12 @@ import (
 	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/monitor"
 	"github.com/ABespalov/aqinotifier/sensor"
+	"github.com/ABespalov/aqinotifier/storage"
 	"github.com/ABespalov/aqinotifier/tgbot"
 	"github.com/rs/zerolog/log"
 )
 
-const BotVersion = "0.13.2"
+const BotVersion = "0.14.0"
 
 func main() {
 	execPath, err := os.Executable()
@@ -48,35 +53,19 @@ func main() {
 
 	log.Info().Str("version", BotVersion).Msg("🌬️ AQI Notifier Bot starting...")
 
-	if cfg.Database.JsonFile == "" {
-		fmt.Fprintf(os.Stderr, "database.json_file is required for the application to function\n")
-		os.Exit(1)
+	// 1. Check if database.use is empty (fatality check)
+	if len(cfg.Database.Use) == 0 {
+		log.Fatal().Msg("FATAL: database.use is empty. At least one persistence mode ('postgres' or 'json') must be specified")
 	}
+
+	strg, err := storage.NewStorage(cfg)
+	if err != nil {
+		log.Fatal().Err(err).Msg("FATAL: failed to initialize storage")
+	}
+	defer strg.Close()
 
 	var bot *tgbot.Bot
-	ms := monitor.NewMonitorService(cfg)
-
-	// Database initialization with reconnection logic
-	var db *sql.DB
-	if cfg.Database.Type == "postgres" {
-		for i := 0; i < 20; i++ {
-			db, err = config.NewDB(cfg.Database)
-			if err == nil {
-				// Configure connection pool
-				db.SetMaxOpenConns(cfg.Database.MaxOpenConns)
-				db.SetMaxIdleConns(cfg.Database.MaxIdleConns)
-				db.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
-				break
-			}
-			log.Warn().Err(err).Msgf("db: connection failed, retrying in 10s... (%d/20)", i+1)
-			time.Sleep(10 * time.Second)
-		}
-		if err != nil {
-			log.Error().Err(err).Msg("db: failed to connect to postgres after retries, falling back to JSON")
-		} else {
-			ms.SetDB(db)
-		}
-	}
+	ms := monitor.NewMonitorService(cfg, strg)
 
 	restartServer := make(chan struct{}, 1)
 	restartBot := make(chan struct{}, 1)
@@ -134,6 +123,12 @@ func main() {
 						continue
 					}
 
+					if len(newCfg.Database.Use) == 0 {
+						log.Error().Msg("config reload: database.use cannot be empty")
+						updateModTimes(cfg)
+						continue
+					}
+
 					oldNode := cfg.Server.Node()
 					oldProto := cfg.Server.Protocol
 					oldUrl := cfg.Server.Url
@@ -149,6 +144,8 @@ func main() {
 					tgbot.ReloadAll()
 					ms.Reload()
 					log.Info().Msg("config reload: success (including translations & evaluators)")
+
+					strg.UpdateConfig(cfg)
 
 					if cfg.Log.Level != oldLogLevel || cfg.Log.LogFile != oldLogFile {
 						log.Info().Msg("config reload: updating logger...")
@@ -191,7 +188,7 @@ func main() {
 					var err error
 					// Retry loop for bot startup (e.g. no internet/DNS at boot)
 					for i := 0; i < 30; i++ {
-						bot, err = tgbot.NewBot(cfg, &cfg.Monitor, ms, BotVersion)
+						bot, err = tgbot.NewBot(cfg, &cfg.Monitor, ms, strg, BotVersion)
 						if err == nil {
 							break
 						}
@@ -202,9 +199,7 @@ func main() {
 					if err != nil {
 						log.Error().Err(err).Msg("failed to start Telegram bot after retries")
 					} else {
-						if db != nil {
-							bot.SetDB(db)
-						}
+
 						ms.SetNotifier(bot)
 						go bot.Run()
 						log.Info().Str("json_file", cfg.TgBot.JsonFile).Msg("tgbot: started")

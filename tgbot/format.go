@@ -1,3 +1,7 @@
+// Package tgbot implements the Telegram bot logic, command handlers, keyboards,
+// and state storage.
+// This file provides text formatting functions for device statuses, measurements,
+// AQI values, and localized unit labels.
 package tgbot
 
 import (

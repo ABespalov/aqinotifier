@@ -62,27 +62,48 @@ AQI Notifier принимает данные в реальном времени 
 
 ## Архитектура
 
-```
-┌─────────────────────┐     POST /aqi      ┌─────────────────────┐
-│  ArmAQI / AirGradient│ ────────────────▶  │   HTTP-сервер       │
-│  датчик (ESP8266)   │                    │   (Go net/http)     │
-└─────────────────────┘                    └──────────┬──────────┘
-                                                       │
-                                            ┌──────────▼──────────┐
-                                            │  MonitorService     │
-                                            │  - парсинг и коррекция│
-                                            │  - расчёт AQI       │
-                                            │  - обнаружение алертов│
-                                            └──────┬───────┬──────┘
-                                                   │       │
-                                       ┌───────────▼─┐  ┌──▼──────────┐
-                                       │  PostgreSQL  │  │  JSON-файл  │
-                                       └─────────────┘  └─────────────┘
-                                                   │
-                                            ┌──────▼──────────────┐
-                                            │   Telegram-бот      │
-                                            │   (библиотека telego)│
-                                            └─────────────────────┘
+```mermaid
+flowchart TD
+    %% Define styles
+    classDef device fill:#2A3F54,stroke:#1ABB9C,stroke-width:2px,color:#fff;
+    classDef server fill:#34495E,stroke:#3498DB,stroke-width:2px,color:#fff;
+    classDef module fill:#3498DB,stroke:#2980B9,stroke-width:2px,color:#fff;
+    classDef storage fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff;
+    classDef db fill:#27AE60,stroke:#2ECC71,stroke-width:2px,color:#fff;
+    classDef file fill:#E67E22,stroke:#F39C12,stroke-width:2px,color:#fff;
+    classDef tg fill:#2980B9,stroke:#3498DB,stroke-width:2px,color:#fff;
+
+    %% Nodes
+    Sensor["📡 Датчики<br/>(ArmAQI / AirGradient)"]:::device
+    HTTP["🌐 HTTP Сервер<br/>(POST /aqi)"]:::server
+    
+    subgraph Core ["Ядро приложения"]
+        Monitor["📊 MonitorService<br/>(Парсинг, Калибровка, AQI)"]:::module
+        Bot["🤖 Telegram Бот<br/>(UI, Настройки, Уведомления)"]:::module
+    end
+    
+    subgraph Persistence ["Слой хранения данных"]
+        Storage["💾 Менеджер хранения<br/>(Dual, PG-only, JSON-only)"]:::storage
+        PG[("🐘 PostgreSQL<br/>(Основной)")]:::db
+        JSON["📄 JSON Файл<br/>(Резервный или Основной)"]:::file
+    end
+    
+    TG["📱 Пользователи Telegram"]:::tg
+
+    %% Connections
+    Sensor -- "JSON Данные" --> HTTP
+    HTTP -- "Разобранные данные" --> Monitor
+    Monitor -- "Уведомления (Алерты)" --> Bot
+    
+    Monitor -- "Сохранение/Загрузка истории" --> Storage
+    Bot -- "Сохранение/Загрузка подписок" --> Storage
+    
+    Storage -- "Запись / Чтение" --> PG
+    Storage -- "Запись / Чтение" --> JSON
+    JSON -. "Авто-синхронизация при реконнекте" .-> PG
+    
+    Bot -- "Меню, Графики и Уведомления" --> TG
+    TG -- "Команды и Настройки" --> Bot
 ```
 
 ---
@@ -121,8 +142,11 @@ server:
   key_file:  "server-key.pem"
 
 database:
-  type: "postgres"           # или "json" для работы без базы данных
+  use:
+    - postgres
+    - json                   # режим резервного копирования, либо укажите только ["json"] для работы без СУБД
   pgsql_file: "aqinotifier.pgsql"
+  max_values: 1500           # ограничение количества записей (только в режиме "json")
 
 tgbot:
   enabled: true

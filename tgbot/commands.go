@@ -1,3 +1,7 @@
+// Package tgbot implements the Telegram bot logic, command handlers, keyboards,
+// and state storage.
+// This file implements various Telegram bot command handlers (such as subscribe,
+// status, list, settings) and user settings prompt handlers.
 package tgbot
 
 import (
@@ -541,7 +545,8 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 			}
 
 			line := b.T(chatID, "msgResetAlertItem", atoms)
-			alertsSB.WriteString(line + "\n")
+			alertsSB.WriteString(line)
+			alertsSB.WriteByte('\n')
 		}
 	}
 

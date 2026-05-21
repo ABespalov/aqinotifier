@@ -1,3 +1,7 @@
+// Package tgbot implements the Telegram bot logic, command handlers, keyboards,
+// and state storage.
+// This file implements helper functions to generate, format, and render line charts (using go-analyze/charts)
+// representing sensor history (AQI, PM2.5, PM10, Temperature, Humidity, Pressure).
 package tgbot
 
 import (

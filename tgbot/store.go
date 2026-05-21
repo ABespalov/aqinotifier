@@ -1,9 +1,10 @@
+// Package tgbot implements the Telegram bot logic, command handlers, keyboards,
+// and state storage.
+// This store file implements persistent state storage (subscriptions, preferences, language settings)
+// using JSON fallback files and/or a SQL database backend.
 package tgbot
 
 import (
-	"database/sql"
-	"encoding/json"
-	"os"
 	"sync"
 
 	"github.com/ABespalov/aqinotifier/config"
@@ -12,24 +13,27 @@ import (
 
 // Subscription holds per-chat subscriptions and personalized settings.
 type Subscription struct {
-	ChatID      int64             `json:"chat_id"`
-	DeviceIDs   []string          `json:"device_ids"`
-	Settings    *config.Monitor   `json:"settings,omitempty"`
-	Language    string            `json:"language,omitempty"`
-	TGCode      string            `json:"tg_code,omitempty"`
-	UnitTemp    string            `json:"unit_temp,omitempty"`  // "c", "f"
-	UnitPress   string            `json:"unit_press,omitempty"` // "mmhg", "hpa"
-	Version     int               `json:"version,omitempty"`    // for migrations
-	LastPrompts []int             `json:"last_prompts,omitempty"`
+	ChatID      int64           `json:"chat_id"`
+	DeviceIDs   []string        `json:"device_ids"`
+	Settings    *config.Monitor `json:"settings,omitempty"`
+	Language    string          `json:"language,omitempty"`
+	TGCode      string          `json:"tg_code,omitempty"`
+	UnitTemp    string          `json:"unit_temp,omitempty"`  // "c", "f"
+	UnitPress   string          `json:"unit_press,omitempty"` // "mmhg", "hpa"
+	Version     int             `json:"version,omitempty"`    // for migrations
+	LastPrompts []int           `json:"last_prompts,omitempty"`
+}
+
+type SubscriptionStore interface {
+	SaveSubscription(sub *Subscription, allSubs []*Subscription)
+	LoadSubscriptions() []*Subscription
 }
 
 // Store manages Telegram bot state persisted to a JSON file or Postgres.
 type Store struct {
 	mu               sync.RWMutex
-	file             string
-	db               *sql.DB
+	store            SubscriptionStore
 	subs             map[int64]*Subscription // keyed by chat_id
-	fileMu           sync.Mutex              // protects JSON file from concurrent writes
 	defaultUnitTemp  string
 	defaultUnitPress string
 	saveChan         chan saveRequest
@@ -40,102 +44,28 @@ type saveRequest struct {
 	sub    *Subscription // cloned or marshaled
 }
 
-// NewStore creates a Store backed by the given file path.
-func NewStore(file string, defaultUnitTemp, defaultUnitPress string) *Store {
+// NewStore creates a Store backed by the given file path and database settings.
+func NewStore(store SubscriptionStore, defaultUnitTemp, defaultUnitPress string) *Store {
 	s := &Store{
-		file:             file,
+		store:            store,
 		subs:             make(map[int64]*Subscription),
 		defaultUnitTemp:  defaultUnitTemp,
 		defaultUnitPress: defaultUnitPress,
 		saveChan:         make(chan saveRequest, 100),
 	}
-	s.load()
+
+	if store != nil {
+		loaded := store.LoadSubscriptions()
+		for _, sub := range loaded {
+			s.subs[sub.ChatID] = sub
+		}
+	}
+
 	go s.runSaveWorker()
 	return s
 }
 
 // SetDB attaches a Postgres connection and migrates/syncs data.
-func (s *Store) SetDB(db *sql.DB) {
-	s.mu.Lock()
-	s.db = db
-	s.mu.Unlock()
-
-	query := "CREATE TABLE IF NOT EXISTS bot_subscriptions (chat_id BIGINT PRIMARY KEY, data JSONB);"
-	_, err := db.Exec(query)
-	if err != nil {
-		log.Error().Err(err).Msg("tgbot: failed to initialize SQL table")
-		return
-	}
-
-	log.Info().Msg("tgbot: sql table bot_subscriptions ready")
-	s.loadFromSQL()
-
-	// Initial sync of all subs to SQL if they were only in JSON
-	s.mu.RLock()
-	for id, sub := range s.subs {
-		s.saveChan <- saveRequest{chatID: id, sub: sub}
-	}
-	s.mu.RUnlock()
-}
-
-func (s *Store) loadFromSQL() {
-	s.mu.RLock()
-	db := s.db
-	s.mu.RUnlock()
-	if db == nil {
-		return
-	}
-
-	log.Debug().Msg("tgbot: loading subscriptions from sql")
-	rows, err := db.Query("SELECT chat_id, data FROM bot_subscriptions")
-	if err != nil {
-		log.Error().Err(err).Msg("tgbot: failed to load from SQL")
-		return
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var chatID int64
-		var data []byte
-		if err := rows.Scan(&chatID, &data); err == nil {
-			var sub Subscription
-			if err := json.Unmarshal(data, &sub); err == nil {
-				if sub.Settings != nil {
-					sub.Settings.Validate()
-					log.Info().Int64("chat_id", chatID).
-						Float64("pm25_l1", sub.Settings.PM25L1).
-						Float64("pm10_l1", sub.Settings.PM10L1).
-						Msg("tgbot: loaded settings from sql")
-				}
-				s.mu.Lock()
-				s.subs[chatID] = &sub
-				s.mu.Unlock()
-			}
-		}
-	}
-}
-
-func (s *Store) load() {
-	data, err := os.ReadFile(s.file)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Error().Err(err).Str("file", s.file).Msg("tgbot: failed to read store file")
-		}
-		return
-	}
-	var list []*Subscription
-	if err := json.Unmarshal(data, &list); err != nil {
-		log.Error().Err(err).Str("file", s.file).Msg("tgbot: failed to unmarshal store")
-		return
-	}
-	for _, sub := range list {
-		if sub.Settings != nil {
-			sub.Settings.Validate()
-		}
-		s.subs[sub.ChatID] = sub
-	}
-}
-
 func (s *Store) runSaveWorker() {
 	for req := range s.saveChan {
 		s.performSave(req)
@@ -143,49 +73,18 @@ func (s *Store) runSaveWorker() {
 }
 
 func (s *Store) performSave(req saveRequest) {
-	// 1. Save to JSON (always save the whole state for consistency in JSON file)
+	if s.store == nil {
+		return
+	}
 	s.mu.RLock()
+	sub := s.subs[req.chatID]
 	list := make([]*Subscription, 0, len(s.subs))
 	for _, sub := range s.subs {
 		list = append(list, sub)
 	}
 	s.mu.RUnlock()
 
-	jsonData, err := json.MarshalIndent(list, "", "  ")
-	if err != nil {
-		log.Error().Err(err).Msg("tgbot: failed to marshal store to JSON")
-	} else {
-		s.fileMu.Lock()
-		if err := os.WriteFile(s.file, jsonData, 0644); err != nil {
-			log.Error().Err(err).Str("file", s.file).Msg("tgbot: failed to write store file")
-		}
-		s.fileMu.Unlock()
-	}
-
-	// 2. Save specific user to SQL
-	s.mu.RLock()
-	db := s.db
-	s.mu.RUnlock()
-
-	if db != nil && req.chatID != 0 {
-		// We need to marshal the sub again or use a cloned one to avoid race if user is modified while saving
-		// Actually, req.sub is a snapshot if we cloned it.
-		// For now, let's just get it from s.subs under lock again to be sure
-		s.mu.RLock()
-		sub, ok := s.subs[req.chatID]
-		var subData []byte
-		if ok {
-			subData, _ = json.Marshal(sub)
-		}
-		s.mu.RUnlock()
-
-		if subData != nil {
-			_, err = db.Exec("INSERT INTO bot_subscriptions (chat_id, data) VALUES ($1, $2) ON CONFLICT (chat_id) DO UPDATE SET data = $2", req.chatID, subData)
-			if err != nil {
-				log.Error().Err(err).Int64("chat_id", req.chatID).Msg("tgbot: failed to sync user to SQL")
-			}
-		}
-	}
+	s.store.SaveSubscription(sub, list)
 }
 
 func (s *Store) saveLocked(chatID int64) {

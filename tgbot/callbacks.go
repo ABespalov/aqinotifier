@@ -1,3 +1,7 @@
+// Package tgbot implements the Telegram bot logic, command handlers, keyboards,
+// and state storage.
+// This file handles incoming callback queries from inline keyboards and dispatches
+// them to the appropriate menu actions.
 package tgbot
 
 import (
@@ -456,7 +460,6 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		}
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdSoundMenu(chatID, silent, cq.Message.GetMessageID())
-
 
 	case strings.HasPrefix(data, "rename:"):
 		deviceID := strings.TrimPrefix(data, "rename:")

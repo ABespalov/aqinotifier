@@ -1,3 +1,7 @@
+// Package tgbot implements the Telegram bot logic, command handlers, keyboards,
+// and state storage.
+// This file implements internalization (i18n) by loading translations, icons,
+// and colors, and resolving templates with conditional placeholders.
 package tgbot
 
 import (

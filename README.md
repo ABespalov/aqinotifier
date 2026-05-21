@@ -62,7 +62,49 @@ Highly granular Telegram notifications for:
 
 ## Architecture
 
-![Architecture](res/architecture.png)
+```mermaid
+flowchart TD
+    %% Define styles
+    classDef device fill:#2A3F54,stroke:#1ABB9C,stroke-width:2px,color:#fff;
+    classDef server fill:#34495E,stroke:#3498DB,stroke-width:2px,color:#fff;
+    classDef module fill:#3498DB,stroke:#2980B9,stroke-width:2px,color:#fff;
+    classDef storage fill:#8E44AD,stroke:#9B59B6,stroke-width:2px,color:#fff;
+    classDef db fill:#27AE60,stroke:#2ECC71,stroke-width:2px,color:#fff;
+    classDef file fill:#E67E22,stroke:#F39C12,stroke-width:2px,color:#fff;
+    classDef tg fill:#2980B9,stroke:#3498DB,stroke-width:2px,color:#fff;
+
+    %% Nodes
+    Sensor["📡 Sensors<br/>(ArmAQI / AirGradient)"]:::device
+    HTTP["🌐 HTTP Server<br/>(POST /aqi)"]:::server
+    
+    subgraph Core ["Application Core"]
+        Monitor["📊 MonitorService<br/>(Parse, Calibrate, AQI)"]:::module
+        Bot["🤖 Telegram Bot<br/>(UI, Settings, Alerts)"]:::module
+    end
+    
+    subgraph Persistence ["Persistence Layer"]
+        Storage["💾 Storage Manager<br/>(Dual, PG-only, JSON-only)"]:::storage
+        PG[("🐘 PostgreSQL<br/>(Primary)")]:::db
+        JSON["📄 JSON File<br/>(Fallback or Primary)"]:::file
+    end
+    
+    TG["📱 Telegram Users"]:::tg
+
+    %% Connections
+    Sensor -- "JSON Payload" --> HTTP
+    HTTP -- "Parsed Data" --> Monitor
+    Monitor -- "Alerts" --> Bot
+    
+    Monitor -- "Save/Load History" --> Storage
+    Bot -- "Save/Load Subs" --> Storage
+    
+    Storage -- "Write / Read" --> PG
+    Storage -- "Write / Read" --> JSON
+    JSON -. "Auto-sync on PG reconnect" .-> PG
+    
+    Bot -- "Notifications & UI" --> TG
+    TG -- "Commands & Settings" --> Bot
+```
 
 ---
 
@@ -100,8 +142,11 @@ server:
   key_file:  "server-key.pem"
 
 database:
-  type: "postgres"           # or "json" for no-database mode
+  use:
+    - postgres
+    - json                   # fallback mode, or use only ["json"] for no-database mode
   pgsql_file: "aqinotifier.pgsql"
+  max_values: 1500           # limit only when using json-only mode
 
 tgbot:
   enabled: true
