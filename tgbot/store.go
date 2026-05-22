@@ -118,8 +118,8 @@ func (s *Store) GetSettings(chatID int64, defaults *config.Monitor) *config.Moni
 
 	sub.Settings.Validate()
 	log.Debug().Int64("chat_id", chatID).
-		Float64("pm25_l1", sub.Settings.PM25L1).
-		Float64("pm10_l1", sub.Settings.PM10L1).
+		Float64("pm25_l1", sub.Settings.PM25.Level1).
+		Float64("pm10_l1", sub.Settings.PM10.Level1).
 		Msg("tgbot: returning existing settings")
 	return sub.Settings
 }
@@ -143,10 +143,14 @@ func (s *Store) cloneMonitor(m *config.Monitor) *config.Monitor {
 		return nil
 	}
 	clone := *m
-	clone.Notifications = make([]string, len(m.Notifications))
-	copy(clone.Notifications, m.Notifications)
-	clone.Warnings = make([]string, len(m.Warnings))
-	copy(clone.Warnings, m.Warnings)
+	clone.Notifications = make(map[string][]string)
+	for k, v := range m.Notifications {
+		clone.Notifications[k] = append([]string(nil), v...)
+	}
+	clone.Warnings = make(map[string][]string)
+	for k, v := range m.Warnings {
+		clone.Warnings[k] = append([]string(nil), v...)
+	}
 	return &clone
 }
 
@@ -162,8 +166,8 @@ func (s *Store) UpdateSettings(chatID int64, settings *config.Monitor) {
 	}
 	sub.Settings = settings
 	log.Info().Int64("chat_id", chatID).
-		Float64("pm25_l1", settings.PM25L1).
-		Float64("pm10_l1", settings.PM10L1).
+		Float64("pm25_l1", settings.PM25.Level1).
+		Float64("pm10_l1", settings.PM10.Level1).
 		Msg("tgbot: UpdateSettings - memory updated, triggering save")
 	s.saveLocked(chatID)
 }

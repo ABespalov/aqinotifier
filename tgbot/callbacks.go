@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
@@ -32,7 +33,7 @@ type AlertItem struct {
 func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 	d := b.defaults
 	defWarnings := make(map[string]bool)
-	for _, w := range d.Warnings {
+	for _, w := range config.FlattenNotifications(d.Warnings) {
 		defWarnings[w] = true
 	}
 
@@ -40,7 +41,7 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 
 	if filter == "" || filter == "aqi" {
 		mcfg := b.GetUserSettings(chatID)
-		stdTag := strings.ToUpper(mcfg.AQIStandard)
+		stdTag := strings.ToUpper(mcfg.AQI.Standard)
 		stdData, ok := sensor.Standards[stdTag]
 		if ok {
 			for _, zone := range stdData.Zones {
@@ -270,6 +271,18 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.deleteMessage(chatID, cq)
 		b.setState(chatID, stateIdle)
 		b.sendHelp(chatID)
+	case data == "menu_lazy":
+		b.cleanupMessage(chatID, cq)
+		b.cmdLazyMenu(chatID)
+	case strings.HasPrefix(data, "lazy_set:"):
+		parts := strings.Split(data, ":")
+		if len(parts) == 3 {
+			b.promptLazy(chatID, parts[1], parts[2])
+		}
+	case data == "cancel_lazy":
+		b.deleteMessage(chatID, cq)
+		b.setState(chatID, stateIdle)
+		b.cmdLazyMenu(chatID)
 	case data == "aqi_std_toggle":
 		mcfg := b.GetUserSettings(chatID)
 		tags := make([]string, 0, len(sensor.Standards))
@@ -280,48 +293,26 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 
 		next := tags[0]
 		for i, tag := range tags {
-			if tag == mcfg.AQIStandard {
+			if tag == mcfg.AQI.Standard {
 				if i+1 < len(tags) {
 					next = tags[i+1]
 				}
 				break
 			}
 		}
-		mcfg.AQIStandard = next
+		mcfg.AQI.Standard = next
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
 	case strings.HasPrefix(data, "aqi_toggle:"):
 		id := strings.TrimPrefix(data, "aqi_toggle:")
 		mcfg := b.GetUserSettings(chatID)
-		found := -1
-		for i, n := range mcfg.Notifications {
-			if n == id {
-				found = i
-				break
-			}
-		}
-		if found >= 0 {
-			mcfg.Notifications = append(mcfg.Notifications[:found], mcfg.Notifications[found+1:]...)
-		} else {
-			mcfg.Notifications = append(mcfg.Notifications, id)
-		}
+		mcfg.ToggleNotification(id)
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
 	case strings.HasPrefix(data, "aqi_sound:"):
 		id := strings.TrimPrefix(data, "aqi_sound:")
 		mcfg := b.GetUserSettings(chatID)
-		found := -1
-		for i, w := range mcfg.Warnings {
-			if w == id {
-				found = i
-				break
-			}
-		}
-		if found >= 0 {
-			mcfg.Warnings = append(mcfg.Warnings[:found], mcfg.Warnings[found+1:]...)
-		} else {
-			mcfg.Warnings = append(mcfg.Warnings, id)
-		}
+		mcfg.ToggleWarning(id)
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdAqiMenu(chatID, cq.Message.GetMessageID())
 	case strings.HasPrefix(data, "charts_dev:"):
@@ -420,20 +411,8 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		}
 		alertID := parts[1]
 		silent := parts[2] == "true"
-
 		mcfg := b.GetUserSettings(chatID)
-		found := -1
-		for i, n := range mcfg.Notifications {
-			if n == alertID {
-				found = i
-				break
-			}
-		}
-		if found >= 0 {
-			mcfg.Notifications = append(mcfg.Notifications[:found], mcfg.Notifications[found+1:]...)
-		} else {
-			mcfg.Notifications = append(mcfg.Notifications, alertID)
-		}
+		mcfg.ToggleNotification(alertID)
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdSoundMenu(chatID, silent, cq.Message.GetMessageID())
 
@@ -444,20 +423,8 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		}
 		alertID := parts[1]
 		silent := parts[2] == "true"
-
 		mcfg := b.GetUserSettings(chatID)
-		found := -1
-		for i, w := range mcfg.Warnings {
-			if w == alertID {
-				found = i
-				break
-			}
-		}
-		if found >= 0 {
-			mcfg.Warnings = append(mcfg.Warnings[:found], mcfg.Warnings[found+1:]...)
-		} else {
-			mcfg.Warnings = append(mcfg.Warnings, alertID)
-		}
+		mcfg.ToggleWarning(alertID)
 		b.store.UpdateSettings(chatID, mcfg)
 		b.cmdSoundMenu(chatID, silent, cq.Message.GetMessageID())
 

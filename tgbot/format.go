@@ -112,10 +112,10 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 		"curr10":    m.PM10,
 		"labelPm25": b.T(chatID, "labelPm25"),
 		"labelPm10": b.T(chatID, "labelPm10"),
-		"l1_25":     mcfg.PM25L1,
-		"l2_25":     mcfg.PM25L2,
-		"l1_10":     mcfg.PM10L1,
-		"l2_10":     mcfg.PM10L2,
+		"l1_25":     mcfg.PM25.Level1,
+		"l2_25":     mcfg.PM25.Level2,
+		"l1_10":     mcfg.PM10.Level1,
+		"l2_10":     mcfg.PM10.Level2,
 	}
 
 	if name, ok := mcfg.DeviceNames[m.DeviceID]; ok && name != "" {
@@ -164,30 +164,30 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 		}
 		return b.I(kIcoPmLevel3)
 	}
-	args["zone25Icon"] = getZoneIcon(m.PM25, mcfg.PM25L1, mcfg.PM25L2)
-	args["zone10Icon"] = getZoneIcon(m.PM10, mcfg.PM10L1, mcfg.PM10L2)
+	args["zone25Icon"] = getZoneIcon(m.PM25, mcfg.PM25.Level1, mcfg.PM25.Level2)
+	args["zone10Icon"] = getZoneIcon(m.PM10, mcfg.PM10.Level1, mcfg.PM10.Level2)
 
 	var aqi float64
 	var level sensor.AQILevel
-	aqi, level = sensor.CalculateValueAQI(m.PM25, "PM2.5", mcfg.AQIStandard)
-	aqi10, level10 := sensor.CalculateValueAQI(m.PM10, "PM10", mcfg.AQIStandard)
+	aqi, level = sensor.CalculateValueAQI(m.PM25, "PM2.5", mcfg.AQI.Standard)
+	aqi10, level10 := sensor.CalculateValueAQI(m.PM10, "PM10", mcfg.AQI.Standard)
 	if aqi10 > aqi {
 		aqi = aqi10
 		level = level10
 	}
 
 	levelChar := fmt.Sprintf("l%d", level)
-	args["aqiIcon"] = b.getAQIIcon(level, mcfg.AQIStandard)
+	args["aqiIcon"] = b.getAQIIcon(level, mcfg.AQI.Standard)
 	args["aqiVal"] = aqi
 	args["aqiLevel"] = int(level)
 
-	stdTag := strings.ToUpper(mcfg.AQIStandard)
+	stdTag := strings.ToUpper(mcfg.AQI.Standard)
 	aqiName := ""
 	if s, ok := sensor.Standards[stdTag]; ok && int(level) > 0 && int(level) <= len(s.Zones) {
 		aqiName = s.Zones[level-1].Name
 	}
 	// Try localization if available
-	key := fmt.Sprintf("aqiName%s%s", strings.Title(levelChar), strings.Title(strings.ToLower(mcfg.AQIStandard)))
+	key := fmt.Sprintf("aqiName%s%s", strings.Title(levelChar), strings.Title(strings.ToLower(mcfg.AQI.Standard)))
 	if localized := b.T(chatID, key); !strings.HasPrefix(localized, "!!") {
 		aqiName = localized
 	}

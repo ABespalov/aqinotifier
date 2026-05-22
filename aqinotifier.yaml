@@ -18,8 +18,9 @@ server:
   protocol: "https"
   # Paths to SSL/TLS certificate and key files. Required if protocol is "https",
   # otherwise these parameters are ignored.
-  cert_file: "localhost.pem"
-  key_file: "localhost-key.pem"
+  file:
+    cert: "localhost.pem"
+    key: "localhost-key.pem"
   # Timeouts are in seconds. Tune according to expected request sizes and
   # network conditions.
   timeout:
@@ -42,10 +43,11 @@ database:
   # JSON file settings (always used for persistence and stability).
   # {app} will be replaced with the executable name.
   # If no directory is specified, the executable's directory is used.
-  json_file: "{app}.data.json"
-  # PostgreSQL sub-config file (for database provider)
-  # If specified and exists, settings will be loaded from this file.
-  pgsql_file: "{app}.pgsql"
+  file:
+    json: "{app}.data.json"
+    # PostgreSQL sub-config file (for database provider)
+    # If specified and exists, settings will be loaded from this file.
+    pgsql: "{app}.pgsql"
   # Maximum number of values to keep in the JSON file per device ID (only enforced if only "json" is used).
   # Use 0 for no limit.
   max_values: 1500
@@ -89,45 +91,58 @@ monitor:
   # Raw data correction formulas per device type
   corrections:
     ArmAQI:
-      pm25: "1.80 * pm25_raw + 2.5"
-      pm10: "?(1.85 * pm10_raw) < pm25:pm25:(1.85 * pm10_raw)"
+      pm25: "1.85 * pm25_raw + 4.5"
+      pm10: "?(1.9 * pm10_raw) < pm25:pm25:(1.9 * pm10_raw)"
 
   # Thresholds for PM2.5 and PM10 zones.
   # Green zone: [0, green]
   # Yellow zone: (green, yellow]
   # Red zone: (yellow, infinity)
   # Values must satisfy: yellow >= green
-  pm25_level1: 9.0
-  pm25_level2: 35.0
-  pm10_level1: 54.0
-  pm10_level2: 154.0
-
-  # Percentage change thresholds for PM2.5 and PM10 compared to the previous measurement.
-  pm25_diff: 50.0
-  pm10_diff: 66.0
+  pm25:
+    level1: 9.0
+    level2: 35.4
+    diff: 50.0
+    lazy_notify:
+      up: 2
+      down: 3
+  
+  pm10:
+    level1: 54.0
+    level2: 154.0
+    diff: 66.0
+    lazy_notify:
+      up: 2
+      down: 3
 
   # Air Quality Index (AQI) calculation standard: "EU" (default) or "US".
-  aqi_standard: "EU"
+  aqi:
+    standard: "US"
+    lazy_notify:
+      up: 2
+      down: 3
 
   # Enabled notifications.
   # AQI zone notifications (based on selected aqi_standard):
-  # - aqi_l1: Good (US: Good, EU: Good)
-  # - aqi_l2: Moderate (US: Moderate, EU: Fair)
-  # - aqi_l3: Sensitive/Moderate (US: Slightly unhealthy, EU: Moderate)
-  # - aqi_l4: Unhealthy/Poor (US: Unhealthy, EU: Poor)
-  # - aqi_l5: Very unhealthy (US: Very unhealthy, EU: Very poor)
-  # - aqi_l6: Hazardous/Extreme (US: Hazardous, EU: Extremely poor)
-  # - aqi_l7: Extremely Hazardous (US: Extremely Hazardous, EU: -)
-  # Absolute transitions:
-  # - val25_l2u: PM2.5 Level 1 -> Level 2
-  # - val25_l3u: PM2.5 Level 1/2 -> Level 3
-  # - val25_l2d: PM2.5 Level 3 -> Level 2
-  # - val25_l1d: PM2.5 Level 3/2 -> Level 1
-  # - val10_l2u, val10_l3u, val10_l2d, val10_l1d: same for PM10
-  # - vals_l2u: Both PM2.5/PM10 Level 1 -> Level 2 (at least one in Level 2)
-  # - vals_l3u: Both PM2.5/PM10 -> Level 3 (both in Level 3)
-  # - vals_l2d: Both PM2.5/PM10 Level 3 -> Level 2 (both in Level 2)
-  # - vals_l1d: Both PM2.5/PM10 -> Level 1 (both in Level 1)
+  # - aqi: level1, level2, ... (Good, Moderate, etc.)
+  #
+  # Absolute transitions are grouped by boundary levels and transition direction:
+  # - val25 (PM2.5), val10 (PM10), vals (Both PM2.5 and PM10)
+  # - boundary levels and transition direction can be:
+  #   - level2 (boundary between Level 1/Green and Level 2/Yellow):
+  #     - up: rising transition (Level 1 -> Level 2)
+  #     - down: falling transition (Level 2 -> Level 1)
+  #   - level3 (boundary between Level 2/Yellow and Level 3/Red):
+  #     - up: rising transition (Level 2 -> Level 3)
+  #     - down: falling transition (Level 3 -> Level 2)
+  # For example:
+  #   val25:
+  #     - level2:
+  #       - up
+  #       - down
+  #     - level3:
+  #       - up
+  #
   # Relative changes:
   # - diff25_l1u, diff10_l1u, diffs_l1u: Growth while staying in Level 1
   # - diff25_l1d, diff10_l1d, diffs_l1d: Drop resulting in Level 1
@@ -136,38 +151,44 @@ monitor:
   # - diff25_l3u, diff10_l3u, diffs_l3u: Growth resulting in Level 3
   # - diff25_l3d, diff10_l3d, diffs_l3d: Drop while staying in Level 3
   notifications:
-    - aqi_l1
-    - aqi_l2
-    - aqi_l3
-    - aqi_l4
-    - aqi_l5
-    - aqi_l6
-    - aqi_l7
-    - vals_l3u
-    - vals_l1d
+    aqi:
+      - level1
+      - level2
+      - level3
+      - level4
+      - level5
+      - level6
+      - level7
 
   # List of notifications that should be sent WITH sound by default.
   # Others will be silent unless changed by the user in the bot settings.
   warnings:
-    - aqi_l1
-    - aqi_l2
-    - aqi_l3
-    - aqi_l4
-    - aqi_l5
-    - aqi_l6
-    - aqi_l7
-    - val25_l2u
-    - val25_l3u
-    - val25_l2d
-    - val25_l1d
-    - val10_l2u
-    - val10_l3u
-    - val10_l2d
-    - val10_l1d
-    - vals_l2u
-    - vals_l3u
-    - vals_l2d
-    - vals_l1d
+    aqi:
+      - level1
+      - level2
+      - level3
+      - level4
+      - level5
+      - level6
+      - level7
+    val25:
+      - level2:
+        - up
+        - down
+      - level3:
+        - up
+    val10:
+      - level2:
+        - up
+        - down
+      - level3:
+        - up
+    vals:
+      - level2:
+        - up
+        - down
+      - level3:
+        - up
 
 # Optional: metrics / observability settings could be added here later.
 
@@ -178,20 +199,24 @@ tgbot:
   enabled: true
   # Bot token issued by @BotFather. Keep this secret!
   # token: "0000000000:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  # File to read the token from if 'token' is not provided.
-  token_file: "{app}.tgbot.token"
-  # JSON file to persist user subscriptions.
-  # {app} is replaced with the executable name. If no directory is specified,
-  # the file is placed next to the executable.
-  json_file: "{app}.tgbot.json"
+  file:
+    # File to read the token from if 'token' is not provided.
+    token: "{app}.tgbot.token"
+    # JSON file to persist user subscriptions.
+    # {app} is replaced with the executable name. If no directory is specified,
+    # the file is placed next to the executable.
+    json: "{app}.tgbot.json"
   # Enable verbose Telegram API debug output (prints all API calls to stdout).
   debug: false
-  # Chart width in pixels
-  chart_width: 1024
-  # Chart height in pixels
-  chart_height: 768
-  # Chart font size
-  chart_font_size: 12.0
-  # Default units for measurements (Temperature: c/f, Pressure: mmhg/hpa)
-  default_unit_temp: "c"
-  default_unit_press: "mmhg"
+  chart:
+    # Chart width in pixels
+    width: 1024
+    # Chart height in pixels
+    height: 768
+    # Chart font size
+    font_size: 12.0
+  default:
+    unit:
+      # Default units for measurements (Temperature: c/f, Pressure: mmhg/hpa)
+      temp: "c"
+      press: "mmhg"

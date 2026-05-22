@@ -30,6 +30,7 @@ Highly granular Telegram notifications for:
 - **AQI level changes** (levels 1–7 across EU, US, and CN standards)
 - **PM absolute zone transitions** — PM2.5 or PM10 entering/leaving Green, Yellow, or Red zones
 - **PM relative dynamics** — sudden rises or drops (configurable % thresholds)
+- **Notification delays (lazy mechanism)** — filter out flickering notifications on AQI boundary thresholds by delaying alerts until a new level remains stable for N consecutive measurements (configurable independently for rising and falling trends)
 - Per-user notification preferences (enable/disable individual alert types)
 - Per-user sound/silent mode for each alert type
 
@@ -138,19 +139,21 @@ server:
   host: "0.0.0.0"
   port: 28288
   protocol: "https"          # or "http" for local testing
-  cert_file: "server.pem"
-  key_file:  "server-key.pem"
+  file:
+    cert: "server.pem"
+    key:  "server-key.pem"
 
 database:
   use:
     - postgres
     - json                   # fallback mode, or use only ["json"] for no-database mode
-  pgsql_file: "aqinotifier.pgsql"
+  file:
+    pgsql: "aqinotifier.pgsql"
   max_values: 1500           # limit only when using json-only mode
 
 tgbot:
   enabled: true
-  token: "YOUR_BOT_TOKEN"    # or use token_file
+  token: "YOUR_BOT_TOKEN"    # or use file.token
 ```
 
 ### PostgreSQL Setup (optional)

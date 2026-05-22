@@ -55,7 +55,7 @@ func NewStorage(cfg *config.Config) (*Storage, error) {
 			if !hasJSON {
 				return nil, err
 			}
-			if isJSONFileEmpty(cfg.TgBot.JsonFile) {
+			if isJSONFileEmpty(cfg.TgBot.File.Json) {
 				return nil, err
 			}
 			log.Warn().Err(err).Msg("storage: database is unavailable at startup, falling back to JSON mode")

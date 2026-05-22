@@ -129,7 +129,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 		pm25Values = append(pm25Values, m.PM25)
 
 		var aqi float64
-		if mcfg.AQIStandard == "US" {
+		if mcfg.AQI.Standard == "US" {
 			aqi, _ = sensor.CalculateUS_AQI(m.PM25, m.PM10)
 		} else {
 			aqi, _ = sensor.CalculateEU_AQI(m.PM25, m.PM10)
@@ -174,7 +174,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	var buffers [][]byte
 	if len(aqiValues) > 0 {
 		aqiTitle := b.T(chatID, "txtChartTitleAqi")
-		aqiBuf, err := b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+		aqiBuf, err := b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQI.Standard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		if err == nil {
 			buffers = append(buffers, aqiBuf)
 		}
@@ -271,7 +271,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 			pm25Values = append(pm25Values, m.PM25)
 		case "aqi":
 			var aqi float64
-			if mcfg.AQIStandard == "US" {
+			if mcfg.AQI.Standard == "US" {
 				aqi, _ = sensor.CalculateUS_AQI(m.PM25, m.PM10)
 			} else {
 				aqi, _ = sensor.CalculateEU_AQI(m.PM25, m.PM10)
@@ -337,7 +337,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 		}
 	case "aqi":
 		if len(aqiValues) > 0 {
-			return b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQIStandard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+			return b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQI.Standard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
 		}
 	}
 
@@ -565,12 +565,12 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			}
 		}
 
-		drawBar(0, barWidth, 0, mcfg.PM25L1, b.getChartColor("colorGreenZone"))
-		drawBar(0, barWidth, mcfg.PM25L1, mcfg.PM25L2, b.getChartColor("colorYellowZone"))
-		drawBar(0, barWidth, mcfg.PM25L2, math.MaxFloat64, b.getChartColor("colorRedZone"))
-		drawBar(gridW-barWidth, gridW, 0, mcfg.PM10L1, b.getChartColor("colorGreenZone"))
-		drawBar(gridW-barWidth, gridW, mcfg.PM10L1, mcfg.PM10L2, b.getChartColor("colorYellowZone"))
-		drawBar(gridW-barWidth, gridW, mcfg.PM10L2, math.MaxFloat64, b.getChartColor("colorRedZone"))
+		drawBar(0, barWidth, 0, mcfg.PM25.Level1, b.getChartColor("colorGreenZone"))
+		drawBar(0, barWidth, mcfg.PM25.Level1, mcfg.PM25.Level2, b.getChartColor("colorYellowZone"))
+		drawBar(0, barWidth, mcfg.PM25.Level2, math.MaxFloat64, b.getChartColor("colorRedZone"))
+		drawBar(gridW-barWidth, gridW, 0, mcfg.PM10.Level1, b.getChartColor("colorGreenZone"))
+		drawBar(gridW-barWidth, gridW, mcfg.PM10.Level1, mcfg.PM10.Level2, b.getChartColor("colorYellowZone"))
+		drawBar(gridW-barWidth, gridW, mcfg.PM10.Level2, math.MaxFloat64, b.getChartColor("colorRedZone"))
 
 		dashWidth := chartStrokeWidth * chartDashWidthCoef
 		dashPattern := chartDashPattern
@@ -591,24 +591,24 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			pureCp.DashedLineStroke([]charts.Point{{X: int(tx1), Y: int(y)}, {X: int(tx2), Y: int(y)}}, color, dashWidth, dashPattern)
 		}
 
-		drawThreshold(mcfg.PM25L1, b.getChartColor("colorRed"), true, 0)
-		drawDots(data[0], mcfg.PM25L1, b.getChartColor("colorRed"), 0)
-		drawThreshold(mcfg.PM25L2, b.getChartColor("colorRed"), true, 0)
-		drawDots(data[0], mcfg.PM25L2, b.getChartColor("colorRed"), 0)
+		drawThreshold(mcfg.PM25.Level1, b.getChartColor("colorRed"), true, 0)
+		drawDots(data[0], mcfg.PM25.Level1, b.getChartColor("colorRed"), 0)
+		drawThreshold(mcfg.PM25.Level2, b.getChartColor("colorRed"), true, 0)
+		drawDots(data[0], mcfg.PM25.Level2, b.getChartColor("colorRed"), 0)
 
 		var g10Offset float64
-		if mcfg.PM10L1 == mcfg.PM25L1 || mcfg.PM10L1 == mcfg.PM25L2 {
+		if mcfg.PM10.Level1 == mcfg.PM25.Level1 || mcfg.PM10.Level1 == mcfg.PM25.Level2 {
 			g10Offset = dashWidth * 2
 		}
-		drawThreshold(mcfg.PM10L1, b.getChartColor("colorBlue"), false, g10Offset)
-		drawDots(data[1], mcfg.PM10L1, b.getChartColor("colorBlue"), g10Offset)
+		drawThreshold(mcfg.PM10.Level1, b.getChartColor("colorBlue"), false, g10Offset)
+		drawDots(data[1], mcfg.PM10.Level1, b.getChartColor("colorBlue"), g10Offset)
 
 		var y10Offset float64
-		if mcfg.PM10L2 == mcfg.PM25L1 || mcfg.PM10L2 == mcfg.PM25L2 {
+		if mcfg.PM10.Level2 == mcfg.PM25.Level1 || mcfg.PM10.Level2 == mcfg.PM25.Level2 {
 			y10Offset = dashWidth * 2
 		}
-		drawThreshold(mcfg.PM10L2, b.getChartColor("colorBlue"), false, y10Offset)
-		drawDots(data[1], mcfg.PM10L2, b.getChartColor("colorBlue"), y10Offset)
+		drawThreshold(mcfg.PM10.Level2, b.getChartColor("colorBlue"), false, y10Offset)
+		drawDots(data[1], mcfg.PM10.Level2, b.getChartColor("colorBlue"), y10Offset)
 
 		drawSeriesPoints(data[0], b.getChartColor("colorRed"), 0)
 		drawSeriesPoints(data[1], b.getChartColor("colorBlue"), g10Offset)
@@ -616,14 +616,14 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 
 	if isAQI {
 		breakpoints := sensor.IndexPointsEU
-		if mcfg.AQIStandard == "US" {
+		if mcfg.AQI.Standard == "US" {
 			breakpoints = sensor.IndexPointsUS
 		}
 		colors := []charts.Color{
 			b.getChartColor("colorGreen"), b.getChartColor("colorYellow"), b.getChartColor("colorOrange"),
 			b.getChartColor("colorDarkRed"), b.getChartColor("colorViolet"), b.getChartColor("colorMaroon"), b.getChartColor("colorGray"),
 		}
-		if mcfg.AQIStandard == "EU" {
+		if mcfg.AQI.Standard == "EU" {
 			colors = []charts.Color{
 				b.getChartColor("colorLightBlue"), b.getChartColor("colorGreen"), b.getChartColor("colorYellow"),
 				b.getChartColor("colorOrange"), b.getChartColor("colorDarkRed"), b.getChartColor("colorMaroon"),
@@ -632,7 +632,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		for i := 0; i < len(breakpoints)-1; i++ {
 			low := breakpoints[i]
 			high := breakpoints[i+1]
-			if i == len(breakpoints)-2 && mcfg.AQIStandard == "US" {
+			if i == len(breakpoints)-2 && mcfg.AQI.Standard == "US" {
 				high = sensor.IndexPointsUS[len(sensor.IndexPointsUS)-1]
 			}
 			c := colors[i]

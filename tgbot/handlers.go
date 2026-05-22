@@ -146,6 +146,10 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 		b.handleThresholdUpdate(chatID, "PM10", "diff", text)
 	case stateAwaitDiff25:
 		b.handleThresholdUpdate(chatID, "PM2.5", "diff", text)
+	case stateAwaitAQILazyUp:
+		b.handleLazyUpdate(chatID, "aqi", "up", text)
+	case stateAwaitAQILazyDown:
+		b.handleLazyUpdate(chatID, "aqi", "down", text)
 	case stateAwaitDeviceName:
 		b.handleDeviceRename(chatID, msg)
 		return
@@ -174,26 +178,26 @@ func (b *Bot) handleThresholdUpdate(chatID int64, pmType, level, text string) {
 	case "PM10":
 		switch level {
 		case "level1":
-			old = mcfg.PM10L1
-			mcfg.PM10L1 = val
+			old = mcfg.PM10.Level1
+			mcfg.PM10.Level1 = val
 		case "level2":
-			old = mcfg.PM10L2
-			mcfg.PM10L2 = val
+			old = mcfg.PM10.Level2
+			mcfg.PM10.Level2 = val
 		case "diff":
-			old = mcfg.PM10Diff
-			mcfg.PM10Diff = val
+			old = mcfg.PM10.Diff
+			mcfg.PM10.Diff = val
 		}
 	case "PM2.5":
 		switch level {
 		case "level1":
-			old = mcfg.PM25L1
-			mcfg.PM25L1 = val
+			old = mcfg.PM25.Level1
+			mcfg.PM25.Level1 = val
 		case "level2":
-			old = mcfg.PM25L2
-			mcfg.PM25L2 = val
+			old = mcfg.PM25.Level2
+			mcfg.PM25.Level2 = val
 		case "diff":
-			old = mcfg.PM25Diff
-			mcfg.PM25Diff = val
+			old = mcfg.PM25.Diff
+			mcfg.PM25.Diff = val
 		}
 	}
 
@@ -268,17 +272,17 @@ func (b *Bot) promptThreshold(chatID int64, param, levelKey string) {
 			b.setState(chatID, stateAwaitPM10Level1)
 			zoneLabel = b.T(chatID, "labelZoneGreen")
 			zoneIcon = b.I(kIcoPmLevel1)
-			currentVal = mcfg.PM10L1
+			currentVal = mcfg.PM10.Level1
 		case "level2":
 			b.setState(chatID, stateAwaitPM10Level2)
 			zoneLabel = b.T(chatID, "labelZoneYellow")
 			zoneIcon = b.I(kIcoPmLevel2)
-			currentVal = mcfg.PM10L2
+			currentVal = mcfg.PM10.Level2
 		case "diff":
 			b.setState(chatID, stateAwaitDiff10)
 			zoneLabel = b.T(chatID, "msgThresholdDiffTitle")
 			zoneIcon = b.I(kIcoPm10)
-			currentVal = mcfg.PM10Diff
+			currentVal = mcfg.PM10.Diff
 		}
 	case "PM2.5":
 		pmLabel = b.T(chatID, "labelPm25")
@@ -287,17 +291,17 @@ func (b *Bot) promptThreshold(chatID int64, param, levelKey string) {
 			b.setState(chatID, stateAwaitPM25Level1)
 			zoneLabel = b.T(chatID, "labelZoneGreen")
 			zoneIcon = b.I(kIcoPmLevel1)
-			currentVal = mcfg.PM25L1
+			currentVal = mcfg.PM25.Level1
 		case "level2":
 			b.setState(chatID, stateAwaitPM25Level2)
 			zoneLabel = b.T(chatID, "labelZoneYellow")
 			zoneIcon = b.I(kIcoPmLevel2)
-			currentVal = mcfg.PM25L2
+			currentVal = mcfg.PM25.Level2
 		case "diff":
 			b.setState(chatID, stateAwaitDiff25)
 			zoneLabel = b.T(chatID, "msgThresholdDiffTitle")
 			zoneIcon = b.I(kIcoPm25)
-			currentVal = mcfg.PM25Diff
+			currentVal = mcfg.PM25.Diff
 		}
 	}
 
@@ -310,4 +314,80 @@ func (b *Bot) promptThreshold(chatID int64, param, levelKey string) {
 	})
 
 	b.sendWithKeyboard(chatID, text, b.cancelThresholdKeyboard(chatID))
+}
+
+func (b *Bot) promptLazy(chatID int64, metric, direction string) {
+	mcfg := b.GetUserSettings(chatID)
+	var currentVal int
+
+	if metric == "aqi" {
+		if direction == "up" {
+			b.setState(chatID, stateAwaitAQILazyUp)
+			if mcfg.AQI.LazyNotify.Up != nil {
+				currentVal = *mcfg.AQI.LazyNotify.Up
+			}
+		} else {
+			b.setState(chatID, stateAwaitAQILazyDown)
+			if mcfg.AQI.LazyNotify.Down != nil {
+				currentVal = *mcfg.AQI.LazyNotify.Down
+			}
+		}
+	}
+
+	title := b.T(chatID, "msgLazyPromptTitle", map[string]interface{}{
+		"dir": direction,
+	})
+
+	text := b.T(chatID, "msgLazyPrompt", map[string]interface{}{
+		"title": title,
+		"curr":  currentVal,
+	})
+
+	b.sendWithKeyboard(chatID, text, b.cancelLazyKeyboard(chatID))
+}
+
+func (b *Bot) handleLazyUpdate(chatID int64, metric, direction, text string) {
+	var val int
+	_, err := fmt.Sscanf(text, "%d", &val)
+	if err != nil {
+		b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorNumber"), nil)
+		return
+	}
+	if val < 0 {
+		b.sendWithKeyboard(chatID, b.T(chatID, "msgErrorPositive"), nil)
+		return
+	}
+
+	mcfg := b.GetUserSettings(chatID)
+	var old int
+
+	if metric == "aqi" {
+		if direction == "up" {
+			if mcfg.AQI.LazyNotify.Up != nil {
+				old = *mcfg.AQI.LazyNotify.Up
+			}
+			mcfg.AQI.LazyNotify.Up = &val
+		} else {
+			if mcfg.AQI.LazyNotify.Down != nil {
+				old = *mcfg.AQI.LazyNotify.Down
+			}
+			mcfg.AQI.LazyNotify.Down = &val
+		}
+	}
+
+	b.store.UpdateSettings(chatID, mcfg)
+	b.setState(chatID, stateIdle)
+
+	title := b.T(chatID, "msgLazyPromptTitle", map[string]interface{}{
+		"dir": direction,
+	})
+
+	res := b.T(chatID, "msgLazyUpd", map[string]interface{}{
+		"title": title,
+		"dir":   direction,
+		"old":   old,
+		"new":   val,
+	})
+	b.clearLastPrompt(chatID)
+	b.sendWithKeyboard(chatID, res, b.lazySettingsKeyboard(chatID))
 }

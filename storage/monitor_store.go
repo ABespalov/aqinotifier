@@ -78,7 +78,7 @@ func (s *Storage) syncMonitorJSON() {
 	defer s.monitorFileMu.Unlock()
 
 	s.mu.RLock()
-	jsonFile := s.cfg.Database.JsonFile
+	jsonFile := s.cfg.Database.File.Json
 	db := s.db
 	s.mu.RUnlock()
 
@@ -157,7 +157,7 @@ func (s *Storage) LoadMeasurements(limit int) map[string][]monitor.Measurement {
 
 	s.mu.RLock()
 	hasJSON := s.cfg.Database.HasUse("json")
-	jsonFile := s.cfg.Database.JsonFile
+	jsonFile := s.cfg.Database.File.Json
 	db := s.db
 	dbConnected := s.dbConnected
 	s.mu.RUnlock()
@@ -267,7 +267,7 @@ func (s *Storage) SaveMeasurement(m monitor.Measurement) {
 	hasJSON := s.cfg.Database.HasUse("json")
 	dbConnected := s.dbConnected && s.db != nil
 	db := s.db
-	jsonFile := s.cfg.Database.JsonFile
+	jsonFile := s.cfg.Database.File.Json
 	maxValues := s.cfg.Database.MaxValues
 	s.mu.RUnlock()
 
@@ -351,7 +351,7 @@ func (s *Storage) GetMeasurementsByDuration(deviceID string, duration time.Durat
 	hasJSON := s.cfg.Database.HasUse("json")
 	dbConnected := s.dbConnected && s.db != nil
 	db := s.db
-	jsonFile := s.cfg.Database.JsonFile
+	jsonFile := s.cfg.Database.File.Json
 	s.mu.RUnlock()
 
 	since := time.Now().UTC().Add(-duration)

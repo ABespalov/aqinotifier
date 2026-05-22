@@ -71,6 +71,17 @@ type Notifier interface {
 	GetDeviceType(deviceID string) string
 }
 
+type aqiLazyKey struct {
+	ChatID   int64
+	DeviceID string
+}
+
+type aqiLazyState struct {
+	ConfirmedLevel sensor.AQILevel
+	UpCounter      int
+	DownCounter    int
+}
+
 type MonitorService struct {
 	cfg        *config.Config
 	history    map[string][]Measurement
@@ -78,6 +89,7 @@ type MonitorService struct {
 	notifier   Notifier
 	store      MeasurementStore
 	evaluators map[string]*DeviceEvaluator
+	lazyStates map[aqiLazyKey]*aqiLazyState
 }
 
 // SetNotifier attaches a Notifier that will receive warning callbacks.
@@ -137,6 +149,7 @@ func NewMonitorService(cfg *config.Config, store MeasurementStore) *MonitorServi
 		history:    hist,
 		evaluators: evaluatorsMap,
 		store:      store,
+		lazyStates: make(map[aqiLazyKey]*aqiLazyState),
 	}
 
 	for id := range s.history {
@@ -277,13 +290,13 @@ func (s *MonitorService) notify(m *Measurement) {
 		}
 
 		// Ensure Level2 >= Level1
-		pm10Level1 := mcfg.PM10L1
-		pm10Level2 := mcfg.PM10L2
+		pm10Level1 := mcfg.PM10.Level1
+		pm10Level2 := mcfg.PM10.Level2
 		if pm10Level2 < pm10Level1 {
 			pm10Level2 = pm10Level1
 		}
-		pm25Level1 := mcfg.PM25L1
-		pm25Level2 := mcfg.PM25L2
+		pm25Level1 := mcfg.PM25.Level1
+		pm25Level2 := mcfg.PM25.Level2
 		if pm25Level2 < pm25Level1 {
 			pm25Level2 = pm25Level1
 		}
@@ -294,12 +307,12 @@ func (s *MonitorService) notify(m *Measurement) {
 		prevZ25 := getZone(m.PM25Prev, pm25Level1, pm25Level2)
 
 		notifications := make(map[string]bool)
-		for _, n := range mcfg.Notifications {
+		for _, n := range config.FlattenNotifications(mcfg.Notifications) {
 			notifications[n] = true
 		}
 
 		warnings := make(map[string]bool)
-		for _, w := range mcfg.Warnings {
+		for _, w := range config.FlattenNotifications(mcfg.Warnings) {
 			warnings[w] = true
 		}
 
@@ -395,7 +408,7 @@ func (s *MonitorService) notify(m *Measurement) {
 		var level sensor.AQILevel
 		var prevLevel sensor.AQILevel
 
-		if mcfg.AQIStandard == "US" {
+		if mcfg.AQI.Standard == "US" {
 			aqi, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
 			_, prevLevel = sensor.CalculateUS_AQI(m.PM25Prev, m.PM10Prev)
 		} else {
@@ -403,9 +416,92 @@ func (s *MonitorService) notify(m *Measurement) {
 			_, prevLevel = sensor.CalculateEU_AQI(m.PM25Prev, m.PM10Prev)
 		}
 
-		if level != prevLevel {
+		delayUp := 0
+		if mcfg.AQI.LazyNotify.Up != nil {
+			delayUp = *mcfg.AQI.LazyNotify.Up
+		}
+		delayDown := 0
+		if mcfg.AQI.LazyNotify.Down != nil {
+			delayDown = *mcfg.AQI.LazyNotify.Down
+		}
+
+		s.mu.Lock()
+		stateKey := aqiLazyKey{ChatID: chatID, DeviceID: m.DeviceID}
+		state, exists := s.lazyStates[stateKey]
+		if !exists {
+			state = &aqiLazyState{}
+			s.lazyStates[stateKey] = state
+		}
+
+		shouldNotify := false
+		var targetLevel sensor.AQILevel
+
+		if state.ConfirmedLevel == 0 {
+			state.ConfirmedLevel = level
+			state.UpCounter = 0
+			state.DownCounter = 0
+		} else if delayUp == 0 && delayDown == 0 {
+			if level != state.ConfirmedLevel {
+				state.ConfirmedLevel = level
+				shouldNotify = true
+				targetLevel = level
+			}
+		} else {
+			// Update counters based on trend
+			if prevLevel > level {
+				// AQI decreased
+				state.UpCounter = -1
+				if state.DownCounter >= 0 {
+					state.DownCounter++
+				} else if level < state.ConfirmedLevel {
+					state.DownCounter = 0
+				}
+			} else if prevLevel < level {
+				// AQI increased
+				state.DownCounter = -1
+				if state.UpCounter >= 0 {
+					state.UpCounter++
+				} else if level > state.ConfirmedLevel {
+					state.UpCounter = 0
+				}
+			} else {
+				// AQI unchanged
+				if state.UpCounter >= 0 {
+					state.UpCounter++
+				} else if level > state.ConfirmedLevel {
+					state.UpCounter = 0
+				}
+
+				if state.DownCounter >= 0 {
+					state.DownCounter++
+				} else if level < state.ConfirmedLevel {
+					state.DownCounter = 0
+				}
+			}
+
+			// Check UP notification
+			if delayUp > 0 && state.UpCounter >= delayUp && level > state.ConfirmedLevel {
+				state.ConfirmedLevel = level
+				state.UpCounter = 0
+				state.DownCounter = 0
+				shouldNotify = true
+				targetLevel = level
+			}
+
+			// Check DOWN notification
+			if delayDown > 0 && state.DownCounter >= delayDown && level < state.ConfirmedLevel {
+				state.ConfirmedLevel = level
+				state.DownCounter = 0
+				state.UpCounter = 0
+				shouldNotify = true
+				targetLevel = level
+			}
+		}
+		s.mu.Unlock()
+
+		if shouldNotify {
 			var aqiID string
-			switch level {
+			switch targetLevel {
 			case sensor.LevelGood:
 				aqiID = "aqi_l1"
 			case sensor.LevelModerate:
@@ -423,7 +519,7 @@ func (s *MonitorService) notify(m *Measurement) {
 			}
 
 			if aqiID != "" {
-				if level == sensor.LevelGood {
+				if targetLevel == sensor.LevelGood {
 					addClear(aqiID, aqi)
 				} else {
 					addEvent(aqiID, aqi)
@@ -432,8 +528,8 @@ func (s *MonitorService) notify(m *Measurement) {
 		}
 
 		// Silent Notifications (Growth/Drop within zones)
-		pm10DiffExceeded := m.PM10Diff != nil && math.Abs(*m.PM10Diff) >= mcfg.PM10Diff
-		pm25DiffExceeded := m.PM25Diff != nil && math.Abs(*m.PM25Diff) >= mcfg.PM25Diff
+		pm10DiffExceeded := m.PM10Diff != nil && math.Abs(*m.PM10Diff) >= mcfg.PM10.Diff
+		pm25DiffExceeded := m.PM25Diff != nil && math.Abs(*m.PM25Diff) >= mcfg.PM25.Diff
 
 		// PM10 Growth
 		if pm10DiffExceeded && p10d > 0 {

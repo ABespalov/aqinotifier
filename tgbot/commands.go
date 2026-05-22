@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 
+
+	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
@@ -193,7 +195,7 @@ func (b *Bot) cmdLangMenu(chatID int64, editMsgID ...int) {
 
 func (b *Bot) cmdAqiMenu(chatID int64, editMsgID ...int) {
 	mcfg := b.GetUserSettings(chatID)
-	stdTag := strings.ToUpper(mcfg.AQIStandard)
+	stdTag := strings.ToUpper(mcfg.AQI.Standard)
 	std, ok := sensor.Standards[stdTag]
 
 	var details string
@@ -248,8 +250,8 @@ func (b *Bot) cmdThresholdsMenu(chatID int64) {
 	b.clearLastPrompt(chatID)
 	mcfg := b.GetUserSettings(chatID)
 	text := b.T(chatID, msgThresholdsMenu, map[string]interface{}{
-		"l1_25": mcfg.PM25L1, "l2_25": mcfg.PM25L2, "dyn25": mcfg.PM25Diff,
-		"l1_10": mcfg.PM10L1, "l2_10": mcfg.PM10L2, "dyn10": mcfg.PM10Diff,
+		"l1_25": mcfg.PM25.Level1, "l2_25": mcfg.PM25.Level2, "dyn25": mcfg.PM25.Diff,
+		"l1_10": mcfg.PM10.Level1, "l2_10": mcfg.PM10.Level2, "dyn10": mcfg.PM10.Diff,
 		"labelPm25": b.T(chatID, "labelPm25"), "labelPm10": b.T(chatID, "labelPm10"),
 		"labelL1": b.T(chatID, "labelL1"), "labelL2": b.T(chatID, "labelL2"),
 		"labelDynamics": b.T(chatID, "labelDynamics"),
@@ -264,18 +266,18 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 		sTags = suggestedTags[0]
 	}
 	mcfg := b.GetUserSettings(chatID)
-	std := strings.ToUpper(mcfg.AQIStandard)
+	std := strings.ToUpper(mcfg.AQI.Standard)
 	if _, ok := sensor.Standards[std]; !ok {
 		return
 	}
 
 	text := b.T(chatID, msgAqiCycleMenu, map[string]interface{}{
-		"l1_25": mcfg.PM25L1, "l2_25": mcfg.PM25L2,
-		"l1_10": mcfg.PM10L1, "l2_10": mcfg.PM10L2,
+		"l1_25": mcfg.PM25.Level1, "l2_25": mcfg.PM25.Level2,
+		"l1_10": mcfg.PM10.Level1, "l2_10": mcfg.PM10.Level2,
 	})
 
 	getIcon := func(pmType string, val float64) (string, string, string) {
-		activeTag := strings.ToUpper(mcfg.AQIStandard)
+		activeTag := strings.ToUpper(mcfg.AQI.Standard)
 
 		// Check active standard first
 		if stdData, ok := sensor.Standards[activeTag]; ok {
@@ -346,12 +348,12 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 
 	kb := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
-			btn("PM25", "level1", b.I(kIcoPmLevel1), mcfg.PM25L1),
-			btn("PM10", "level1", b.I(kIcoPmLevel1), mcfg.PM10L1),
+			btn("PM25", "level1", b.I(kIcoPmLevel1), mcfg.PM25.Level1),
+			btn("PM10", "level1", b.I(kIcoPmLevel1), mcfg.PM10.Level1),
 		),
 		tu.InlineKeyboardRow(
-			btn("PM25", "level2", b.I(kIcoPmLevel2), mcfg.PM25L2),
-			btn("PM10", "level2", b.I(kIcoPmLevel2), mcfg.PM10L2),
+			btn("PM25", "level2", b.I(kIcoPmLevel2), mcfg.PM25.Level2),
+			btn("PM10", "level2", b.I(kIcoPmLevel2), mcfg.PM10.Level2),
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(b.T(chatID, btnAqiBackToThresholds)).WithCallbackData(cmdThresholdsMenu),
@@ -447,7 +449,7 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 	}
 
 	log.Debug().Int64("chat_id", chatID).Msg("tgbot: drawing charts start")
-	buffers, err := generateCharts(b, chatID, history, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize, chartSmoothingHistory)
+	buffers, err := generateCharts(b, chatID, history, b.cfg.Chart.Width, b.cfg.Chart.Height, b.cfg.Chart.FontSize, chartSmoothingHistory)
 	if err != nil {
 		log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to generate charts")
 		b.sendWithKeyboard(chatID, b.T(chatID, msgHistoryError), b.mainKeyboard(chatID))
@@ -496,21 +498,21 @@ func (b *Bot) cmdDeviceHistory(chatID int64, deviceID string) {
 func (b *Bot) cmdResetConfirm(chatID int64) {
 	b.clearLastPrompt(chatID)
 	d := b.defaults
-	std := strings.ToLower(d.AQIStandard)
+	std := strings.ToLower(d.AQI.Standard)
 	stdLabel := b.T(chatID, "standard"+strings.Title(std))
 
-	unitT := b.T(chatID, "txtUnit"+strings.Title(strings.ToLower(b.cfg.DefaultUnitTemp)))
-	unitP := b.T(chatID, "txtUnit"+strings.Title(strings.ToLower(b.cfg.DefaultUnitPress)))
+	unitT := b.T(chatID, "txtUnit"+strings.Title(strings.ToLower(b.cfg.Default.Unit.Temp)))
+	unitP := b.T(chatID, "txtUnit"+strings.Title(strings.ToLower(b.cfg.Default.Unit.Press)))
 
 	var alertsSB strings.Builder
 	allAlerts := b.getAllAlerts(chatID, "")
 
 	defNotifications := make(map[string]bool)
-	for _, n := range d.Notifications {
+	for _, n := range config.FlattenNotifications(d.Notifications) {
 		defNotifications[n] = true
 	}
 	defWarnings := make(map[string]bool)
-	for _, w := range d.Warnings {
+	for _, w := range config.FlattenNotifications(d.Warnings) {
 		defWarnings[w] = true
 	}
 
@@ -551,8 +553,8 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 	}
 
 	text := b.T(chatID, "msgResetConfirm", map[string]interface{}{
-		"l1_25": d.PM25L1, "l2_25": d.PM25L2, "dyn25": d.PM25Diff,
-		"l1_10": d.PM10L1, "l2_10": d.PM10L2, "dyn10": d.PM10Diff,
+		"l1_25": d.PM25.Level1, "l2_25": d.PM25.Level2, "dyn25": d.PM25.Diff,
+		"l1_10": d.PM10.Level1, "l2_10": d.PM10.Level2, "dyn10": d.PM10.Diff,
 		"stdName": stdLabel, "aqiStandardFlag": b.I("icoFlag" + strings.ToUpper(std)),
 		"unitT": unitT, "unitP": unitP,
 		"alertsList": alertsSB.String(),
@@ -566,9 +568,15 @@ func (b *Bot) cmdResetExecute(chatID int64) {
 
 	mcfg := b.store.GetSettings(chatID, b.defaults)
 	text := b.T(chatID, msgResetExecution, map[string]interface{}{
-		"l1_25": mcfg.PM25L1, "l2_25": mcfg.PM25L2, "dyn25": mcfg.PM25Diff,
-		"l1_10": mcfg.PM10L1, "l2_10": mcfg.PM10L2, "dyn10": mcfg.PM10Diff,
+		"l1_25": mcfg.PM25.Level1, "l2_25": mcfg.PM25.Level2, "dyn25": mcfg.PM25.Diff,
+		"l1_10": mcfg.PM10.Level1, "l2_10": mcfg.PM10.Level2, "dyn10": mcfg.PM10.Diff,
 	})
 
 	b.sendWithKeyboard(chatID, text, b.settingsKeyboard(chatID))
+}
+
+func (b *Bot) cmdLazyMenu(chatID int64) {
+	b.clearLastPrompt(chatID)
+	text := b.T(chatID, "msgLazyMenu")
+	b.sendWithKeyboard(chatID, text, b.lazySettingsKeyboard(chatID))
 }

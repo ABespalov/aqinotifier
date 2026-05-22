@@ -12,6 +12,7 @@ import (
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
 
+	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/rs/zerolog/log"
 )
@@ -55,11 +56,14 @@ func (b *Bot) settingsKeyboard(chatID int64) telego.ReplyMarkup {
 			tu.InlineKeyboardButton(b.T(chatID, btnThresholds)).WithCallbackData(cmdThresholdsMenu),
 		),
 		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, btnLazySettings)).WithCallbackData("menu_lazy"),
 			tu.InlineKeyboardButton(b.T(chatID, btnList)).WithCallbackData(cmdList),
-			tu.InlineKeyboardButton(b.T(chatID, btnResetDefaults)).WithCallbackData(cmdResetSettings),
 		),
 		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, btnResetDefaults)).WithCallbackData(cmdResetSettings),
 			tu.InlineKeyboardButton(b.T(chatID, btnLang)).WithCallbackData(cmdLang),
+		),
+		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(b.T(chatID, btnMainMenu)).WithCallbackData(cmdHelp),
 		),
 	)
@@ -128,7 +132,7 @@ func (b *Bot) subscriptionKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 
 func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 	mcfg := b.GetUserSettings(chatID)
-	std := strings.ToUpper(mcfg.AQIStandard)
+	std := strings.ToUpper(mcfg.AQI.Standard)
 	stdData, ok := sensor.Standards[std]
 	if !ok {
 		// Fallback if standard not found
@@ -143,11 +147,11 @@ func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 	}
 
 	activeNotifications := make(map[string]bool)
-	for _, n := range mcfg.Notifications {
+	for _, n := range config.FlattenNotifications(mcfg.Notifications) {
 		activeNotifications[n] = true
 	}
 	loudWarnings := make(map[string]bool)
-	for _, w := range mcfg.Warnings {
+	for _, w := range config.FlattenNotifications(mcfg.Warnings) {
 		loudWarnings[w] = true
 	}
 
@@ -209,12 +213,12 @@ func (b *Bot) notificationSettingsKeyboard(chatID int64, silent bool) *telego.In
 	allAlerts := b.getAllAlerts(chatID, filter)
 
 	activeNotifications := make(map[string]bool)
-	for _, n := range mcfg.Notifications {
+	for _, n := range config.FlattenNotifications(mcfg.Notifications) {
 		activeNotifications[n] = true
 	}
 
 	activeWarnings := make(map[string]bool)
-	for _, w := range mcfg.Warnings {
+	for _, w := range config.FlattenNotifications(mcfg.Warnings) {
 		activeWarnings[w] = true
 	}
 
@@ -304,6 +308,36 @@ func (b *Bot) cancelSubKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 	return tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(b.T(chatID, btnCancel)).WithCallbackData(cmdCancelSub),
+		),
+	)
+}
+
+func (b *Bot) lazySettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
+	mcfg := b.GetUserSettings(chatID)
+	aqiUpVal := 2
+	if mcfg.AQI.LazyNotify.Up != nil {
+		aqiUpVal = *mcfg.AQI.LazyNotify.Up
+	}
+	aqiDownVal := 3
+	if mcfg.AQI.LazyNotify.Down != nil {
+		aqiDownVal = *mcfg.AQI.LazyNotify.Down
+	}
+
+	return tu.InlineKeyboard(
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, "btnAqiLazyUp", map[string]interface{}{"val": aqiUpVal})).WithCallbackData("lazy_set:aqi:up"),
+			tu.InlineKeyboardButton(b.T(chatID, "btnAqiLazyDown", map[string]interface{}{"val": aqiDownVal})).WithCallbackData("lazy_set:aqi:down"),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),
+		),
+	)
+}
+
+func (b *Bot) cancelLazyKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
+	return tu.InlineKeyboard(
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, btnCancel)).WithCallbackData("cancel_lazy"),
 		),
 	)
 }

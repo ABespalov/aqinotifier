@@ -23,7 +23,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const BotVersion = "0.14.1"
+const BotVersion = "0.16.1a"
 
 func main() {
 	execPath, err := os.Executable()
@@ -75,10 +75,10 @@ func main() {
 			getWatchList := func(c *config.Config) []string {
 				return []string{
 					configName,
-					c.Server.CertFile,
-					c.Server.KeyFile,
-					c.TgBot.TokenFile,
-					c.Database.PgsqlFile,
+					c.Server.File.Cert,
+					c.Server.File.Key,
+					c.TgBot.File.Token,
+					c.Database.File.Pgsql,
 					filepath.Join("res", "ru.json"),
 					filepath.Join("res", "en.json"),
 					filepath.Join("res", "ico.json"),
@@ -132,8 +132,8 @@ func main() {
 					oldNode := cfg.Server.Node()
 					oldProto := cfg.Server.Protocol
 					oldUrl := cfg.Server.Url
-					oldCert := cfg.Server.CertFile
-					oldKey := cfg.Server.KeyFile
+					oldCert := cfg.Server.File.Cert
+					oldKey := cfg.Server.File.Key
 					oldTgEnabled := cfg.TgBot.Enabled
 					oldTgToken := cfg.TgBot.Token
 					oldLogLevel := cfg.Log.Level
@@ -160,7 +160,7 @@ func main() {
 						}
 					}
 
-					if cfg.Server.Node() != oldNode || cfg.Server.Protocol != oldProto || cfg.Server.Url != oldUrl || cfg.Server.CertFile != oldCert || cfg.Server.KeyFile != oldKey {
+					if cfg.Server.Node() != oldNode || cfg.Server.Protocol != oldProto || cfg.Server.Url != oldUrl || cfg.Server.File.Cert != oldCert || cfg.Server.File.Key != oldKey {
 						select {
 						case restartServer <- struct{}{}:
 						default:
@@ -202,7 +202,7 @@ func main() {
 
 						ms.SetNotifier(bot)
 						go bot.Run()
-						log.Info().Str("json_file", cfg.TgBot.JsonFile).Msg("tgbot: started")
+						log.Info().Str("json_file", cfg.TgBot.File.Json).Msg("tgbot: started")
 					}
 				}
 			} else {
@@ -231,7 +231,7 @@ func main() {
 		go func() {
 			var err error
 			if cfg.Server.Protocol == "https" {
-				err = srv.ListenAndServeTLS(cfg.Server.CertFile, cfg.Server.KeyFile)
+				err = srv.ListenAndServeTLS(cfg.Server.File.Cert, cfg.Server.File.Key)
 			} else {
 				err = srv.ListenAndServe()
 			}

@@ -24,7 +24,7 @@ func (s *Storage) syncTgBotJSON() {
 	defer s.tgbotFileMu.Unlock()
 
 	s.mu.RLock()
-	jsonFile := s.cfg.TgBot.JsonFile
+	jsonFile := s.cfg.TgBot.File.Json
 	db := s.db
 	s.mu.RUnlock()
 
@@ -98,7 +98,7 @@ func (s *Storage) LoadSubscriptions() []*tgbot.Subscription {
 
 	s.mu.RLock()
 	hasJSON := s.cfg.Database.HasUse("json")
-	jsonFile := s.cfg.TgBot.JsonFile
+	jsonFile := s.cfg.TgBot.File.Json
 	db := s.db
 	dbConnected := s.dbConnected
 	s.mu.RUnlock()
@@ -157,7 +157,7 @@ func (s *Storage) SaveSubscription(sub *tgbot.Subscription, allSubs []*tgbot.Sub
 	hasJSON := s.cfg.Database.HasUse("json")
 	dbConnected := s.dbConnected && s.db != nil
 	db := s.db
-	jsonFile := s.cfg.TgBot.JsonFile
+	jsonFile := s.cfg.TgBot.File.Json
 	s.mu.RUnlock()
 
 	saveJSON := func() {

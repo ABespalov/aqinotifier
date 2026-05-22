@@ -5,6 +5,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,13 +17,15 @@ import (
 // Server holds HTTP server binding settings and the URL path used by the
 // application to receive POST requests from sensors.
 type Server struct {
-	Host     string        `yaml:"host"`
-	Port     int           `yaml:"port"`
-	Url      string        `yaml:"url"`
-	Protocol string        `yaml:"protocol"`
-	CertFile string        `yaml:"cert_file"`
-	KeyFile  string        `yaml:"key_file"`
-	Timeout  ServerTimeout `yaml:"timeout"`
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Url      string `yaml:"url"`
+	Protocol string `yaml:"protocol"`
+	File     struct {
+		Cert string `yaml:"cert"`
+		Key  string `yaml:"key"`
+	} `yaml:"file"`
+	Timeout ServerTimeout `yaml:"timeout"`
 }
 
 // ServerTimeout groups timeout settings (in seconds) used by the HTTP server.
@@ -77,8 +80,13 @@ func NewServerConfig() *Server {
 		Port:     28288,
 		Url:      "/aqi",
 		Protocol: "https",
-		CertFile: "localhost.pem",
-		KeyFile:  "localhost-key.pem",
+		File: struct {
+			Cert string `yaml:"cert"`
+			Key  string `yaml:"key"`
+		}{
+			Cert: "localhost.pem",
+			Key:  "localhost-key.pem",
+		},
 		Timeout: ServerTimeout{
 			Server: 30,
 			Read:   15,
@@ -109,19 +117,21 @@ func (s Server) String() string {
 // Database contains settings required to open a connection to the SQL
 // database and tune the connection pool.
 type Database struct {
-	Use             []string `yaml:"use"`
-	JsonFile        string   `yaml:"json_file"`
-	PgsqlFile       string   `yaml:"pgsql_file"`
-	MaxValues       int      `yaml:"max_values"`
-	Host            string   `yaml:"host"`
-	Port            int      `yaml:"port"`
-	Db              string   `yaml:"db"`
-	User            string   `yaml:"user"`
-	Password        string   `yaml:"password"`
-	SslMode         string   `yaml:"sslmode"`
-	MaxOpenConns    int      `yaml:"max_open_conns"`
-	MaxIdleConns    int      `yaml:"max_idle_conns"`
-	ConnMaxLifetime int      `yaml:"conn_max_lifetime"`
+	Use  []string `yaml:"use"`
+	File struct {
+		Json  string `yaml:"json"`
+		Pgsql string `yaml:"pgsql"`
+	} `yaml:"file"`
+	MaxValues       int    `yaml:"max_values"`
+	Host            string `yaml:"host"`
+	Port            int    `yaml:"port"`
+	Db              string `yaml:"db"`
+	User            string `yaml:"user"`
+	Password        string `yaml:"password"`
+	SslMode         string `yaml:"sslmode"`
+	MaxOpenConns    int    `yaml:"max_open_conns"`
+	MaxIdleConns    int    `yaml:"max_idle_conns"`
+	ConnMaxLifetime int    `yaml:"conn_max_lifetime"`
 }
 
 // HasUse returns true if the specified mode is present in Use configuration.
@@ -150,9 +160,14 @@ func (d Database) DBProvider() string {
 func NewDatabaseConfig() *Database {
 	app := getAppName()
 	return &Database{
-		Use:             []string{"postgres", "json"},
-		JsonFile:        app + ".data.json",
-		PgsqlFile:       app + ".pgsql",
+		Use: []string{"postgres", "json"},
+		File: struct {
+			Json  string `yaml:"json"`
+			Pgsql string `yaml:"pgsql"`
+		}{
+			Json:  app + ".data.json",
+			Pgsql: app + ".pgsql",
+		},
 		MaxValues:       1500,
 		Host:            "localhost",
 		Port:            5432,
@@ -196,69 +211,440 @@ func NewSystemConfig() *System {
 	}
 }
 
+type MonitorLevelGroup struct {
+	Level1     float64 `yaml:"level1" json:"level1"`
+	Level2     float64 `yaml:"level2" json:"level2"`
+	Diff       float64 `yaml:"diff" json:"diff"`
+	LazyNotify struct {
+		Up   *int `yaml:"up" json:"up"`
+		Down *int `yaml:"down" json:"down"`
+	} `yaml:"lazy_notify" json:"lazy_notify"`
+}
+
+type MonitorAQIGroup struct {
+	Standard   string `yaml:"standard" json:"standard"`
+	LazyNotify struct {
+		Up   *int `yaml:"up" json:"up"`
+		Down *int `yaml:"down" json:"down"`
+	} `yaml:"lazy_notify" json:"lazy_notify"`
+}
+
+// NotificationMap maps a category to a list of its configurations.
+// During YAML unmarshalling, it converts nested level and direction blocks to items with "_up" and "_down" suffixes.
+type NotificationMap map[string][]string
+
+func mapLevelDirToCanonical(lvl, dir string) string {
+	lvl = strings.ToLower(strings.TrimSpace(lvl))
+	dir = strings.ToLower(strings.TrimSpace(dir))
+
+	// Normalize level prefix
+	if lvl == "l1" {
+		lvl = "level1"
+	} else if lvl == "l2" {
+		lvl = "level2"
+	} else if lvl == "l3" {
+		lvl = "level3"
+	}
+
+	// Normalize direction
+	if dir == "u" {
+		dir = "up"
+	} else if dir == "d" {
+		dir = "down"
+	}
+
+	// Boundary-based transition mapping:
+	// - level2 up (entering level 2 from below) -> level2_up (l2u)
+	// - level2 down (leaving level 2 to level 1) -> level1_down (l1d)
+	// - level3 up (entering level 3 from below) -> level3_up (l3u)
+	// - level3 down (leaving level 3 to level 2) -> level2_down (l2d)
+	// - level1 down (legacy fallback) -> level1_down (l1d)
+	if lvl == "level2" && dir == "up" {
+		return "level2_up"
+	} else if lvl == "level2" && dir == "down" {
+		return "level1_down"
+	} else if lvl == "level3" && dir == "up" {
+		return "level3_up"
+	} else if lvl == "level3" && dir == "down" {
+		return "level2_down"
+	} else if lvl == "level1" && dir == "down" {
+		return "level1_down"
+	}
+
+	return fmt.Sprintf("%s_%s", lvl, dir)
+}
+
+func appendUnique(slice []string, val string) []string {
+	for _, v := range slice {
+		if v == val {
+			return slice
+		}
+	}
+	return append(slice, val)
+}
+
+func (n *NotificationMap) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var raw map[string]interface{}
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+	*n = make(NotificationMap)
+	for cat, val := range raw {
+		switch v := val.(type) {
+		case []interface{}:
+			var items []string
+			for _, itemRaw := range v {
+				switch item := itemRaw.(type) {
+				case string:
+					items = appendUnique(items, item)
+				case map[interface{}]interface{}:
+					for lvlRaw, dirsRaw := range item {
+						lvlStr, okLvl := lvlRaw.(string)
+						if !okLvl {
+							continue
+						}
+						dirsSlice, okDirs := dirsRaw.([]interface{})
+						if !okDirs {
+							continue
+						}
+						for _, dirRaw := range dirsSlice {
+							dirStr, okDir := dirRaw.(string)
+							if !okDir {
+								continue
+							}
+							canonical := mapLevelDirToCanonical(lvlStr, dirStr)
+							items = appendUnique(items, canonical)
+						}
+					}
+				case map[string]interface{}:
+					for lvlStr, dirsRaw := range item {
+						dirsSlice, okDirs := dirsRaw.([]interface{})
+						if !okDirs {
+							continue
+						}
+						for _, dirRaw := range dirsSlice {
+							dirStr, okDir := dirRaw.(string)
+							if !okDir {
+								continue
+							}
+							canonical := mapLevelDirToCanonical(lvlStr, dirStr)
+							items = appendUnique(items, canonical)
+						}
+					}
+				}
+			}
+			(*n)[cat] = items
+		}
+	}
+	return nil
+}
+
 type Monitor struct {
-	PM10L1        float64                      `yaml:"pm10_l1" json:"pm10_l1"`
-	PM25L1        float64                      `yaml:"pm25_l1" json:"pm25_l1"`
-	PM10L2        float64                      `yaml:"pm10_l2" json:"pm10_l2"`
-	PM25L2        float64                      `yaml:"pm25_l2" json:"pm25_l2"`
-	PM10Diff      float64                      `yaml:"pm10_diff" json:"pm10_diff"`
-	PM25Diff      float64                      `yaml:"pm25_diff" json:"pm25_diff"`
-	Notifications []string                     `yaml:"notifications" json:"notifications"`
-	Warnings      []string                     `yaml:"warnings" json:"warnings"`
-	AQIStandard   string                       `yaml:"aqi_standard" json:"aqi_standard"`
+	PM10          MonitorLevelGroup            `yaml:"pm10" json:"pm10"`
+	PM25          MonitorLevelGroup            `yaml:"pm25" json:"pm25"`
+	AQI           MonitorAQIGroup              `yaml:"aqi" json:"aqi"`
+	Notifications NotificationMap              `yaml:"notifications" json:"notifications"`
+	Warnings      NotificationMap              `yaml:"warnings" json:"warnings"`
 	DeviceNames   map[string]string            `yaml:"device_names" json:"device_names"`
 	Corrections   map[string]map[string]string `yaml:"corrections" json:"corrections"`
 }
 
 // NewMonitorConfig returns a Monitor pre-populated with default values
 func NewMonitorConfig() *Monitor {
+	lazyUp := 2
+	lazyDown := 3
 	return &Monitor{
-		PM10L1:        54.0,
-		PM25L1:        9.0,
-		PM10L2:        154.0,
-		PM25L2:        35.0,
-		PM10Diff:      66.0,
-		PM25Diff:      50.0,
-		Notifications: []string{"aqi_l1", "aqi_l2", "aqi_l3", "aqi_l4", "aqi_l5", "aqi_l6", "aqi_l7", "vals_l3u", "vals_l1d"},
-		Warnings:      []string{"aqi_l1", "aqi_l2", "aqi_l3", "aqi_l4", "aqi_l5", "aqi_l6", "aqi_l7", "val25_l2u", "val25_l3u", "val25_l2d", "val25_l1d", "val10_l2u", "val10_l3u", "val10_l2d", "val10_l1d", "vals_l2u", "vals_l3u", "vals_l2d", "vals_l1d"},
-		AQIStandard:   "EU",
-		DeviceNames:   make(map[string]string),
-		Corrections:   make(map[string]map[string]string),
+		PM10: MonitorLevelGroup{
+			Level1: 54.0,
+			Level2: 154.0,
+			Diff:   66.0,
+			LazyNotify: struct {
+				Up   *int `yaml:"up" json:"up"`
+				Down *int `yaml:"down" json:"down"`
+			}{Up: &lazyUp, Down: &lazyDown},
+		},
+		PM25: MonitorLevelGroup{
+			Level1: 9.0,
+			Level2: 35.0,
+			Diff:   50.0,
+			LazyNotify: struct {
+				Up   *int `yaml:"up" json:"up"`
+				Down *int `yaml:"down" json:"down"`
+			}{Up: &lazyUp, Down: &lazyDown},
+		},
+		AQI: MonitorAQIGroup{
+			Standard: "EU",
+			LazyNotify: struct {
+				Up   *int `yaml:"up" json:"up"`
+				Down *int `yaml:"down" json:"down"`
+			}{Up: &lazyUp, Down: &lazyDown},
+		},
+		Notifications: NotificationMap{
+			"aqi":  {"level1", "level2", "level3", "level4", "level5", "level6", "level7"},
+			"vals": {"level3_up", "level1_down"},
+		},
+		Warnings: NotificationMap{
+			"aqi":   {"level1", "level2", "level3", "level4", "level5", "level6", "level7"},
+			"val25": {"level2_up", "level3_up", "level2_down", "level1_down"},
+			"val10": {"level2_up", "level3_up", "level2_down", "level1_down"},
+			"vals":  {"level2_up", "level3_up", "level2_down", "level1_down"},
+		},
+		DeviceNames: make(map[string]string),
+		Corrections: make(map[string]map[string]string),
 	}
+}
+
+func normalizeNotificationItem(item string) string {
+	item = strings.ReplaceAll(item, "level", "l")
+	item = strings.ReplaceAll(item, "_up", "u")
+	item = strings.ReplaceAll(item, "up", "u")
+	item = strings.ReplaceAll(item, "_down", "d")
+	item = strings.ReplaceAll(item, "down", "d")
+
+	item = strings.ReplaceAll(item, "l", "level")
+	item = strings.ReplaceAll(item, "u", "_up")
+	item = strings.ReplaceAll(item, "d", "_down")
+	return item
 }
 
 // Validate ensures that the Monitor configuration is valid and populates defaults for missing values
 func (m *Monitor) Validate() {
 	defaults := NewMonitorConfig()
-	if m.PM10L1 == 0 {
-		m.PM10L1 = defaults.PM10L1
+	if m.PM10.Level1 == 0 {
+		m.PM10.Level1 = defaults.PM10.Level1
 	}
-	if m.PM25L1 == 0 {
-		m.PM25L1 = defaults.PM25L1
+	if m.PM25.Level1 == 0 {
+		m.PM25.Level1 = defaults.PM25.Level1
 	}
-	if m.PM10L2 == 0 {
-		m.PM10L2 = defaults.PM10L2
+	if m.PM10.Level2 == 0 {
+		m.PM10.Level2 = defaults.PM10.Level2
 	}
-	if m.PM25L2 == 0 {
-		m.PM25L2 = defaults.PM25L2
+	if m.PM25.Level2 == 0 {
+		m.PM25.Level2 = defaults.PM25.Level2
 	}
-	if m.PM10Diff == 0 {
-		m.PM10Diff = defaults.PM10Diff
+	if m.PM10.Diff == 0 {
+		m.PM10.Diff = defaults.PM10.Diff
 	}
-	if m.PM25Diff == 0 {
-		m.PM25Diff = defaults.PM25Diff
+	if m.PM25.Diff == 0 {
+		m.PM25.Diff = defaults.PM25.Diff
 	}
-	if m.AQIStandard == "" {
-		m.AQIStandard = defaults.AQIStandard
+	if m.AQI.Standard == "" {
+		m.AQI.Standard = defaults.AQI.Standard
 	}
 	if m.Notifications == nil {
 		m.Notifications = defaults.Notifications
+	} else {
+		for cat, items := range m.Notifications {
+			for i, item := range items {
+				m.Notifications[cat][i] = normalizeNotificationItem(item)
+			}
+		}
 	}
 	if m.Warnings == nil {
 		m.Warnings = defaults.Warnings
+	} else {
+		for cat, items := range m.Warnings {
+			for i, item := range items {
+				m.Warnings[cat][i] = normalizeNotificationItem(item)
+			}
+		}
 	}
 	if m.Corrections == nil {
 		m.Corrections = defaults.Corrections
+	}
+	if m.AQI.LazyNotify.Up == nil {
+		m.AQI.LazyNotify.Up = defaults.AQI.LazyNotify.Up
+	}
+	if m.AQI.LazyNotify.Down == nil {
+		m.AQI.LazyNotify.Down = defaults.AQI.LazyNotify.Down
+	}
+	if m.PM25.LazyNotify.Up == nil {
+		m.PM25.LazyNotify.Up = defaults.PM25.LazyNotify.Up
+	}
+	if m.PM25.LazyNotify.Down == nil {
+		m.PM25.LazyNotify.Down = defaults.PM25.LazyNotify.Down
+	}
+	if m.PM10.LazyNotify.Up == nil {
+		m.PM10.LazyNotify.Up = defaults.PM10.LazyNotify.Up
+	}
+	if m.PM10.LazyNotify.Down == nil {
+		m.PM10.LazyNotify.Down = defaults.PM10.LazyNotify.Down
+	}
+}
+
+// FlattenNotifications converts the nested map format back into the flat format expected by the app.
+func FlattenNotifications(n NotificationMap) []string {
+	var result []string
+	for cat, items := range n {
+		for _, item := range items {
+			item = strings.ReplaceAll(item, "level", "l")
+			item = strings.ReplaceAll(item, "_up", "u")
+			item = strings.ReplaceAll(item, "up", "u")
+			item = strings.ReplaceAll(item, "_down", "d")
+			item = strings.ReplaceAll(item, "down", "d")
+			result = append(result, fmt.Sprintf("%s_%s", cat, item))
+		}
+	}
+	return result
+}
+
+// unflattenNotifications converts old flat format into the new nested map format.
+func unflattenNotifications(flat []string) NotificationMap {
+	result := make(NotificationMap)
+	for _, f := range flat {
+		parts := strings.SplitN(f, "_", 2)
+		if len(parts) == 2 {
+			cat := parts[0]
+			item := parts[1]
+			result[cat] = append(result[cat], normalizeNotificationItem(item))
+		}
+	}
+	return result
+}
+
+// UnmarshalJSON migrates legacy flat JSON settings into the new nested Monitor structure.
+func (m *Monitor) UnmarshalJSON(data []byte) error {
+	type Alias Monitor
+	aux := &struct {
+		*Alias
+		PM10L1       float64         `json:"pm10_l1"`
+		PM25L1       float64         `json:"pm25_l1"`
+		PM10L2       float64         `json:"pm10_l2"`
+		PM25L2       float64         `json:"pm25_l2"`
+		PM10Diff     float64         `json:"pm10_diff"`
+		PM25Diff     float64         `json:"pm25_diff"`
+		AQIStandard  string          `json:"aqi_standard"`
+		AQILazyUp    *int            `json:"aqi_lazy_up"`
+		AQILazyDown  *int            `json:"aqi_lazy_down"`
+		PM25LazyUp   *int            `json:"pm25_lazy_up"`
+		PM25LazyDown *int            `json:"pm25_lazy_down"`
+		PM10LazyUp   *int            `json:"pm10_lazy_up"`
+		PM10LazyDown *int            `json:"pm10_lazy_down"`
+		RawNotif     json.RawMessage `json:"notifications"`
+		RawWarn      json.RawMessage `json:"warnings"`
+	}{
+		Alias: (*Alias)(m),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	if m.PM10.Level1 == 0 && aux.PM10L1 != 0 {
+		m.PM10.Level1 = aux.PM10L1
+	}
+	if m.PM25.Level1 == 0 && aux.PM25L1 != 0 {
+		m.PM25.Level1 = aux.PM25L1
+	}
+	if m.PM10.Level2 == 0 && aux.PM10L2 != 0 {
+		m.PM10.Level2 = aux.PM10L2
+	}
+	if m.PM25.Level2 == 0 && aux.PM25L2 != 0 {
+		m.PM25.Level2 = aux.PM25L2
+	}
+	if m.PM10.Diff == 0 && aux.PM10Diff != 0 {
+		m.PM10.Diff = aux.PM10Diff
+	}
+	if m.PM25.Diff == 0 && aux.PM25Diff != 0 {
+		m.PM25.Diff = aux.PM25Diff
+	}
+	if m.AQI.Standard == "" && aux.AQIStandard != "" {
+		m.AQI.Standard = aux.AQIStandard
+	}
+	if m.AQI.LazyNotify.Up == nil && aux.AQILazyUp != nil {
+		m.AQI.LazyNotify.Up = aux.AQILazyUp
+	}
+	if m.AQI.LazyNotify.Down == nil && aux.AQILazyDown != nil {
+		m.AQI.LazyNotify.Down = aux.AQILazyDown
+	}
+	if m.PM25.LazyNotify.Up == nil && aux.PM25LazyUp != nil {
+		m.PM25.LazyNotify.Up = aux.PM25LazyUp
+	}
+	if m.PM25.LazyNotify.Down == nil && aux.PM25LazyDown != nil {
+		m.PM25.LazyNotify.Down = aux.PM25LazyDown
+	}
+	if m.PM10.LazyNotify.Up == nil && aux.PM10LazyUp != nil {
+		m.PM10.LazyNotify.Up = aux.PM10LazyUp
+	}
+	if m.PM10.LazyNotify.Down == nil && aux.PM10LazyDown != nil {
+		m.PM10.LazyNotify.Down = aux.PM10LazyDown
+	}
+
+	// Process Notifications
+	if len(aux.RawNotif) > 0 {
+		var oldArray []string
+		if err := json.Unmarshal(aux.RawNotif, &oldArray); err == nil {
+			m.Notifications = unflattenNotifications(oldArray)
+		} else {
+			var newMap map[string][]string
+			if err := json.Unmarshal(aux.RawNotif, &newMap); err == nil {
+				m.Notifications = NotificationMap(newMap)
+			}
+		}
+	}
+
+	// Process Warnings
+	if len(aux.RawWarn) > 0 {
+		var oldArray []string
+		if err := json.Unmarshal(aux.RawWarn, &oldArray); err == nil {
+			m.Warnings = unflattenNotifications(oldArray)
+		} else {
+			var newMap map[string][]string
+			if err := json.Unmarshal(aux.RawWarn, &newMap); err == nil {
+				m.Warnings = NotificationMap(newMap)
+			}
+		}
+	}
+
+	return nil
+}
+
+// ToggleNotification toggles a flat notification ID (e.g. "aqi_l1") in the nested map structure.
+func (m *Monitor) ToggleNotification(id string) {
+	parts := strings.SplitN(id, "_", 2)
+	if len(parts) != 2 {
+		return
+	}
+	cat, item := parts[0], parts[1]
+	normItem := normalizeNotificationItem(item)
+	if m.Notifications == nil {
+		m.Notifications = make(NotificationMap)
+	}
+	found := -1
+	for i, v := range m.Notifications[cat] {
+		if normalizeNotificationItem(v) == normItem {
+			found = i
+			break
+		}
+	}
+	if found >= 0 {
+		m.Notifications[cat] = append(m.Notifications[cat][:found], m.Notifications[cat][found+1:]...)
+	} else {
+		m.Notifications[cat] = append(m.Notifications[cat], normItem)
+	}
+}
+
+// ToggleWarning toggles a flat warning ID in the nested map structure.
+func (m *Monitor) ToggleWarning(id string) {
+	parts := strings.SplitN(id, "_", 2)
+	if len(parts) != 2 {
+		return
+	}
+	cat, item := parts[0], parts[1]
+	normItem := normalizeNotificationItem(item)
+	if m.Warnings == nil {
+		m.Warnings = make(NotificationMap)
+	}
+	found := -1
+	for i, v := range m.Warnings[cat] {
+		if normalizeNotificationItem(v) == normItem {
+			found = i
+			break
+		}
+	}
+	if found >= 0 {
+		m.Warnings[cat] = append(m.Warnings[cat][:found], m.Warnings[cat][found+1:]...)
+	} else {
+		m.Warnings[cat] = append(m.Warnings[cat], normItem)
 	}
 }
 
@@ -268,38 +654,62 @@ type TgBot struct {
 	Enabled bool `yaml:"enabled"`
 	// Token is the BotFather token for the Telegram bot.
 	Token string `yaml:"token"`
-	// TokenFile is the path to the file containing the bot token.
-	TokenFile string `yaml:"token_file"`
-	// JsonFile is the path to the JSON file used to persist subscriptions.
-	// Supports the {app} placeholder (replaced with the executable name).
-	JsonFile string `yaml:"json_file"`
+	File  struct {
+		Token string `yaml:"token"`
+		Json  string `yaml:"json"`
+	} `yaml:"file"`
 	// Debug enables verbose Telegram API logging.
 	Debug bool `yaml:"debug"`
-	// ChartWidth specifies the width of generated charts.
-	ChartWidth int `yaml:"chart_width"`
-	// ChartHeight specifies the height of generated charts.
-	ChartHeight int `yaml:"chart_height"`
-	// ChartFontSize specifies the font size used in generated charts.
-	ChartFontSize float64 `yaml:"chart_font_size"`
-	// Default units
-	DefaultUnitTemp  string `yaml:"default_unit_temp"`
-	DefaultUnitPress string `yaml:"default_unit_press"`
+	Chart struct {
+		Width    int     `yaml:"width"`
+		Height   int     `yaml:"height"`
+		FontSize float64 `yaml:"font_size"`
+	} `yaml:"chart"`
+	Default struct {
+		Unit struct {
+			Temp  string `yaml:"temp"`
+			Press string `yaml:"press"`
+		} `yaml:"unit"`
+	} `yaml:"default"`
 }
 
 // NewTgBotConfig returns a TgBot with sensible defaults.
 func NewTgBotConfig() *TgBot {
 	app := getAppName()
 	return &TgBot{
-		Enabled:          true,
-		Token:            "",
-		TokenFile:        app + ".tgbot.token",
-		JsonFile:         app + ".tgbot.json",
-		Debug:            false,
-		ChartWidth:       1024,
-		ChartHeight:      768,
-		ChartFontSize:    12.0,
-		DefaultUnitTemp:  "c",
-		DefaultUnitPress: "mmhg",
+		Enabled: true,
+		Token:   "",
+		File: struct {
+			Token string `yaml:"token"`
+			Json  string `yaml:"json"`
+		}{
+			Token: app + ".tgbot.token",
+			Json:  app + ".tgbot.json",
+		},
+		Debug: false,
+		Chart: struct {
+			Width    int     `yaml:"width"`
+			Height   int     `yaml:"height"`
+			FontSize float64 `yaml:"font_size"`
+		}{
+			Width:    1024,
+			Height:   768,
+			FontSize: 12.0,
+		},
+		Default: struct {
+			Unit struct {
+				Temp  string `yaml:"temp"`
+				Press string `yaml:"press"`
+			} `yaml:"unit"`
+		}{
+			Unit: struct {
+				Temp  string `yaml:"temp"`
+				Press string `yaml:"press"`
+			}{
+				Temp:  "c",
+				Press: "mmhg",
+			},
+		},
 	}
 }
 
@@ -370,34 +780,34 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 	}
 
 	// 4. Post-processing for other fields that support {app}
-	if cfg.Database.JsonFile != "" {
-		cfg.Database.JsonFile = resolveAppPath(cfg.Database.JsonFile)
+	if cfg.Database.File.Json != "" {
+		cfg.Database.File.Json = resolveAppPath(cfg.Database.File.Json)
 	}
-	if cfg.Database.PgsqlFile != "" {
-		cfg.Database.PgsqlFile = resolveAppPath(cfg.Database.PgsqlFile)
+	if cfg.Database.File.Pgsql != "" {
+		cfg.Database.File.Pgsql = resolveAppPath(cfg.Database.File.Pgsql)
 		// Load from pgsql_file if it exists
-		if _, err := os.Stat(cfg.Database.PgsqlFile); err == nil {
-			pgData, err := os.ReadFile(cfg.Database.PgsqlFile)
+		if _, err := os.Stat(cfg.Database.File.Pgsql); err == nil {
+			pgData, err := os.ReadFile(cfg.Database.File.Pgsql)
 			if err == nil {
 				if err := yaml.Unmarshal(pgData, &cfg.Database); err != nil {
-					return fmt.Errorf("unmarshalling pgsql file %q: %w", cfg.Database.PgsqlFile, err)
+					return fmt.Errorf("unmarshalling pgsql file %q: %w", cfg.Database.File.Pgsql, err)
 				}
 			}
 		}
 	}
-	if cfg.TgBot.TokenFile != "" {
-		cfg.TgBot.TokenFile = resolveAppPath(cfg.TgBot.TokenFile)
+	if cfg.TgBot.File.Token != "" {
+		cfg.TgBot.File.Token = resolveAppPath(cfg.TgBot.File.Token)
 	}
-	if cfg.TgBot.JsonFile != "" {
-		cfg.TgBot.JsonFile = resolveAppPath(cfg.TgBot.JsonFile)
+	if cfg.TgBot.File.Json != "" {
+		cfg.TgBot.File.Json = resolveAppPath(cfg.TgBot.File.Json)
 	}
 	if cfg.Log.LogFile != "" {
 		cfg.Log.LogFile = resolveAppPath(cfg.Log.LogFile)
 	}
 
 	// 5. Load token from file if not provided in YAML
-	if cfg.TgBot.Token == "" && cfg.TgBot.TokenFile != "" {
-		tokenBytes, err := os.ReadFile(cfg.TgBot.TokenFile)
+	if cfg.TgBot.Token == "" && cfg.TgBot.File.Token != "" {
+		tokenBytes, err := os.ReadFile(cfg.TgBot.File.Token)
 		if err == nil {
 			content := string(tokenBytes)
 			// Handle UTF-16 BOM if present (common on Windows)

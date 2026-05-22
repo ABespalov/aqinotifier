@@ -236,5 +236,12 @@
   "unitC": "{txtUnitC}",
   "unitF": "{txtUnitF}",
   "unitHpa": "{txtUnitHpa}",
-  "unitMmhg": "{txtUnitMmhg}"
+  "unitMmhg": "{txtUnitMmhg}",
+  "btnLazySettings": "{icoTime} Delays",
+  "btnAqiLazyUp": "{icoTrendUp} AQI Rise: {val} meas.",
+  "btnAqiLazyDown": "{icoTrendDown} AQI Fall: {val} meas.",
+  "msgLazyMenu": "{icoTime} <b>Notification Delays</b>\n\nConfigure delays (in consecutive measurements) to filter oscillations at zone boundaries.",
+  "msgLazyPromptTitle": "Delay for AQI on level {?dir == up%increase%decrease}",
+  "msgLazyPrompt": "<b>{title}</b>\n\nCurrent value: <b>{curr}</b> meas.\nEnter new integer value (0 to disable):",
+  "msgLazyUpd": "{icoSuccess} Delay for AQI on level {?dir == up%increase%decrease} updated from <b>{old}</b> to <b>{new}</b>"
 }

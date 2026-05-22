@@ -44,6 +44,8 @@ const (
 	stateAwaitDiff25
 	stateAwaitDeviceName
 	stateAwaitDeviceID
+	stateAwaitAQILazyUp
+	stateAwaitAQILazyDown
 )
 
 const (
@@ -79,6 +81,7 @@ const (
 	btnBackDevices         = "btnBackDevices"
 	btnAqiBackToThresholds = "btnAqiBackToThresholds"
 	btnRename              = "btnRename"
+	btnLazySettings        = "btnLazySettings"
 	btnCancel              = "btnCancel"
 )
 
@@ -257,7 +260,7 @@ func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor
 	b := &Bot{
 		api:       api,
 		handler:   handler,
-		store:     NewStore(store, cfg.DefaultUnitTemp, cfg.DefaultUnitPress),
+		store:     NewStore(store, cfg.Default.Unit.Temp, cfg.Default.Unit.Press),
 		monitor:   ms,
 		cfg:       cfg,
 		sys:       &fullCfg.System,
@@ -328,7 +331,7 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 
 		var level, prevLevel sensor.AQILevel
 		mcfg := b.GetUserSettings(chatID)
-		if mcfg.AQIStandard == "US" {
+		if mcfg.AQI.Standard == "US" {
 			_, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
 			_, prevLevel = sensor.CalculateUS_AQI(m.PM25Prev, m.PM10Prev)
 		} else {
@@ -538,15 +541,15 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 	var current float64
 	if pmType == "PM10" {
 		if levelKey == "level1" {
-			current = mcfg.PM10L1
+			current = mcfg.PM10.Level1
 		} else {
-			current = mcfg.PM10L2
+			current = mcfg.PM10.Level2
 		}
 	} else {
 		if levelKey == "level1" {
-			current = mcfg.PM25L1
+			current = mcfg.PM25.Level1
 		} else {
-			current = mcfg.PM25L2
+			current = mcfg.PM25.Level2
 		}
 	}
 
@@ -562,7 +565,10 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 				break
 			}
 			// Fallback: if no currentTag, try to match user's default standard
-			if currentTag == "" && strings.EqualFold(item.tag, mcfg.AQIStandard) {
+			if currentTag == "" && strings.EqualFold(item.tag, mcfg.AQI.Standard) {
+				currentTag = "✓ "
+			}
+			if strings.EqualFold(item.tag, mcfg.AQI.Standard) {
 				idx = i
 				break
 			}
@@ -575,15 +581,15 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 
 	if pmType == "PM10" {
 		if levelKey == "level1" {
-			mcfg.PM10L1 = next
+			mcfg.PM10.Level1 = next
 		} else {
-			mcfg.PM10L2 = next
+			mcfg.PM10.Level2 = next
 		}
 	} else {
 		if levelKey == "level1" {
-			mcfg.PM25L1 = next
+			mcfg.PM25.Level1 = next
 		} else {
-			mcfg.PM25L2 = next
+			mcfg.PM25.Level2 = next
 		}
 	}
 
@@ -600,7 +606,7 @@ func (b *Bot) sendChartForDevice(chatID int64, deviceID, chartType string) {
 		return
 	}
 
-	buf, err := generateSingleChart(b, chatID, hist, chartType, b.cfg.ChartWidth, b.cfg.ChartHeight, b.cfg.ChartFontSize, chartSmoothing24h)
+	buf, err := generateSingleChart(b, chatID, hist, chartType, b.cfg.Chart.Width, b.cfg.Chart.Height, b.cfg.Chart.FontSize, chartSmoothing24h)
 	if err != nil {
 		log.Error().Err(err).Str("device", deviceID).Str("type", chartType).Msg("tgbot: failed to generate chart")
 		b.sendWithKeyboard(chatID, b.T(chatID, msgHistoryError), nil)
