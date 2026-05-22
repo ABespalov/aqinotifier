@@ -315,12 +315,14 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 	allEvents = append(allEvents, clears...)
 
 	var winnerID string
+	var winnerEvent monitor.AlertEvent
 	maxPriority := -1
 	for _, e := range allEvents {
 		p := b.getEventPriority(e.ID)
 		if p > maxPriority {
 			maxPriority = p
 			winnerID = e.ID
+			winnerEvent = e
 		}
 	}
 
@@ -331,12 +333,11 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 
 		var level, prevLevel sensor.AQILevel
 		mcfg := b.GetUserSettings(chatID)
-		if mcfg.AQI.Standard == "US" {
-			_, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
-			_, prevLevel = sensor.CalculateUS_AQI(m.PM25Prev, m.PM10Prev)
-		} else {
-			_, level = sensor.CalculateEU_AQI(m.PM25, m.PM10)
-			_, prevLevel = sensor.CalculateEU_AQI(m.PM25Prev, m.PM10Prev)
+		_, level = sensor.CalculateAQI(m.PM25, m.PM10, mcfg.AQI.Standard)
+		_, prevLevel = sensor.CalculateAQI(m.PM25Prev, m.PM10Prev, mcfg.AQI.Standard)
+
+		if winnerEvent.HasPrev {
+			prevLevel = sensor.AQILevel(winnerEvent.PrevValue)
 		}
 
 		argsMap["isRise"] = level > prevLevel

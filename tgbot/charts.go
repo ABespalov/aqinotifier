@@ -30,6 +30,15 @@ func (b *Bot) getChartColor(key string) charts.Color {
 	return charts.ParseColor(hex)
 }
 
+func (b *Bot) getZoneChartColor(zoneColor string) charts.Color {
+	resolved := b.Resolve(zoneColor)
+	if resolved == "" || resolved == zoneColor {
+		key := strings.Trim(zoneColor, "{}")
+		return b.getChartColor(key)
+	}
+	return charts.ParseColor(resolved)
+}
+
 const (
 	chartStrokeWidth      = 3.0
 	chartSmoothingHistory = 0.1
@@ -128,12 +137,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 		pm10Values = append(pm10Values, m.PM10)
 		pm25Values = append(pm25Values, m.PM25)
 
-		var aqi float64
-		if mcfg.AQI.Standard == "US" {
-			aqi, _ = sensor.CalculateUS_AQI(m.PM25, m.PM10)
-		} else {
-			aqi, _ = sensor.CalculateEU_AQI(m.PM25, m.PM10)
-		}
+		aqi, _ := sensor.CalculateAQI(m.PM25, m.PM10, mcfg.AQI.Standard)
 		aqiValues = append(aqiValues, aqi)
 
 		if m.Temperature != 0 {
@@ -270,12 +274,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 			pm10Values = append(pm10Values, m.PM10)
 			pm25Values = append(pm25Values, m.PM25)
 		case "aqi":
-			var aqi float64
-			if mcfg.AQI.Standard == "US" {
-				aqi, _ = sensor.CalculateUS_AQI(m.PM25, m.PM10)
-			} else {
-				aqi, _ = sensor.CalculateEU_AQI(m.PM25, m.PM10)
-			}
+			aqi, _ := sensor.CalculateAQI(m.PM25, m.PM10, mcfg.AQI.Standard)
 			aqiValues = append(aqiValues, aqi)
 		case "temp":
 			if m.Temperature != 0 {
@@ -615,26 +614,35 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 	}
 
 	if isAQI {
-		breakpoints := sensor.IndexPointsEU
-		if mcfg.AQI.Standard == "US" {
+		std, ok := sensor.Standards[strings.ToUpper(mcfg.AQI.Standard)]
+		var breakpoints []float64
+		var colors []charts.Color
+		if ok {
+			breakpoints = std.IndexPoints
+			for _, z := range std.Zones {
+				colors = append(colors, b.getZoneChartColor(z.Color))
+			}
+		} else {
+			// Fallback logic
 			breakpoints = sensor.IndexPointsUS
-		}
-		colors := []charts.Color{
-			b.getChartColor("colorGreen"), b.getChartColor("colorYellow"), b.getChartColor("colorOrange"),
-			b.getChartColor("colorDarkRed"), b.getChartColor("colorViolet"), b.getChartColor("colorMaroon"), b.getChartColor("colorGray"),
-		}
-		if mcfg.AQI.Standard == "EU" {
-			colors = []charts.Color{
-				b.getChartColor("colorLightBlue"), b.getChartColor("colorGreen"), b.getChartColor("colorYellow"),
-				b.getChartColor("colorOrange"), b.getChartColor("colorDarkRed"), b.getChartColor("colorMaroon"),
+			if mcfg.AQI.Standard == "EU" {
+				breakpoints = sensor.IndexPointsEU
+			}
+			// Fallback colors for US/EU
+			for _, key := range []string{"colorGreen", "colorYellow", "colorOrange", "colorDarkRed", "colorViolet", "colorMaroon", "colorGray"} {
+				colors = append(colors, b.getChartColor(key))
+			}
+			if mcfg.AQI.Standard == "EU" {
+				colors = []charts.Color{
+					b.getChartColor("colorLightBlue"), b.getChartColor("colorGreen"), b.getChartColor("colorYellow"),
+					b.getChartColor("colorOrange"), b.getChartColor("colorDarkRed"), b.getChartColor("colorMaroon"),
+				}
 			}
 		}
+
 		for i := 0; i < len(breakpoints)-1; i++ {
 			low := breakpoints[i]
 			high := breakpoints[i+1]
-			if i == len(breakpoints)-2 && mcfg.AQI.Standard == "US" {
-				high = sensor.IndexPointsUS[len(sensor.IndexPointsUS)-1]
-			}
 			c := colors[i]
 			c.A = 51
 			pyBottom := yFunc(math.Max(low, yMin))

@@ -7,6 +7,10 @@
     "indexPoints": [0, 50, 100, 150, 200, 300, 500],
     "breakpoints25": [10, 20, 25, 50, 75, 800],
     "breakpoints10": [20, 40, 50, 100, 150, 1200],
+    "roundMethod25": "none",
+    "roundDecimals25": 0,
+    "roundMethod10": "none",
+    "roundDecimals10": 0,
     "zones": [
       { "level": 1, "name": "Very Good", "color": "{colorLightBlue}", "icon": "{icoCircleBlue}" },
       { "level": 2, "name": "Good", "color": "{colorGreen}", "icon": "{icoCircleGreen}" },
@@ -24,6 +28,10 @@
     "indexPoints": [0, 50, 100, 150, 200, 300, 400, 500],
     "breakpoints25": [9.0, 35.4, 55.4, 125.4, 225.4, 325.4, 500.4],
     "breakpoints10": [54, 154, 254, 354, 424, 504, 604],
+    "roundMethod25": "floor",
+    "roundDecimals25": 1,
+    "roundMethod10": "floor",
+    "roundDecimals10": 0,
     "zones": [
       { "level": 1, "name": "Good", "color": "{colorGreen}", "icon": "{icoCircleGreen}" },
       { "level": 2, "name": "Moderate", "color": "{colorYellow}", "icon": "{icoCircleYellow}" },
@@ -42,6 +50,10 @@
     "indexPoints": [0, 50, 100, 150, 200, 300, 400, 500],
     "breakpoints25": [35, 75, 115, 150, 250, 350, 500],
     "breakpoints10": [50, 150, 250, 350, 420, 500, 600],
+    "roundMethod25": "round",
+    "roundDecimals25": 0,
+    "roundMethod10": "round",
+    "roundDecimals10": 0,
     "zones": [
       { "level": 1, "name": "Excellent", "color": "{colorGreen}", "icon": "{icoCircleGreen}" },
       { "level": 2, "name": "Good", "color": "{colorYellow}", "icon": "{icoCircleYellow}" },

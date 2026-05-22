@@ -42,14 +42,18 @@ type AQIZone struct {
 }
 
 type AQIStandard struct {
-	Tag           string    `json:"tag"`
-	NameShort     string    `json:"nameShort"`
-	NameFull      string    `json:"nameFull"`
-	Flag          string    `json:"flag"`
-	IndexPoints   []float64 `json:"indexPoints"`
-	Breakpoints25 []float64 `json:"breakpoints25"`
-	Breakpoints10 []float64 `json:"breakpoints10"`
-	Zones         []AQIZone `json:"zones"`
+	Tag             string    `json:"tag"`
+	NameShort       string    `json:"nameShort"`
+	NameFull        string    `json:"nameFull"`
+	Flag            string    `json:"flag"`
+	IndexPoints     []float64 `json:"indexPoints"`
+	Breakpoints25   []float64 `json:"breakpoints25"`
+	Breakpoints10   []float64 `json:"breakpoints10"`
+	RoundMethod25   string    `json:"roundMethod25"`
+	RoundDecimals25 int       `json:"roundDecimals25"`
+	RoundMethod10   string    `json:"roundMethod10"`
+	RoundDecimals10 int       `json:"roundDecimals10"`
+	Zones           []AQIZone `json:"zones"`
 }
 
 func LoadStandards(data []byte) error {
@@ -65,49 +69,31 @@ func LoadStandards(data []byte) error {
 	return nil
 }
 
-// CalculateUS_AQI calculates the US EPA Air Quality Index for PM2.5 or PM10.
-// Based on 2024 standards for PM2.5.
-func CalculateUS_AQI(pm25, pm10 float64) (float64, AQILevel) {
-	std, ok := Standards["US"]
-	if !ok {
-		// Fallback to hardcoded
-		c25 := math.Floor(pm25*10) / 10
-		c10 := math.Floor(pm10)
-		aqi25 := calculateAQI_Piecewise(c25, append([]float64{0}, BreakpointsUS25...), IndexPointsUS)
-		aqi10 := calculateAQI_Piecewise(c10, append([]float64{0}, BreakpointsUS10...), IndexPointsUS)
-		aqi := math.Max(aqi25, aqi10)
-		return aqi, getLevel(aqi, IndexPointsUS)
+func roundValue(val float64, method string, decimals int) float64 {
+	if method == "none" || method == "" {
+		return val
 	}
-
-	c25 := math.Floor(pm25*10) / 10
-	c10 := math.Floor(pm10)
-	aqi25 := calculateAQI_Piecewise(c25, append([]float64{0}, std.Breakpoints25...), std.IndexPoints)
-	aqi10 := calculateAQI_Piecewise(c10, append([]float64{0}, std.Breakpoints10...), std.IndexPoints)
-	aqi := math.Max(aqi25, aqi10)
-	return aqi, getLevel(aqi, std.IndexPoints)
+	shift := math.Pow10(decimals)
+	switch strings.ToLower(method) {
+	case "floor":
+		return math.Floor(val*shift) / shift
+	case "round":
+		return math.Round(val*shift) / shift
+	case "ceil":
+		return math.Ceil(val*shift) / shift
+	default:
+		return val
+	}
 }
 
-// CalculateEU_AQI calculates a continuous index (0-500) based on European EAQI levels.
-// Level 1 (Good) -> 0-50
-// Level 2 (Fair) -> 51-100
-// Level 3 (Moderate) -> 101-150
-// Level 4 (Poor) -> 151-200
-// Level 5 (Very poor) -> 201-300
-// Level 6 (Extremely poor) -> 301-500
-func CalculateEU_AQI(pm25, pm10 float64) (float64, AQILevel) {
-	std, ok := Standards["EU"]
-	if !ok {
-		// Fallback to hardcoded
-		aqi25 := calculateAQI_Piecewise(pm25, append([]float64{0}, BreakpointsEU25...), IndexPointsEU)
-		aqi10 := calculateAQI_Piecewise(pm10, append([]float64{0}, BreakpointsEU10...), IndexPointsEU)
-		aqi := math.Max(aqi25, aqi10)
-		return aqi, getLevel(aqi, IndexPointsEU)
+// CalculateAQI calculates AQI based on the maximum AQI between PM2.5 and PM10 for a standard.
+func CalculateAQI(pm25, pm10 float64, standard string) (float64, AQILevel) {
+	aqi25, level25 := CalculateValueAQI(pm25, "PM2.5", standard)
+	aqi10, level10 := CalculateValueAQI(pm10, "PM10", standard)
+	if aqi10 > aqi25 {
+		return aqi10, level10
 	}
-
-	aqi25 := calculateAQI_Piecewise(pm25, append([]float64{0}, std.Breakpoints25...), std.IndexPoints)
-	aqi10 := calculateAQI_Piecewise(pm10, append([]float64{0}, std.Breakpoints10...), std.IndexPoints)
-	aqi := math.Max(aqi25, aqi10)
-	return aqi, getLevel(aqi, std.IndexPoints)
+	return aqi25, level25
 }
 
 // CalculateValueAQI calculates AQI for a single value based on standard and PM type.
@@ -115,35 +101,37 @@ func CalculateValueAQI(val float64, pmType string, standard string) (float64, AQ
 	tag := strings.ToUpper(standard)
 	std, ok := Standards[tag]
 	if !ok {
-		// Fallback to legacy hardcoded logic
-		var breakpoints, indexPoints []float64
 		if tag == "US" {
-			indexPoints = IndexPointsUS
-			if pmType == "PM10" {
-				breakpoints = append([]float64{0}, BreakpointsUS10...)
-			} else {
-				val = math.Floor(val*10) / 10
-				breakpoints = append([]float64{0}, BreakpointsUS25...)
+			std = &AQIStandard{
+				Tag:             "US",
+				IndexPoints:     IndexPointsUS,
+				Breakpoints25:   BreakpointsUS25,
+				Breakpoints10:   BreakpointsUS10,
+				RoundMethod25:   "floor",
+				RoundDecimals25: 1,
+				RoundMethod10:   "floor",
+				RoundDecimals10: 0,
 			}
 		} else {
-			indexPoints = IndexPointsEU
-			if pmType == "PM10" {
-				breakpoints = append([]float64{0}, BreakpointsEU10...)
-			} else {
-				breakpoints = append([]float64{0}, BreakpointsEU25...)
+			std = &AQIStandard{
+				Tag:             "EU",
+				IndexPoints:     IndexPointsEU,
+				Breakpoints25:   BreakpointsEU25,
+				Breakpoints10:   BreakpointsEU10,
+				RoundMethod25:   "none",
+				RoundDecimals25: 0,
+				RoundMethod10:   "none",
+				RoundDecimals10: 0,
 			}
 		}
-		aqi := calculateAQI_Piecewise(val, breakpoints, indexPoints)
-		return aqi, getLevel(aqi, indexPoints)
 	}
 
 	var breakpoints []float64
 	if pmType == "PM10" {
+		val = roundValue(val, std.RoundMethod10, std.RoundDecimals10)
 		breakpoints = append([]float64{0}, std.Breakpoints10...)
 	} else {
-		if tag == "US" {
-			val = math.Floor(val*10) / 10
-		}
+		val = roundValue(val, std.RoundMethod25, std.RoundDecimals25)
 		breakpoints = append([]float64{0}, std.Breakpoints25...)
 	}
 

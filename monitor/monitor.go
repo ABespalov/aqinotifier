@@ -47,8 +47,10 @@ type Measurement struct {
 // AlertEvent represents a specific monitoring event that triggered a notification.
 // It carries the event type and optional associated value (like AQI).
 type AlertEvent struct {
-	ID    string
-	Value float64
+	ID        string
+	Value     float64
+	PrevValue float64
+	HasPrev   bool
 }
 
 type MeasurementStore interface {
@@ -338,6 +340,10 @@ func (s *MonitorService) notify(m *Measurement) {
 				v = val[0]
 			}
 			evt := AlertEvent{ID: id, Value: v}
+			if len(val) > 1 {
+				evt.PrevValue = val[1]
+				evt.HasPrev = true
+			}
 			if warnings[id] {
 				soundEvents = append(soundEvents, evt)
 				isLoud = true
@@ -355,6 +361,10 @@ func (s *MonitorService) notify(m *Measurement) {
 				v = val[0]
 			}
 			evt := AlertEvent{ID: id, Value: v}
+			if len(val) > 1 {
+				evt.PrevValue = val[1]
+				evt.HasPrev = true
+			}
 			clearEvents = append(clearEvents, evt)
 			if warnings[id] {
 				isLoud = true
@@ -406,15 +416,8 @@ func (s *MonitorService) notify(m *Measurement) {
 		// AQI Notifications
 		var aqi float64
 		var level sensor.AQILevel
-		var prevLevel sensor.AQILevel
 
-		if mcfg.AQI.Standard == "US" {
-			aqi, level = sensor.CalculateUS_AQI(m.PM25, m.PM10)
-			_, prevLevel = sensor.CalculateUS_AQI(m.PM25Prev, m.PM10Prev)
-		} else {
-			aqi, level = sensor.CalculateEU_AQI(m.PM25, m.PM10)
-			_, prevLevel = sensor.CalculateEU_AQI(m.PM25Prev, m.PM10Prev)
-		}
+		aqi, level = sensor.CalculateAQI(m.PM25, m.PM10, mcfg.AQI.Standard)
 
 		delayUp := 0
 		if mcfg.AQI.LazyNotify.Up != nil {
@@ -435,6 +438,7 @@ func (s *MonitorService) notify(m *Measurement) {
 
 		shouldNotify := false
 		var targetLevel sensor.AQILevel
+		var oldConfirmedLevel sensor.AQILevel
 
 		if state.ConfirmedLevel == 0 {
 			state.ConfirmedLevel = level
@@ -442,45 +446,31 @@ func (s *MonitorService) notify(m *Measurement) {
 			state.DownCounter = 0
 		} else if delayUp == 0 && delayDown == 0 {
 			if level != state.ConfirmedLevel {
+				oldConfirmedLevel = state.ConfirmedLevel
 				state.ConfirmedLevel = level
 				shouldNotify = true
 				targetLevel = level
 			}
 		} else {
 			// Update counters based on trend
-			if prevLevel > level {
-				// AQI decreased
-				state.UpCounter = -1
-				if state.DownCounter >= 0 {
-					state.DownCounter++
-				} else if level < state.ConfirmedLevel {
-					state.DownCounter = 0
-				}
-			} else if prevLevel < level {
-				// AQI increased
-				state.DownCounter = -1
-				if state.UpCounter >= 0 {
-					state.UpCounter++
-				} else if level > state.ConfirmedLevel {
-					state.UpCounter = 0
-				}
+			if level > state.ConfirmedLevel {
+				state.UpCounter++
+				state.DownCounter = 0
+			} else if level < state.ConfirmedLevel {
+				state.DownCounter++
+				state.UpCounter = 0
 			} else {
-				// AQI unchanged
-				if state.UpCounter >= 0 {
-					state.UpCounter++
-				} else if level > state.ConfirmedLevel {
-					state.UpCounter = 0
-				}
-
-				if state.DownCounter >= 0 {
-					state.DownCounter++
-				} else if level < state.ConfirmedLevel {
-					state.DownCounter = 0
-				}
+				state.UpCounter = 0
+				state.DownCounter = 0
 			}
 
 			// Check UP notification
-			if delayUp > 0 && state.UpCounter >= delayUp && level > state.ConfirmedLevel {
+			effectiveDelayUp := delayUp
+			if effectiveDelayUp <= 0 {
+				effectiveDelayUp = 1
+			}
+			if state.UpCounter >= effectiveDelayUp && level > state.ConfirmedLevel {
+				oldConfirmedLevel = state.ConfirmedLevel
 				state.ConfirmedLevel = level
 				state.UpCounter = 0
 				state.DownCounter = 0
@@ -489,7 +479,12 @@ func (s *MonitorService) notify(m *Measurement) {
 			}
 
 			// Check DOWN notification
-			if delayDown > 0 && state.DownCounter >= delayDown && level < state.ConfirmedLevel {
+			effectiveDelayDown := delayDown
+			if effectiveDelayDown <= 0 {
+				effectiveDelayDown = 1
+			}
+			if state.DownCounter >= effectiveDelayDown && level < state.ConfirmedLevel {
+				oldConfirmedLevel = state.ConfirmedLevel
 				state.ConfirmedLevel = level
 				state.DownCounter = 0
 				state.UpCounter = 0
@@ -520,9 +515,9 @@ func (s *MonitorService) notify(m *Measurement) {
 
 			if aqiID != "" {
 				if targetLevel == sensor.LevelGood {
-					addClear(aqiID, aqi)
+					addClear(aqiID, aqi, float64(oldConfirmedLevel))
 				} else {
-					addEvent(aqiID, aqi)
+					addEvent(aqiID, aqi, float64(oldConfirmedLevel))
 				}
 			}
 		}
