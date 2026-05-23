@@ -30,7 +30,7 @@ Highly granular Telegram notifications for:
 - **AQI level changes** (levels 1–7 across EU, US, and CN standards)
 - **PM absolute zone transitions** — PM2.5 or PM10 entering/leaving Green, Yellow, or Red zones
 - **PM relative dynamics** — sudden rises or drops (configurable % thresholds)
-- **Notification delays (lazy mechanism)** — filter out flickering notifications on AQI boundary thresholds by delaying alerts until a new level remains stable for N consecutive measurements (configurable independently for rising and falling trends)
+- **Notification delays (lazy mechanism)** — filter out flickering notifications on AQI boundary thresholds by delaying alerts. Setting the delay to `N` requires `N` confirmation measurements after the initial transition (meaning `N + 1` consecutive measurements in total). Set to `0` for instant alerts (configurable independently for rising and falling trends)
 - Per-user notification preferences (enable/disable individual alert types)
 - Per-user sound/silent mode for each alert type
 
@@ -255,13 +255,15 @@ Each user can toggle any notification on/off and set its sound mode independentl
 
 ## AQI Standards
 
-Supported calculation standards (user-selectable in-bot):
+AQI calculation and zoning is completely data-driven. The calculation rules, breakpoints, rounding methods, and display names are defined in `res/aqi.json`. By default, the following standards are included (user-selectable in-bot):
 
 | Standard | Zones | Typical Use |
 |---|---|---|
-| **EU** | 1–6 (Good → Extremely Poor) | European CAQI |
-| **US EPA** | 1–7 (Good → Hazardous) | US AQI |
-| **CN** | 1–7 (Excellent → Hazardous) | China AQI |
+| **EU** | 1-6 (Good -> Extremely Poor) | European CAQI |
+| **US EPA** | 1-7 (Good -> Hazardous) | US AQI |
+| **CN** | 1-7 (Excellent -> Hazardous) | China AQI |
+
+You can add or modify standards in `res/aqi.json` on the fly without recompiling the code. The bot will automatically reload the changes if config hot-reload is enabled.
 
 ---
 
@@ -282,7 +284,7 @@ All UI text, icons, and AQI definitions are in the `res/` directory:
 | `res/ico.json` | Icon definitions (emoji placeholders) |
 | `res/colors.json` | Color mappings |
 | `res/aqi.json` | AQI breakpoints per standard |
-| `res/readme.en.md` | [Template engine documentation](res/README.md) |
+| `res/readme.en.md` | [Template engine documentation](res/readme.en.md) |
 
 ---
 

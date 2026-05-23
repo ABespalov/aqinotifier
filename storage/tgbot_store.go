@@ -1,3 +1,4 @@
+// This file implements persistence for Telegram bot user settings and subscriptions.
 package storage
 
 import (

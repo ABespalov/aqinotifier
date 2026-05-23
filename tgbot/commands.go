@@ -12,7 +12,6 @@ import (
 	"sort"
 	"strings"
 
-
 	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/mymmrac/telego"
@@ -39,7 +38,7 @@ func (b *Bot) cmdSubscribeDevice(chatID int64, msg *telego.Message) {
 	}
 
 	for _, c := range deviceID {
-		if c < '0' || c > '9' {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
 			b.sendWithKeyboard(chatID, b.T(chatID, msgInvalidDeviceId), b.mainKeyboard(chatID))
 			return
 		}
@@ -196,10 +195,10 @@ func (b *Bot) cmdLangMenu(chatID int64, editMsgID ...int) {
 func (b *Bot) cmdAqiMenu(chatID int64, editMsgID ...int) {
 	mcfg := b.GetUserSettings(chatID)
 	stdTag := strings.ToUpper(mcfg.AQI.Standard)
-	std, ok := sensor.Standards[stdTag]
+	std := sensor.GetStandard(stdTag)
 
 	var details string
-	if ok {
+	if std != nil {
 		stdName := std.NameFull
 		stdLocKey := "standard" + strings.Title(strings.ToLower(stdTag))
 		if loc := b.T(chatID, stdLocKey); !strings.HasPrefix(loc, "!!") {
@@ -267,7 +266,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 	}
 	mcfg := b.GetUserSettings(chatID)
 	std := strings.ToUpper(mcfg.AQI.Standard)
-	if _, ok := sensor.Standards[std]; !ok {
+	if sensor.GetStandard(std) == nil {
 		return
 	}
 
@@ -280,7 +279,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 		activeTag := strings.ToUpper(mcfg.AQI.Standard)
 
 		// Check active standard first
-		if stdData, ok := sensor.Standards[activeTag]; ok {
+		if stdData := sensor.GetStandard(activeTag); stdData != nil {
 			var bp []float64
 			if pmType == "PM10" {
 				bp = stdData.Breakpoints10
@@ -297,7 +296,8 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 
 		// Get other tags in sorted order
 		var otherTags []string
-		for tag := range sensor.Standards {
+		allStds := sensor.GetStandards()
+		for tag := range allStds {
 			if tag != activeTag {
 				otherTags = append(otherTags, tag)
 			}
@@ -306,7 +306,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 
 		// Check others
 		for _, tag := range otherTags {
-			stdData := sensor.Standards[tag]
+			stdData := allStds[tag]
 			var bp []float64
 			if pmType == "PM10" {
 				bp = stdData.Breakpoints10
@@ -328,7 +328,7 @@ func (b *Bot) cmdAQICycleMenu(chatID int64, editMsgID int, suggestedTags ...map[
 		var tag, flag, levelIcon string
 		if sTag, ok := sTags[key]; ok {
 			tag = sTag
-			if stdData, ok := sensor.Standards[tag]; ok {
+			if stdData := sensor.GetStandard(tag); stdData != nil {
 				flag = stdData.Flag
 				_, level := sensor.CalculateValueAQI(val, pmType, tag)
 				levelIcon = b.getAQIIcon(level, tag)

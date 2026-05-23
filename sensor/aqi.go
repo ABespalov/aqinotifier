@@ -1,15 +1,22 @@
 // Package sensor defines data structures and parsing for incoming sensor
 // payloads (JSON) received from ESP8266-based sensors.
-// This file implements the calculations for US and EU Air Quality Indexes (AQI).
+// This file implements the calculations for Air Quality Index (AQI) using
+// data-driven standards loaded from res/aqi.json. Supported standards
+// include EU (European CAQI), US (EPA AQI), CN (China AQI), and any
+// custom standard added to the configuration file.
 package sensor
 
 import (
 	"encoding/json"
 	"math"
 	"strings"
+	"sync"
+
+	"github.com/rs/zerolog/log"
 )
 
-// AQILevel represents one of the 6 air quality levels.
+// AQILevel represents one of the air quality levels (1 = best).
+// The number of levels varies by standard (e.g. EU has 6, US/CN have 7).
 type AQILevel int
 
 const (
@@ -23,17 +30,28 @@ const (
 )
 
 var (
+	// BreakpointsUS25 holds PM2.5 concentration breakpoints for the US EPA AQI standard.
 	BreakpointsUS25 = []float64{9.0, 35.4, 55.4, 125.4, 225.4, 325.4, 500.4}
+	// BreakpointsUS10 holds PM10 concentration breakpoints for the US EPA AQI standard.
 	BreakpointsUS10 = []float64{54, 154, 254, 354, 424, 504, 604}
+	// BreakpointsEU25 holds PM2.5 concentration breakpoints for the European CAQI standard.
 	BreakpointsEU25 = []float64{10, 20, 25, 50, 75, 800}
+	// BreakpointsEU10 holds PM10 concentration breakpoints for the European CAQI standard.
 	BreakpointsEU10 = []float64{20, 40, 50, 100, 150, 1200}
 
+	// IndexPointsUS maps breakpoint intervals to AQI values for the US EPA standard.
 	IndexPointsUS = []float64{0, 50, 100, 150, 200, 300, 400, 500}
+	// IndexPointsEU maps breakpoint intervals to AQI values for the European CAQI standard.
 	IndexPointsEU = []float64{0, 50, 100, 150, 200, 300, 500}
 
-	Standards map[string]*AQIStandard
+	// standards holds all loaded AQI standards keyed by uppercase tag (e.g. "US", "EU", "CN").
+	// Access must be protected by standardsMu.
+	standards   map[string]*AQIStandard
+	standardsMu sync.RWMutex
 )
 
+// AQIZone describes a single air quality zone within a standard, including
+// its numeric level, display name, chart color reference, and icon reference.
 type AQIZone struct {
 	Level int    `json:"level"`
 	Name  string `json:"name"`
@@ -41,6 +59,9 @@ type AQIZone struct {
 	Icon  string `json:"icon"`
 }
 
+// AQIStandard defines a complete AQI calculation standard loaded from
+// res/aqi.json. It contains breakpoints for PM2.5 and PM10, index point
+// mappings, rounding rules, and display metadata (zones, flags, names).
 type AQIStandard struct {
 	Tag             string    `json:"tag"`
 	NameShort       string    `json:"nameShort"`
@@ -56,6 +77,30 @@ type AQIStandard struct {
 	Zones           []AQIZone `json:"zones"`
 }
 
+// GetStandards returns a snapshot of the currently loaded AQI standards map.
+// The returned map is safe to iterate without holding a lock.
+func GetStandards() map[string]*AQIStandard {
+	standardsMu.RLock()
+	defer standardsMu.RUnlock()
+	// Return a shallow copy to prevent callers from mutating the global map.
+	result := make(map[string]*AQIStandard, len(standards))
+	for k, v := range standards {
+		result[k] = v
+	}
+	return result
+}
+
+// GetStandard returns the AQI standard for the given tag (case-insensitive).
+// Returns nil if the standard is not loaded.
+func GetStandard(tag string) *AQIStandard {
+	standardsMu.RLock()
+	defer standardsMu.RUnlock()
+	return standards[strings.ToUpper(tag)]
+}
+
+// LoadStandards parses a JSON array of AQIStandard definitions and replaces
+// the global standards map. This function is safe to call concurrently
+// (e.g. during config hot-reload).
 func LoadStandards(data []byte) error {
 	var list []AQIStandard
 	if err := json.Unmarshal(data, &list); err != nil {
@@ -65,10 +110,15 @@ func LoadStandards(data []byte) error {
 	for i := range list {
 		m[strings.ToUpper(list[i].Tag)] = &list[i]
 	}
-	Standards = m
+	standardsMu.Lock()
+	standards = m
+	standardsMu.Unlock()
 	return nil
 }
 
+// roundValue applies the specified rounding method to val with the given
+// number of decimal places. Supported methods: "floor", "round", "ceil".
+// If method is empty or "none", the value is returned unchanged.
 func roundValue(val float64, method string, decimals int) float64 {
 	if method == "none" || method == "" {
 		return val
@@ -87,6 +137,7 @@ func roundValue(val float64, method string, decimals int) float64 {
 }
 
 // CalculateAQI calculates AQI based on the maximum AQI between PM2.5 and PM10 for a standard.
+// The higher of the two sub-indices determines the overall AQI and level.
 func CalculateAQI(pm25, pm10 float64, standard string) (float64, AQILevel) {
 	aqi25, level25 := CalculateValueAQI(pm25, "PM2.5", standard)
 	aqi10, level10 := CalculateValueAQI(pm10, "PM10", standard)
@@ -96,34 +147,19 @@ func CalculateAQI(pm25, pm10 float64, standard string) (float64, AQILevel) {
 	return aqi25, level25
 }
 
-// CalculateValueAQI calculates AQI for a single value based on standard and PM type.
+// CalculateValueAQI calculates AQI for a single pollutant value (PM2.5 or PM10)
+// using the specified standard tag. The standard is looked up from the loaded
+// standards map. If not found, a warning is logged and (0, LevelGood) is returned.
 func CalculateValueAQI(val float64, pmType string, standard string) (float64, AQILevel) {
 	tag := strings.ToUpper(standard)
-	std, ok := Standards[tag]
-	if !ok {
-		if tag == "US" {
-			std = &AQIStandard{
-				Tag:             "US",
-				IndexPoints:     IndexPointsUS,
-				Breakpoints25:   BreakpointsUS25,
-				Breakpoints10:   BreakpointsUS10,
-				RoundMethod25:   "floor",
-				RoundDecimals25: 1,
-				RoundMethod10:   "floor",
-				RoundDecimals10: 0,
-			}
-		} else {
-			std = &AQIStandard{
-				Tag:             "EU",
-				IndexPoints:     IndexPointsEU,
-				Breakpoints25:   BreakpointsEU25,
-				Breakpoints10:   BreakpointsEU10,
-				RoundMethod25:   "none",
-				RoundDecimals25: 0,
-				RoundMethod10:   "none",
-				RoundDecimals10: 0,
-			}
-		}
+
+	standardsMu.RLock()
+	std := standards[tag]
+	standardsMu.RUnlock()
+
+	if std == nil {
+		log.Warn().Str("standard", standard).Msg("AQI standard not found, returning zero")
+		return 0, LevelGood
 	}
 
 	var breakpoints []float64
@@ -135,11 +171,17 @@ func CalculateValueAQI(val float64, pmType string, standard string) (float64, AQ
 		breakpoints = append([]float64{0}, std.Breakpoints25...)
 	}
 
-	aqi := calculateAQI_Piecewise(val, breakpoints, std.IndexPoints)
+	aqi := calculatePiecewiseAQI(val, breakpoints, std.IndexPoints)
 	return aqi, getLevel(aqi, std.IndexPoints)
 }
 
-func calculateAQI_Piecewise(c float64, breakpoints []float64, indexPoints []float64) float64 {
+// calculatePiecewiseAQI performs piecewise linear interpolation to convert a
+// concentration value (c) into an AQI value using the provided breakpoint and
+// index point arrays. If c exceeds the highest breakpoint, the maximum index
+// value is returned. If c <= 0, returns 0.
+//
+// Formula: I = ((Ihigh - Ilow) / (Chigh - Clow)) * (C - Clow) + Ilow
+func calculatePiecewiseAQI(c float64, breakpoints []float64, indexPoints []float64) float64 {
 	if c <= 0 {
 		return 0
 	}
@@ -159,6 +201,9 @@ func calculateAQI_Piecewise(c float64, breakpoints []float64, indexPoints []floa
 	return indexPoints[len(indexPoints)-1]
 }
 
+// getLevel determines the AQILevel for a given AQI value by finding
+// which index point interval it falls into. Returns the highest level
+// if the value exceeds all breakpoints.
 func getLevel(aqi float64, indexPoints []float64) AQILevel {
 	for i := 0; i < len(indexPoints)-1; i++ {
 		if aqi <= indexPoints[i+1] {

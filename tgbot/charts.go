@@ -16,6 +16,7 @@ import (
 	"github.com/ABespalov/aqinotifier/monitor"
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/go-analyze/charts"
+	"github.com/rs/zerolog/log"
 )
 
 func (b *Bot) getChartColor(key string) charts.Color {
@@ -89,6 +90,7 @@ var (
 	chartDashPattern = []float64{4, 4}
 )
 
+// chartFormatter formats a float value for chart labels, stripping decimals if it's an AQI value.
 func chartFormatter(f float64, isAQI bool) string {
 	if isAQI {
 		return fmt.Sprintf("%d", int(math.Round(f)))
@@ -96,6 +98,7 @@ func chartFormatter(f float64, isAQI bool) string {
 	return fmt.Sprintf("%.1f", f)
 }
 
+// calcTextWidth roughly estimates the pixel width of a string rendered in the chart font.
 func calcTextWidth(s string, fs float64) float64 {
 	var w float64
 	for _, r := range s {
@@ -108,6 +111,7 @@ func calcTextWidth(s string, fs float64) float64 {
 	return fs * w
 }
 
+// calcYAxisWidth estimates the necessary width for the Y-axis labels based on the value range.
 func calcYAxisWidth(fs float64, yMin, yMax float64, isAQI bool) int {
 	s1 := chartFormatter(yMin, isAQI)
 	s2 := chartFormatter(yMax, isAQI)
@@ -262,7 +266,6 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 
 	var labels []string
 	var pm10Values, pm25Values, aqiValues, tempValues, humValues, pressValues, dewPointValues []float64
-	isF := b.store.GetUnitTemp(chatID) == "f"
 	mcfg := b.GetUserSettings(chatID)
 
 	for _, m := range filteredHist {
@@ -281,9 +284,7 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 				tempValues = append(tempValues, b.convertTemp(m.Temperature, chatID))
 				if m.Humidity != 0 {
 					dp := CalcDewPoint(m.Temperature, m.Humidity)
-					if isF {
-						dp = dp*1.8 + 32
-					}
+					dp = b.convertTemp(dp, chatID)
 					dewPointValues = append(dewPointValues, dp)
 				} else {
 					dewPointValues = append(dewPointValues, charts.GetNullValue())
@@ -614,30 +615,16 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 	}
 
 	if isAQI {
-		std, ok := sensor.Standards[strings.ToUpper(mcfg.AQI.Standard)]
+		std := sensor.GetStandard(mcfg.AQI.Standard)
 		var breakpoints []float64
 		var colors []charts.Color
-		if ok {
+		if std != nil {
 			breakpoints = std.IndexPoints
 			for _, z := range std.Zones {
 				colors = append(colors, b.getZoneChartColor(z.Color))
 			}
 		} else {
-			// Fallback logic
-			breakpoints = sensor.IndexPointsUS
-			if mcfg.AQI.Standard == "EU" {
-				breakpoints = sensor.IndexPointsEU
-			}
-			// Fallback colors for US/EU
-			for _, key := range []string{"colorGreen", "colorYellow", "colorOrange", "colorDarkRed", "colorViolet", "colorMaroon", "colorGray"} {
-				colors = append(colors, b.getChartColor(key))
-			}
-			if mcfg.AQI.Standard == "EU" {
-				colors = []charts.Color{
-					b.getChartColor("colorLightBlue"), b.getChartColor("colorGreen"), b.getChartColor("colorYellow"),
-					b.getChartColor("colorOrange"), b.getChartColor("colorDarkRed"), b.getChartColor("colorMaroon"),
-				}
-			}
+			log.Warn().Str("standard", mcfg.AQI.Standard).Msg("tgbot: AQI standard not found, skipping zone rendering")
 		}
 
 		for i := 0; i < len(breakpoints)-1; i++ {
@@ -688,6 +675,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 	return p.Bytes()
 }
 
+// CalcDewPoint computes the dew point given temperature (Celsius) and relative humidity (%) using the Magnus-Tetens formula.
 func CalcDewPoint(t, rh float64) float64 {
 	if rh == 0 {
 		return charts.GetNullValue()
@@ -696,6 +684,7 @@ func CalcDewPoint(t, rh float64) float64 {
 	return (magnusC * gamma) / (magnusB - gamma)
 }
 
+// stripIcons removes HTML tags and emoji icons from a string, keeping basic text.
 func stripIcons(s string) string {
 	// Remove HTML tags
 	reHTML := regexp.MustCompile(`<[^>]*>`)

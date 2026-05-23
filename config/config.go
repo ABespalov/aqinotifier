@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v2"
@@ -32,10 +33,11 @@ type Server struct {
 // Typical usage is to apply these values to net/http.Server.ReadTimeout,
 // WriteTimeout and IdleTimeout.
 type ServerTimeout struct {
-	Server int `yaml:"server"`
-	Read   int `yaml:"read"`
-	Write  int `yaml:"write"`
-	Idle   int `yaml:"idle"`
+	Server   int `yaml:"server"`
+	Read     int `yaml:"read"`
+	Write    int `yaml:"write"`
+	Idle     int `yaml:"idle"`
+	Shutdown int `yaml:"shutdown"`
 }
 
 // Log rotation settings
@@ -88,10 +90,11 @@ func NewServerConfig() *Server {
 			Key:  "localhost-key.pem",
 		},
 		Timeout: ServerTimeout{
-			Server: 30,
-			Read:   15,
-			Write:  15,
-			Idle:   5,
+			Server:   30,
+			Read:     15,
+			Write:    15,
+			Idle:     5,
+			Shutdown: 5,
 		},
 	}
 }
@@ -132,6 +135,10 @@ type Database struct {
 	MaxOpenConns    int    `yaml:"max_open_conns"`
 	MaxIdleConns    int    `yaml:"max_idle_conns"`
 	ConnMaxLifetime int    `yaml:"conn_max_lifetime"`
+	Connections     struct {
+		Retry int `yaml:"retry"`
+		Delay int `yaml:"delay"`
+	} `yaml:"connections"`
 }
 
 // HasUse returns true if the specified mode is present in Use configuration.
@@ -178,6 +185,13 @@ func NewDatabaseConfig() *Database {
 		MaxOpenConns:    25,
 		MaxIdleConns:    5,
 		ConnMaxLifetime: 300,
+		Connections: struct {
+			Retry int `yaml:"retry"`
+			Delay int `yaml:"delay"`
+		}{
+			Retry: 3,
+			Delay: 2,
+		},
 	}
 }
 
@@ -201,6 +215,8 @@ type System struct {
 	// ConfigReloadTime is the polling interval (in seconds) for detecting changes
 	// in the config file and related resource files. Set to 0 to disable reloading.
 	ConfigReloadTime int `yaml:"config_reload_time"`
+	// HealthCheckTime is the polling interval (in seconds) for database health checks.
+	HealthCheckTime int `yaml:"health_check_time"`
 }
 
 // NewSystemConfig returns a System populated with sensible defaults.
@@ -208,9 +224,11 @@ func NewSystemConfig() *System {
 	return &System{
 		ValuesInRam:      10,
 		ConfigReloadTime: 5,
+		HealthCheckTime:  10,
 	}
 }
 
+// MonitorLevelGroup defines the configuration for PM10 and PM25 thresholds.
 type MonitorLevelGroup struct {
 	Level1     float64 `yaml:"level1" json:"level1"`
 	Level2     float64 `yaml:"level2" json:"level2"`
@@ -221,6 +239,7 @@ type MonitorLevelGroup struct {
 	} `yaml:"lazy_notify" json:"lazy_notify"`
 }
 
+// MonitorAQIGroup defines the configuration for AQI notifications and lazy updates.
 type MonitorAQIGroup struct {
 	Standard   string `yaml:"standard" json:"standard"`
 	LazyNotify struct {
@@ -233,6 +252,7 @@ type MonitorAQIGroup struct {
 // During YAML unmarshalling, it converts nested level and direction blocks to items with "_up" and "_down" suffixes.
 type NotificationMap map[string][]string
 
+// mapLevelDirToCanonical maps shorthand or legacy level and direction strings to their canonical representations (e.g. "l1" -> "level1").
 func mapLevelDirToCanonical(lvl, dir string) string {
 	lvl = strings.ToLower(strings.TrimSpace(lvl))
 	dir = strings.ToLower(strings.TrimSpace(dir))
@@ -274,6 +294,7 @@ func mapLevelDirToCanonical(lvl, dir string) string {
 	return fmt.Sprintf("%s_%s", lvl, dir)
 }
 
+// appendUnique appends an item to a slice if it is not already present.
 func appendUnique(slice []string, val string) []string {
 	for _, v := range slice {
 		if v == val {
@@ -394,17 +415,29 @@ func NewMonitorConfig() *Monitor {
 	}
 }
 
-func normalizeNotificationItem(item string) string {
-	item = strings.ReplaceAll(item, "level", "l")
-	item = strings.ReplaceAll(item, "_up", "u")
-	item = strings.ReplaceAll(item, "up", "u")
-	item = strings.ReplaceAll(item, "_down", "d")
-	item = strings.ReplaceAll(item, "down", "d")
+var normalizeRe = regexp.MustCompile(`^(diff(?:10|25|s)?_)?(?:l|level)(\d+)(?:_?)(u|up|d|down)?$`)
 
-	item = strings.ReplaceAll(item, "l", "level")
-	item = strings.ReplaceAll(item, "u", "_up")
-	item = strings.ReplaceAll(item, "d", "_down")
-	return item
+// normalizeNotificationItem uses regex to parse and reconstruct a notification string into its canonical format.
+func normalizeNotificationItem(item string) string {
+	item = strings.ToLower(strings.TrimSpace(item))
+	matches := normalizeRe.FindStringSubmatch(item)
+	if matches == nil {
+		return item
+	}
+
+	prefix := matches[1]
+	lvl := matches[2]
+	dir := matches[3]
+
+	res := prefix + "level" + lvl
+	if dir != "" {
+		if strings.HasPrefix(dir, "u") {
+			res += "_up"
+		} else if strings.HasPrefix(dir, "d") {
+			res += "_down"
+		}
+	}
+	return res
 }
 
 // Validate ensures that the Monitor configuration is valid and populates defaults for missing values
@@ -488,7 +521,7 @@ func FlattenNotifications(n NotificationMap) []string {
 	return result
 }
 
-// unflattenNotifications converts old flat format into the new nested map format.
+// unflattenNotifications converts a flat slice of notification keys into a structured NotificationMap grouped by categories.
 func unflattenNotifications(flat []string) NotificationMap {
 	result := make(NotificationMap)
 	for _, f := range flat {
@@ -671,6 +704,8 @@ type TgBot struct {
 			Press string `yaml:"press"`
 		} `yaml:"unit"`
 	} `yaml:"default"`
+	StartupRetries int `yaml:"startup_retries"`
+	StartupDelay   int `yaml:"startup_delay"`
 }
 
 // NewTgBotConfig returns a TgBot with sensible defaults.
@@ -694,7 +729,7 @@ func NewTgBotConfig() *TgBot {
 		}{
 			Width:    1024,
 			Height:   768,
-			FontSize: 12.0,
+			FontSize: 11.5,
 		},
 		Default: struct {
 			Unit struct {
@@ -710,6 +745,8 @@ func NewTgBotConfig() *TgBot {
 				Press: "mmhg",
 			},
 		},
+		StartupRetries: 30,
+		StartupDelay:   10,
 	}
 }
 
@@ -827,6 +864,7 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 	return nil
 }
 
+// getAppName extracts the application name from the executable filename without extension.
 func getAppName() string {
 	exe, err := os.Executable()
 	if err != nil {

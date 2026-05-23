@@ -4,6 +4,8 @@ system:
   values_in_ram: 10
   # Interval in seconds to check for configuration file changes (0 to disable).
   config_reload_time: 5
+  # Interval in seconds to check database connection health.
+  health_check_time: 10
 
 # Server settings used to launch the Service. The service is expected to
 # accept POST requests on `server.url` (for example POST /aqi).
@@ -28,6 +30,7 @@ server:
     read: 15     # read timeout for incoming requests
     write: 15    # write timeout for responses
     idle: 5      # idle timeout for keep-alive connections
+    shutdown: 5  # graceful shutdown timeout
 
 # Database settings used for storing received sensor data.
 database:
@@ -61,6 +64,12 @@ database:
   # max_open_conns: 25
   # max_idle_conns: 5
   # conn_max_lifetime: 300
+  # Settings for database connections
+  connections:
+    # Number of connection retry attempts on startup
+    retry: 3
+    # Delay in seconds between connection retries
+    delay: 2
 
 # Local logging configuration (using zerolog).
 # - If 'log_file' is empty, file logging is disabled and logs should go to stdout.
@@ -143,13 +152,19 @@ monitor:
   #     - level3:
   #       - up
   #
-  # Relative changes:
-  # - diff25_l1u, diff10_l1u, diffs_l1u: Growth while staying in Level 1
-  # - diff25_l1d, diff10_l1d, diffs_l1d: Drop resulting in Level 1
-  # - diff25_l2u, diff10_l2u, diffs_l2u: Growth resulting in Level 2
-  # - diff25_l2d, diff10_l2d, diffs_l2d: Drop resulting in Level 2
-  # - diff25_l3u, diff10_l3u, diffs_l3u: Growth resulting in Level 3
-  # - diff25_l3d, diff10_l3d, diffs_l3d: Drop while staying in Level 3
+  # Relative changes are grouped similarly:
+  # - diff25 (PM2.5), diff10 (PM10), diffs (Both PM2.5 and PM10)
+  # For example:
+  #   diff25:
+  #     - level1:
+  #       - up: Growth while staying in Level 1
+  #       - down: Drop resulting in Level 1
+  #     - level2:
+  #       - up: Growth resulting in Level 2
+  #       - down: Drop resulting in Level 2
+  #     - level3:
+  #       - up: Growth resulting in Level 3
+  #       - down: Drop while staying in Level 3
   notifications:
     aqi:
       - level1

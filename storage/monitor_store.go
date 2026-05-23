@@ -1,21 +1,36 @@
+// Package storage provides the persistence layer for the AQI Notifier Bot.
+// It supports both PostgreSQL and JSON file backends, including synchronization
+// between them, handling historical measurements and user subscriptions.
 package storage
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sort"
 	"time"
 
 	"github.com/ABespalov/aqinotifier/monitor"
+	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/rs/zerolog/log"
 )
+
+func sqlSelectColumns() string {
+	return fmt.Sprintf(`device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, COALESCE(device_type, '%s'),
+		pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw`, sensor.DefaultDeviceType)
+}
+
+func sqlInsertColumns() string {
+	return `device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, device_type,
+		pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw`
+}
 
 func (s *Storage) initMonitorTableLocked() {
 	if s.db == nil {
 		return
 	}
 
-	query := `
+	query := fmt.Sprintf(`
 	CREATE TABLE IF NOT EXISTS measurements (
 		device_id TEXT,
 		timestamp TIMESTAMPTZ,
@@ -26,7 +41,7 @@ func (s *Storage) initMonitorTableLocked() {
 		temperature DOUBLE PRECISION,
 		humidity DOUBLE PRECISION,
 		pressure DOUBLE PRECISION,
-		device_type TEXT DEFAULT 'ArmAQI',
+		device_type TEXT DEFAULT '%s',
 		pm03 DOUBLE PRECISION DEFAULT 0,
 		pm03_raw DOUBLE PRECISION DEFAULT 0,
 		pm01 DOUBLE PRECISION DEFAULT 0,
@@ -40,7 +55,7 @@ func (s *Storage) initMonitorTableLocked() {
 		temperature_raw DOUBLE PRECISION DEFAULT 0,
 		humidity_raw DOUBLE PRECISION DEFAULT 0,
 		pressure_raw DOUBLE PRECISION DEFAULT 0
-	);
+	);`, sensor.DefaultDeviceType) + `
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_measurements_unique ON measurements (device_id, timestamp);
 	CREATE INDEX IF NOT EXISTS idx_measurements_device_time ON measurements (device_id, timestamp);
 	`
@@ -53,7 +68,7 @@ func (s *Storage) initMonitorTableLocked() {
 	// Migrations
 	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm10_raw DOUBLE PRECISION DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm25_raw DOUBLE PRECISION DEFAULT 0")
-	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN device_type TEXT DEFAULT 'ArmAQI'")
+	_, _ = s.db.Exec(fmt.Sprintf("ALTER TABLE measurements ADD COLUMN device_type TEXT DEFAULT '%s'", sensor.DefaultDeviceType))
 	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm03 DOUBLE PRECISION DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm03_raw DOUBLE PRECISION DEFAULT 0")
 	_, _ = s.db.Exec("ALTER TABLE measurements ADD COLUMN pm01 DOUBLE PRECISION DEFAULT 0")
@@ -113,12 +128,10 @@ func (s *Storage) syncMonitorJSON() {
 	}
 	defer tx.Rollback()
 
-	query := `
-		INSERT INTO measurements (
-			device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, device_type,
-			pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
-		ON CONFLICT (device_id, timestamp) DO NOTHING`
+	query := fmt.Sprintf(`
+		INSERT INTO measurements (%s) 
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+		ON CONFLICT (device_id, timestamp) DO NOTHING`, sqlInsertColumns())
 
 	stmt, err := tx.Prepare(query)
 	if err != nil {
@@ -180,7 +193,7 @@ func (s *Storage) LoadMeasurements(limit int) map[string][]monitor.Measurement {
 						all[i].PM25Raw = all[i].PM25
 					}
 					if all[i].DeviceType == "" {
-						all[i].DeviceType = "ArmAQI"
+						all[i].DeviceType = sensor.DefaultDeviceType
 					}
 				}
 				for _, m := range all {
@@ -204,13 +217,12 @@ func (s *Storage) LoadMeasurements(limit int) map[string][]monitor.Measurement {
 			rows.Close()
 
 			for _, id := range deviceIDs {
-				mRows, err := db.Query(`
-					SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, COALESCE(device_type, 'ArmAQI'),
-					       pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw
+				mRows, err := db.Query(fmt.Sprintf(`
+					SELECT %s
 					FROM measurements 
 					WHERE device_id = $1 
 					ORDER BY timestamp DESC 
-					LIMIT $2`, id, limit)
+					LIMIT $2`, sqlSelectColumns()), id, limit)
 				if err != nil {
 					continue
 				}
@@ -307,7 +319,11 @@ func (s *Storage) SaveMeasurement(m monitor.Measurement) {
 
 		out, err := json.MarshalIndent(all, "", "  ")
 		if err == nil {
-			_ = os.WriteFile(jsonFile, out, 0644)
+			if wErr := os.WriteFile(jsonFile, out, 0644); wErr != nil {
+				log.Error().Err(wErr).Str("file", jsonFile).Msg("storage: failed to write JSON measurements")
+			}
+		} else {
+			log.Error().Err(err).Msg("storage: failed to marshal JSON measurements")
 		}
 	}
 
@@ -317,11 +333,9 @@ func (s *Storage) SaveMeasurement(m monitor.Measurement) {
 		}
 		// Goroutine to not block
 		go func() {
-			query := `
-				INSERT INTO measurements (
-					device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw, temperature, humidity, pressure, device_type,
-					pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw, tvoc, tvoc_raw, nox, nox_raw, temperature_raw, humidity_raw, pressure_raw
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`
+			query := fmt.Sprintf(`
+				INSERT INTO measurements (%s) 
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`, sqlInsertColumns())
 			_, err := db.Exec(query,
 				m.DeviceID, m.Timestamp, m.PM10, m.PM25, m.PM10Raw, m.PM25Raw, m.Temperature, m.Humidity, m.Pressure, m.DeviceType,
 				m.PM03, m.PM03Raw, m.PM01, m.PM01Raw, m.CO2, m.CO2Raw, m.TVOC, m.TVOCRaw, m.Nox, m.NoxRaw, m.TemperatureRaw, m.HumidityRaw, m.PressureRaw,
@@ -357,14 +371,10 @@ func (s *Storage) GetMeasurementsByDuration(deviceID string, duration time.Durat
 	since := time.Now().UTC().Add(-duration)
 
 	if hasSQL && dbConnected && db != nil {
-		query := `SELECT device_id, timestamp, pm10, pm25, pm10_raw, pm25_raw,
-		temperature, humidity, pressure, COALESCE(device_type, 'ArmAQI'),
-		pm03, pm03_raw, pm01, pm01_raw, co2, co2_raw,
-		tvoc, tvoc_raw, nox, nox_raw,
-		temperature_raw, humidity_raw, pressure_raw
+		query := fmt.Sprintf(`SELECT %s
 		FROM measurements
 		WHERE device_id = $1 AND timestamp >= $2
-		ORDER BY timestamp ASC`
+		ORDER BY timestamp ASC`, sqlSelectColumns())
 		rows, err := db.Query(query, deviceID, since)
 		if err == nil {
 			var res []monitor.Measurement

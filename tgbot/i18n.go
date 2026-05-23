@@ -213,6 +213,9 @@ func loadColors(dir string) {
 	}
 }
 
+// loadAQIStandards reads AQI standard definitions from res/aqi.json,
+// loads them into sensor.Standards, and applies localized names/icons
+// from the currently loaded translation and icon dictionaries.
 func loadAQIStandards(dir string) {
 	path := filepath.Join(dir, "aqi.json")
 	data, err := os.ReadFile(path)
@@ -226,11 +229,14 @@ func loadAQIStandards(dir string) {
 		return
 	}
 
-	// Localize standards from loaded translations/icons
+	// Localize standards from loaded translations/icons.
+	// Use GetStandards() to get a thread-safe snapshot.
+	stds := sensor.GetStandards()
+
 	i18nMu.Lock()
 	defer i18nMu.Unlock()
 
-	for tag, std := range sensor.Standards {
+	for tag, std := range stds {
 		tagUpper := strings.ToUpper(tag)
 
 		// 1. Localize Flag
@@ -473,6 +479,7 @@ func resolvePlaceholderLocked(lang, key, format string, argsMap map[string]inter
 	return "", false
 }
 
+// evaluateCondition parses and evaluates a simple condition expression (e.g. "{var} == value") against the provided arguments map.
 func evaluateCondition(argsMap map[string]interface{}, condition string) bool {
 	if condition == "" {
 		return false
@@ -546,6 +553,7 @@ func evaluateCondition(argsMap map[string]interface{}, condition string) bool {
 	return false
 }
 
+// compareNumeric safely compares an interface value (or its raw string form) against a target numeric string.
 func compareNumeric(val interface{}, rawVal string, target string) int {
 	var f1 float64
 	if val != nil {
@@ -573,6 +581,7 @@ func compareNumeric(val interface{}, rawVal string, target string) int {
 	return 0
 }
 
+// splitByTopLevelPercent splits a string by the '%' character, ignoring any '%' characters that appear within balanced curly braces.
 func splitByTopLevelPercent(s string, max int) []string {
 	var parts []string
 	var current strings.Builder

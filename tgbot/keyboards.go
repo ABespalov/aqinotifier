@@ -133,8 +133,8 @@ func (b *Bot) subscriptionKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 func (b *Bot) aqiSettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 	mcfg := b.GetUserSettings(chatID)
 	std := strings.ToUpper(mcfg.AQI.Standard)
-	stdData, ok := sensor.Standards[std]
-	if !ok {
+	stdData := sensor.GetStandard(std)
+	if stdData == nil {
 		// Fallback if standard not found
 		return nil
 	}

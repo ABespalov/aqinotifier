@@ -106,13 +106,18 @@ func Parse(addr string, body []byte) (*SensorData, error) {
 	return parseArmAQI(addr, body)
 }
 
-// DeviceStandard represents the standard type of the sensor hardware.
+// DeviceStandard represents the hardware type/protocol of a sensor device.
+// It is used to select the correct parser and correction formulas.
 type DeviceStandard string
 
 const (
 	StandardArmAQI      DeviceStandard = "ArmAQI"
 	StandardAirGradient DeviceStandard = "AirGradient"
 )
+
+// DefaultDeviceType is the device type assumed when the actual type cannot be
+// determined (e.g. for legacy data or missing metadata).
+const DefaultDeviceType = string(StandardArmAQI)
 
 // DeviceStandards lists all available sensor hardware standards.
 var DeviceStandards = []DeviceStandard{

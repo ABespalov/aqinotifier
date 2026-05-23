@@ -5,6 +5,7 @@ package monitor
 
 import (
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Measurement represents a single consolidated snapshot of environmental data from a sensor.
 type Measurement struct {
 	DeviceID       string    `json:"device_id"`
 	Timestamp      time.Time `json:"timestamp"`
@@ -84,6 +86,7 @@ type aqiLazyState struct {
 	DownCounter    int
 }
 
+// MonitorService processes incoming sensor measurements, evaluates expressions, detects alerts, and triggers notifications.
 type MonitorService struct {
 	cfg        *config.Config
 	history    map[string][]Measurement
@@ -103,8 +106,8 @@ func (s *MonitorService) SetNotifier(n Notifier) {
 
 // LastMeasurement returns the most recent Measurement for the given deviceID,
 func (s *MonitorService) LastMeasurement(deviceID string) *Measurement {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	hist := s.history[deviceID]
 	if len(hist) == 0 {
 		return nil
@@ -115,8 +118,8 @@ func (s *MonitorService) LastMeasurement(deviceID string) *Measurement {
 
 // GetHistory returns a slice of recent measurements for the given deviceID.
 func (s *MonitorService) GetHistory(deviceID string) []Measurement {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	hist := s.history[deviceID]
 	if len(hist) == 0 {
 		return nil
@@ -220,11 +223,81 @@ func (s *MonitorService) saveHistory(m Measurement) {
 }
 
 func (s *MonitorService) Process(data *sensor.SensorData) {
-	if data.DeviceType == "AirGradient" {
+	log.Debug().
+		Str("device", data.ParentID).
+		Str("type", data.DeviceType).
+		Int("values", len(data.Values)).
+		Msg("monitor: received measurement for processing")
+
+	if data.DeviceType == string(sensor.StandardAirGradient) {
 		s.processAirGradient(data)
 		return
 	}
 	s.processArmAQI(data)
+}
+
+// processMeasurementLocked applies correction formulas, runs glitch filters,
+// calculates diffs, updates history, and dispatches notifications.
+// It MUST be called with s.mu held. The lock will be released internally
+// before saving and notifying.
+func (s *MonitorService) processMeasurementLocked(m *Measurement, data *sensor.SensorData, hasPM10, hasPM25 bool) {
+	// Apply formulas based on device prefix, mapped name, or global device type
+	devName := m.DeviceID
+	if n, ok := s.cfg.Monitor.DeviceNames[m.DeviceID]; ok {
+		devName = n
+	}
+	devType := m.DeviceType
+	if devType == "" {
+		if lm := s.lastMeasurementLocked(m.DeviceID); lm != nil && lm.DeviceType != "" {
+			devType = lm.DeviceType
+		}
+	}
+	if devType == "" {
+		devType = sensor.DefaultDeviceType
+	}
+
+	for prefix, eval := range s.evaluators {
+		if strings.HasPrefix(m.DeviceID, prefix) || strings.HasPrefix(devName, prefix) || strings.HasPrefix(devType, prefix) {
+			eval.Evaluate(m)
+			break
+		}
+	}
+
+	// Safety: don't process measurements without any PM data
+	if !hasPM10 && !hasPM25 {
+		s.mu.Unlock()
+		log.Debug().Str("device", data.ParentID).Msg("skipping measurement with no PM data")
+		return
+	}
+
+	// Safety: Glitch filter for phantom zeros
+	last := s.lastMeasurementLocked(m.DeviceID)
+	if last != nil && m.PM10 == 0 && m.PM25 == 0 && (last.PM10 > 0.5 || last.PM25 > 0.5) {
+		s.mu.Unlock()
+		log.Warn().Str("device", data.ParentID).Float64("prev10", last.PM10).Float64("prev25", last.PM25).Msg("ignoring phantom zero measurement")
+		return
+	}
+
+	// Calculate diff BEFORE adding to history
+	s.calculateDiffLocked(m)
+
+	// Add to history
+	hist := s.history[m.DeviceID]
+	hist = append(hist, *m)
+	s.history[m.DeviceID] = hist
+
+	// Trim history
+	s.trimHistoryInternal()
+
+	// Copy measurement for async processing
+	mCopy := *m
+	s.mu.Unlock()
+
+	log.Debug().Str("device", data.ParentID).Str("type", mCopy.DeviceType).Msg("monitor: successfully processed measurement")
+
+	// Save and notify OUTSIDE of lock
+	s.saveHistory(mCopy)
+	s.notify(&mCopy)
 }
 
 func (s *MonitorService) lastMeasurementLocked(deviceID string) *Measurement {
@@ -265,6 +338,7 @@ const (
 	zoneRed    = 2
 )
 
+// getZone returns the severity zone (1=Green, 2=Yellow, 3=Red) based on the current value and thresholds.
 func getZone(val, green, yellow float64) int {
 	if val <= green {
 		return zoneGreen
@@ -465,8 +539,8 @@ func (s *MonitorService) notify(m *Measurement) {
 			}
 
 			// Check UP notification
-			effectiveDelayUp := delayUp
-			if effectiveDelayUp <= 0 {
+			effectiveDelayUp := delayUp + 1
+			if effectiveDelayUp < 1 {
 				effectiveDelayUp = 1
 			}
 			if state.UpCounter >= effectiveDelayUp && level > state.ConfirmedLevel {
@@ -479,8 +553,8 @@ func (s *MonitorService) notify(m *Measurement) {
 			}
 
 			// Check DOWN notification
-			effectiveDelayDown := delayDown
-			if effectiveDelayDown <= 0 {
+			effectiveDelayDown := delayDown + 1
+			if effectiveDelayDown < 1 {
 				effectiveDelayDown = 1
 			}
 			if state.DownCounter >= effectiveDelayDown && level < state.ConfirmedLevel {

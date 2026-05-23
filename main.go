@@ -23,7 +23,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const BotVersion = "0.16.2a"
+const BotVersion = "0.17.0a"
 
 func main() {
 	execPath, err := os.Executable()
@@ -102,19 +102,22 @@ func main() {
 			ticker := time.NewTicker(time.Duration(cfg.System.ConfigReloadTime) * time.Second)
 			for range ticker.C {
 				changed := false
-				for _, f := range getWatchList(cfg) {
+				trackedFiles := getWatchList(cfg)
+				var changedFiles []string
+				for _, f := range trackedFiles {
 					if f == "" {
 						continue
 					}
 					if info, err := os.Stat(f); err == nil {
 						if info.ModTime().After(lastMod[f]) {
+							changedFiles = append(changedFiles, f)
 							changed = true
-							break
 						}
 					}
 				}
 
 				if changed {
+					log.Info().Strs("files", changedFiles).Msg("config reload: detected file changes")
 					newCfg := config.NewConfig()
 					if err := newCfg.LoadFromFile(configName); err != nil {
 						log.Error().Err(err).Msg("config reload: failed to load new config")
@@ -187,13 +190,13 @@ func main() {
 				} else {
 					var err error
 					// Retry loop for bot startup (e.g. no internet/DNS at boot)
-					for i := 0; i < 30; i++ {
+					for i := 0; i < cfg.TgBot.StartupRetries; i++ {
 						bot, err = tgbot.NewBot(cfg, &cfg.Monitor, ms, strg, BotVersion)
 						if err == nil {
 							break
 						}
-						log.Warn().Err(err).Msgf("failed to start Telegram bot, retrying in 10s... (%d/30)", i+1)
-						time.Sleep(10 * time.Second)
+						log.Warn().Err(err).Msgf("failed to start Telegram bot, retrying in %ds... (%d/%d)", cfg.TgBot.StartupDelay, i+1, cfg.TgBot.StartupRetries)
+						time.Sleep(time.Duration(cfg.TgBot.StartupDelay) * time.Second)
 					}
 
 					if err != nil {
@@ -240,7 +243,7 @@ func main() {
 			}
 		}()
 		<-restartServer
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Server.Timeout.Shutdown)*time.Second)
 		if err := srv.Shutdown(ctx); err != nil {
 			log.Warn().Err(err).Msg("server: shutdown did not complete cleanly")
 		}
@@ -249,17 +252,22 @@ func main() {
 }
 
 func apiHandler(w http.ResponseWriter, r *http.Request, ms *monitor.MonitorService) {
+	log.Debug().Str("method", r.Method).Str("remote", r.RemoteAddr).Str("url", r.URL.String()).Msg("server: received request")
+
 	if r.Method != http.MethodPost {
+		log.Warn().Str("method", r.Method).Str("remote", r.RemoteAddr).Msg("server: rejected non-POST request")
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		log.Error().Err(err).Msg("server: error reading body")
 		http.Error(w, "Error reading body", http.StatusInternalServerError)
 		return
 	}
 	data, err := sensor.Parse(r.RemoteAddr, body)
 	if err != nil {
+		log.Error().Err(err).Str("body", string(body)).Msg("server: error parsing JSON")
 		http.Error(w, "Error parsing JSON", http.StatusBadRequest)
 		return
 	}

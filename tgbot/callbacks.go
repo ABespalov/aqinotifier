@@ -9,14 +9,16 @@ import (
 	"fmt"
 	"strings"
 
+	"sort"
+
 	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
 	"github.com/rs/zerolog/log"
-	"sort"
 )
 
+// AlertItem describes a single configured notification rule for rendering in the UI.
 type AlertItem struct {
 	id         string
 	pm         string
@@ -42,8 +44,8 @@ func (b *Bot) getAllAlerts(chatID int64, filter string) []AlertItem {
 	if filter == "" || filter == "aqi" {
 		mcfg := b.GetUserSettings(chatID)
 		stdTag := strings.ToUpper(mcfg.AQI.Standard)
-		stdData, ok := sensor.Standards[stdTag]
-		if ok {
+		stdData := sensor.GetStandard(stdTag)
+		if stdData != nil {
 			for _, zone := range stdData.Zones {
 				id := fmt.Sprintf("aqi_l%d", zone.Level)
 
@@ -285,8 +287,9 @@ func (b *Bot) handleCallback(cq *telego.CallbackQuery) {
 		b.cmdLazyMenu(chatID)
 	case data == "aqi_std_toggle":
 		mcfg := b.GetUserSettings(chatID)
-		tags := make([]string, 0, len(sensor.Standards))
-		for tag := range sensor.Standards {
+		allStds := sensor.GetStandards()
+		tags := make([]string, 0, len(allStds))
+		for tag := range allStds {
 			tags = append(tags, tag)
 		}
 		sort.Strings(tags)

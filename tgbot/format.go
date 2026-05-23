@@ -37,8 +37,8 @@ func (b *Bot) getEventPriority(id string) int {
 	}
 }
 func (b *Bot) getAQIIcon(level sensor.AQILevel, standard string) string {
-	std, ok := sensor.Standards[strings.ToUpper(standard)]
-	if ok && int(level) > 0 && int(level) <= len(std.Zones) {
+	std := sensor.GetStandard(standard)
+	if std != nil && int(level) > 0 && int(level) <= len(std.Zones) {
 		return b.Resolve(std.Zones[level-1].Icon)
 	}
 
@@ -183,7 +183,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 
 	stdTag := strings.ToUpper(mcfg.AQI.Standard)
 	aqiName := ""
-	if s, ok := sensor.Standards[stdTag]; ok && int(level) > 0 && int(level) <= len(s.Zones) {
+	if s := sensor.GetStandard(stdTag); s != nil && int(level) > 0 && int(level) <= len(s.Zones) {
 		aqiName = s.Zones[level-1].Name
 	}
 	// Try localization if available
@@ -193,7 +193,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	}
 	args["aqiName"] = aqiName
 	args["aqiStandardFlag"] = "{icoFlag" + stdTag + "}"
-	if s, ok := sensor.Standards[stdTag]; ok && s.Flag != "" {
+	if s := sensor.GetStandard(stdTag); s != nil && s.Flag != "" {
 		args["aqiStandardFlag"] = s.Flag
 	}
 

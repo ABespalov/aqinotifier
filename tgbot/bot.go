@@ -223,6 +223,7 @@ type Bot struct {
 	stateMu sync.Mutex
 	states  map[int64]chatState
 
+	ctx      context.Context
 	stopFunc context.CancelFunc
 	defaults *config.Monitor
 	version  string
@@ -265,6 +266,7 @@ func NewBot(fullCfg *config.Config, monitorDefaults *config.Monitor, ms *monitor
 		cfg:       cfg,
 		sys:       &fullCfg.System,
 		states:    make(map[int64]chatState),
+		ctx:       ctx,
 		stopFunc:  cancel,
 		defaults:  monitorDefaults,
 		version:   version,
@@ -286,7 +288,8 @@ func (b *Bot) Run() {
 	b.handler.Start()
 	log.Info().Msg("tgbot: bot is running")
 
-	select {}
+	<-b.ctx.Done()
+	log.Info().Msg("tgbot: bot execution context cancelled")
 }
 
 func (b *Bot) GetSubscribers(deviceID string) []int64 {
@@ -303,7 +306,7 @@ func (b *Bot) GetDeviceType(deviceID string) string {
 			return lm.DeviceType
 		}
 	}
-	return "ArmAQI" // Default fallback
+	return sensor.DefaultDeviceType
 }
 
 func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.AlertEvent, clears []monitor.AlertEvent, silent bool) {
@@ -512,7 +515,8 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 	mcfg := b.GetUserSettings(chatID)
 
 	var tags []string
-	for tag := range sensor.Standards {
+	allStds := sensor.GetStandards()
+	for tag := range allStds {
 		tags = append(tags, tag)
 	}
 	sort.Strings(tags)
@@ -523,7 +527,7 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 	}
 	var fullList []bpItem
 	for _, tag := range tags {
-		stdData := sensor.Standards[tag]
+		stdData := allStds[tag]
 		var list []float64
 		if pmType == "PM10" {
 			list = stdData.Breakpoints10

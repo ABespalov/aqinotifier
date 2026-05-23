@@ -6,7 +6,6 @@ package monitor
 
 import (
 	"strconv"
-	"strings"
 
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/rs/zerolog/log"
@@ -61,59 +60,5 @@ func (s *MonitorService) processAirGradient(data *sensor.SensorData) {
 		}
 	}
 
-	// Apply formulas based on device prefix, mapped name, or global device type
-	devName := m.DeviceID
-	if n, ok := s.cfg.Monitor.DeviceNames[m.DeviceID]; ok {
-		devName = n
-	}
-	devType := m.DeviceType
-	if devType == "" {
-		if lm := s.lastMeasurementLocked(m.DeviceID); lm != nil && lm.DeviceType != "" {
-			devType = lm.DeviceType
-		}
-	}
-	if devType == "" {
-		devType = "AirGradient"
-	}
-
-	for prefix, eval := range s.evaluators {
-		if strings.HasPrefix(m.DeviceID, prefix) || strings.HasPrefix(devName, prefix) || strings.HasPrefix(devType, prefix) {
-			eval.Evaluate(&m)
-			break
-		}
-	}
-
-	// Safety: don't process measurements without any PM data
-	if !hasPM10 && !hasPM25 {
-		s.mu.Unlock()
-		log.Debug().Str("device", data.ParentID).Msg("skipping AirGradient measurement with no PM data")
-		return
-	}
-
-	// Safety: Glitch filter for phantom zeros
-	last := s.lastMeasurementLocked(m.DeviceID)
-	if last != nil && m.PM10 == 0 && m.PM25 == 0 && (last.PM10 > 0.5 || last.PM25 > 0.5) {
-		s.mu.Unlock()
-		log.Warn().Str("device", data.ParentID).Float64("prev10", last.PM10).Float64("prev25", last.PM25).Msg("ignoring AirGradient phantom zero measurement")
-		return
-	}
-
-	// Calculate diff BEFORE adding to history
-	s.calculateDiffLocked(&m)
-
-	// Add to history
-	hist := s.history[m.DeviceID]
-	hist = append(hist, m)
-	s.history[m.DeviceID] = hist
-
-	// Trim history
-	s.trimHistoryInternal()
-
-	// Copy measurement for async processing
-	mCopy := m
-	s.mu.Unlock()
-
-	// Save and notify OUTSIDE of lock
-	s.saveHistory(mCopy)
-	s.notify(&mCopy)
+	s.processMeasurementLocked(&m, data, hasPM10, hasPM25)
 }

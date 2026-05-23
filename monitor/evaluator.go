@@ -15,17 +15,20 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// CompiledFormula holds a precompiled expression for a specific target field.
 type CompiledFormula struct {
 	Target  string
 	Program *vm.Program
 }
 
+// DeviceEvaluator holds an ordered list of compiled formulas used to correct incoming sensor measurements.
 type DeviceEvaluator struct {
 	Formulas []CompiledFormula
 }
 
 var identRegex = regexp.MustCompile(`\b([a-zA-Z_][a-zA-Z0-9_]*)\b`)
 
+// parseTernary translates a shorthand ternary syntax into a valid expr-lang ternary statement.
 func parseTernary(f string) string {
 	f = strings.TrimSpace(f)
 	if strings.HasPrefix(f, "?") {
@@ -180,7 +183,6 @@ func (e *DeviceEvaluator) Evaluate(m *Measurement) {
 		}
 		val, ok := out.(float64)
 		if !ok {
-			// Try type conversion just in case
 			switch v := out.(type) {
 			case int:
 				val = float64(v)
@@ -192,7 +194,12 @@ func (e *DeviceEvaluator) Evaluate(m *Measurement) {
 			}
 		}
 
-		// Update both struct and environment for downstream formulas
+		log.Debug().
+			Str("device", m.DeviceID).
+			Str("target", f.Target).
+			Float64("value", val).
+			Msg("monitor: applied correction formula")
+
 		switch f.Target {
 		case "pm10":
 			m.PM10 = val

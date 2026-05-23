@@ -44,6 +44,8 @@ type saveRequest struct {
 	sub    *Subscription // cloned or marshaled
 }
 
+const saveChanBufferSize = 100
+
 // NewStore creates a Store backed by the given file path and database settings.
 func NewStore(store SubscriptionStore, defaultUnitTemp, defaultUnitPress string) *Store {
 	s := &Store{
@@ -51,7 +53,7 @@ func NewStore(store SubscriptionStore, defaultUnitTemp, defaultUnitPress string)
 		subs:             make(map[int64]*Subscription),
 		defaultUnitTemp:  defaultUnitTemp,
 		defaultUnitPress: defaultUnitPress,
-		saveChan:         make(chan saveRequest, 100),
+		saveChan:         make(chan saveRequest, saveChanBufferSize),
 	}
 
 	if store != nil {

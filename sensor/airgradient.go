@@ -15,23 +15,23 @@ import (
 
 // AirGradientPayload represents the raw JSON structure sent by an AirGradient sensor.
 type AirGradientPayload struct {
-	Wifi        *float64 `json:"wifi"`
-	Rco2        *float64 `json:"rco2"`
-	Pm01        *float64 `json:"pm01"`
-	Pm02        *float64 `json:"pm02"`
-	Pm10        *float64 `json:"pm10"`
-	Pm003Count  *float64 `json:"pm003Count"`
-	Pm003Count2 *float64 `json:"pm003_count"`
-	Pm03Count   *float64 `json:"pm03"`
-	Atmp        *float64 `json:"atmp"`
-	Rhum        *float64 `json:"rhum"`
-	Tvoc        *float64 `json:"tvoc"`
-	TvocIndex   *float64 `json:"tvocIndex"`
-	Nox         *float64 `json:"nox"`
-	NoxIndex    *float64 `json:"noxIndex"`
-	SerialNo    string   `json:"serialno"`
-	ChipID      string   `json:"chipid"`
-	EspID       string   `json:"esp8266id"`
+	Wifi        *float64 `json:"wifi"`        // WiFi signal strength
+	Rco2        *float64 `json:"rco2"`        // CO2 concentration in ppm
+	Pm01        *float64 `json:"pm01"`        // PM1.0 concentration
+	Pm02        *float64 `json:"pm02"`        // PM2.5 concentration (AirGradient uses pm02 for PM2.5)
+	Pm10        *float64 `json:"pm10"`        // PM10 concentration
+	Pm003Count  *float64 `json:"pm003Count"`  // Number of particles > 0.3um (variant 1)
+	Pm003Count2 *float64 `json:"pm003_count"` // Number of particles > 0.3um (variant 2)
+	Pm03Count   *float64 `json:"pm03"`        // Number of particles > 0.3um (variant 3)
+	Atmp        *float64 `json:"atmp"`        // Ambient temperature (Celsius)
+	Rhum        *float64 `json:"rhum"`        // Relative humidity (%)
+	Tvoc        *float64 `json:"tvoc"`        // Total Volatile Organic Compounds
+	TvocIndex   *float64 `json:"tvocIndex"`   // TVOC Index (0-500)
+	Nox         *float64 `json:"nox"`         // Nitrogen Oxides
+	NoxIndex    *float64 `json:"noxIndex"`    // NOx Index (0-500)
+	SerialNo    string   `json:"serialno"`    // Unique serial number
+	ChipID      string   `json:"chipid"`      // ESP chip ID
+	EspID       string   `json:"esp8266id"`   // Legacy ESP8266 ID
 }
 
 // parseAirGradient unmarshals the body as AirGradient payload and maps it to SensorData.

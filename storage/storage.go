@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Storage provides a unified interface for persisting application state. It supports a primary SQL database with a JSON fallback.
 type Storage struct {
 	mu          sync.RWMutex
 	cfg         *config.Config
@@ -37,7 +38,7 @@ func NewStorage(cfg *config.Config) (*Storage, error) {
 	if dbProviderName != "" {
 		log.Info().Str("provider", dbProviderName).Msg("storage: initial connection attempt...")
 		var err error
-		for i := 0; i < 3; i++ {
+		for i := 0; i < cfg.Database.Connections.Retry; i++ {
 			initialDB, err = config.NewDB(cfg.Database)
 			if err == nil {
 				initialDB.SetMaxOpenConns(cfg.Database.MaxOpenConns)
@@ -45,9 +46,9 @@ func NewStorage(cfg *config.Config) (*Storage, error) {
 				initialDB.SetConnMaxLifetime(time.Duration(cfg.Database.ConnMaxLifetime) * time.Second)
 				break
 			}
-			log.Warn().Err(err).Msgf("storage: connection attempt %d/3 failed", i+1)
-			if i < 2 {
-				time.Sleep(2 * time.Second)
+			log.Warn().Err(err).Msgf("storage: connection attempt %d/%d failed", i+1, cfg.Database.Connections.Retry)
+			if i < cfg.Database.Connections.Retry-1 {
+				time.Sleep(time.Duration(cfg.Database.Connections.Delay) * time.Second)
 			}
 		}
 
@@ -101,7 +102,7 @@ func (s *Storage) Close() {
 }
 
 func (s *Storage) runConnectionManager() {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(time.Duration(s.cfg.System.HealthCheckTime) * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -178,6 +179,7 @@ func (s *Storage) runConnectionManager() {
 	}
 }
 
+// isJSONFileEmpty checks if a JSON file does not exist, is empty, or contains only whitespace/empty structures.
 func isJSONFileEmpty(path string) bool {
 	if path == "" {
 		return true
