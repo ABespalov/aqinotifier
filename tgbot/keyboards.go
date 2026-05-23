@@ -224,10 +224,6 @@ func (b *Bot) notificationSettingsKeyboard(chatID int64, silent bool) *telego.In
 
 	var rows [][]telego.InlineKeyboardButton
 	for _, a := range allAlerts {
-		if a.loud != !silent {
-			continue
-		}
-
 		statusIcon := b.I(kIcoUnchecked)
 		if activeNotifications[a.id] {
 			statusIcon = b.I(kIcoChecked)
