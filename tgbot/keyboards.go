@@ -323,10 +323,36 @@ func (b *Bot) lazySettingsKeyboard(chatID int64) *telego.InlineKeyboardMarkup {
 		aqiDownVal = *mcfg.AQI.LazyNotify.Down
 	}
 
+	pm10UpVal := 2
+	if mcfg.PM10.LazyNotify.Up != nil {
+		pm10UpVal = *mcfg.PM10.LazyNotify.Up
+	}
+	pm10DownVal := 3
+	if mcfg.PM10.LazyNotify.Down != nil {
+		pm10DownVal = *mcfg.PM10.LazyNotify.Down
+	}
+
+	pm25UpVal := 2
+	if mcfg.PM25.LazyNotify.Up != nil {
+		pm25UpVal = *mcfg.PM25.LazyNotify.Up
+	}
+	pm25DownVal := 3
+	if mcfg.PM25.LazyNotify.Down != nil {
+		pm25DownVal = *mcfg.PM25.LazyNotify.Down
+	}
+
 	return tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(b.T(chatID, "btnAqiLazyUp", map[string]interface{}{"val": aqiUpVal})).WithCallbackData("lazy_set:aqi:up"),
 			tu.InlineKeyboardButton(b.T(chatID, "btnAqiLazyDown", map[string]interface{}{"val": aqiDownVal})).WithCallbackData("lazy_set:aqi:down"),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, btnPm25LazyUp, map[string]interface{}{"val": pm25UpVal})).WithCallbackData("lazy_set:pm25:up"),
+			tu.InlineKeyboardButton(b.T(chatID, btnPm25LazyDown, map[string]interface{}{"val": pm25DownVal})).WithCallbackData("lazy_set:pm25:down"),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(b.T(chatID, btnPm10LazyUp, map[string]interface{}{"val": pm10UpVal})).WithCallbackData("lazy_set:pm10:up"),
+			tu.InlineKeyboardButton(b.T(chatID, btnPm10LazyDown, map[string]interface{}{"val": pm10DownVal})).WithCallbackData("lazy_set:pm10:down"),
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(b.T(chatID, btnBackSettings)).WithCallbackData(cmdSettings),

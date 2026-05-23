@@ -86,6 +86,64 @@ type aqiLazyState struct {
 	DownCounter    int
 }
 
+type pmLazyState struct {
+	ConfirmedZone int
+	UpCounter     int
+	DownCounter   int
+}
+
+func processLazyZoneTransition(state *pmLazyState, currentZone, delayUp, delayDown int) (shouldNotify bool, oldZone, newZone int) {
+	if state.ConfirmedZone == -1 {
+		state.ConfirmedZone = currentZone
+		return false, -1, currentZone
+	}
+	if delayUp == 0 && delayDown == 0 {
+		if currentZone != state.ConfirmedZone {
+			old := state.ConfirmedZone
+			state.ConfirmedZone = currentZone
+			return true, old, currentZone
+		}
+		return false, 0, 0
+	}
+
+	if currentZone > state.ConfirmedZone {
+		state.UpCounter++
+		state.DownCounter = 0
+	} else if currentZone < state.ConfirmedZone {
+		state.DownCounter++
+		state.UpCounter = 0
+	} else {
+		state.UpCounter = 0
+		state.DownCounter = 0
+	}
+
+	effectiveDelayUp := delayUp + 1
+	if effectiveDelayUp < 1 {
+		effectiveDelayUp = 1
+	}
+	if state.UpCounter >= effectiveDelayUp && currentZone > state.ConfirmedZone {
+		old := state.ConfirmedZone
+		state.ConfirmedZone = currentZone
+		state.UpCounter = 0
+		state.DownCounter = 0
+		return true, old, currentZone
+	}
+
+	effectiveDelayDown := delayDown + 1
+	if effectiveDelayDown < 1 {
+		effectiveDelayDown = 1
+	}
+	if state.DownCounter >= effectiveDelayDown && currentZone < state.ConfirmedZone {
+		old := state.ConfirmedZone
+		state.ConfirmedZone = currentZone
+		state.DownCounter = 0
+		state.UpCounter = 0
+		return true, old, currentZone
+	}
+
+	return false, 0, 0
+}
+
 // MonitorService processes incoming sensor measurements, evaluates expressions, detects alerts, and triggers notifications.
 type MonitorService struct {
 	cfg        *config.Config
@@ -93,8 +151,10 @@ type MonitorService struct {
 	mu         sync.RWMutex
 	notifier   Notifier
 	store      MeasurementStore
-	evaluators map[string]*DeviceEvaluator
-	lazyStates map[aqiLazyKey]*aqiLazyState
+	evaluators     map[string]*DeviceEvaluator
+	lazyStates     map[aqiLazyKey]*aqiLazyState
+	pm10LazyStates map[aqiLazyKey]*pmLazyState
+	pm25LazyStates map[aqiLazyKey]*pmLazyState
 }
 
 // SetNotifier attaches a Notifier that will receive warning callbacks.
@@ -152,9 +212,11 @@ func NewMonitorService(cfg *config.Config, store MeasurementStore) *MonitorServi
 	s := &MonitorService{
 		cfg:        cfg,
 		history:    hist,
-		evaluators: evaluatorsMap,
-		store:      store,
-		lazyStates: make(map[aqiLazyKey]*aqiLazyState),
+		evaluators:     evaluatorsMap,
+		store:          store,
+		lazyStates:     make(map[aqiLazyKey]*aqiLazyState),
+		pm10LazyStates: make(map[aqiLazyKey]*pmLazyState),
+		pm25LazyStates: make(map[aqiLazyKey]*pmLazyState),
 	}
 
 	for id := range s.history {
@@ -445,32 +507,71 @@ func (s *MonitorService) notify(m *Measurement) {
 			}
 		}
 
+		// Fetch delays for PM10 and PM2.5
+		delayUp10, delayDown10 := 0, 0
+		if mcfg.PM10.LazyNotify.Up != nil {
+			delayUp10 = *mcfg.PM10.LazyNotify.Up
+		}
+		if mcfg.PM10.LazyNotify.Down != nil {
+			delayDown10 = *mcfg.PM10.LazyNotify.Down
+		}
+
+		delayUp25, delayDown25 := 0, 0
+		if mcfg.PM25.LazyNotify.Up != nil {
+			delayUp25 = *mcfg.PM25.LazyNotify.Up
+		}
+		if mcfg.PM25.LazyNotify.Down != nil {
+			delayDown25 = *mcfg.PM25.LazyNotify.Down
+		}
+
+		s.mu.Lock()
+		pmStateKey := aqiLazyKey{ChatID: chatID, DeviceID: m.DeviceID}
+
+		state10, exists10 := s.pm10LazyStates[pmStateKey]
+		if !exists10 {
+			state10 = &pmLazyState{ConfirmedZone: -1}
+			s.pm10LazyStates[pmStateKey] = state10
+		}
+		shouldNotify10, effOldZ10, effZ10 := processLazyZoneTransition(state10, z10, delayUp10, delayDown10)
+
+		state25, exists25 := s.pm25LazyStates[pmStateKey]
+		if !exists25 {
+			state25 = &pmLazyState{ConfirmedZone: -1}
+			s.pm25LazyStates[pmStateKey] = state25
+		}
+		shouldNotify25, effOldZ25, effZ25 := processLazyZoneTransition(state25, z25, delayUp25, delayDown25)
+		s.mu.Unlock()
+
 		// PM10 transitions
-		if z10 == zoneYellow && prevZ10 == zoneGreen {
-			addEvent("val10_l2u")
-		}
-		if z10 == zoneRed && prevZ10 != zoneRed {
-			addEvent("val10_l3u")
-		}
-		if z10 == zoneYellow && prevZ10 == zoneRed {
-			addEvent("val10_l2d")
-		}
-		if z10 == zoneGreen && prevZ10 != zoneGreen {
-			addClear("val10_l1d")
+		if shouldNotify10 {
+			if effZ10 == zoneYellow && effOldZ10 == zoneGreen {
+				addEvent("val10_l2u")
+			}
+			if effZ10 == zoneRed && effOldZ10 != zoneRed {
+				addEvent("val10_l3u")
+			}
+			if effZ10 == zoneYellow && effOldZ10 == zoneRed {
+				addEvent("val10_l2d")
+			}
+			if effZ10 == zoneGreen && effOldZ10 != zoneGreen {
+				addClear("val10_l1d")
+			}
 		}
 
 		// PM2.5 transitions
-		if z25 == zoneYellow && prevZ25 == zoneGreen {
-			addEvent("val25_l2u")
-		}
-		if z25 == zoneRed && prevZ25 != zoneRed {
-			addEvent("val25_l3u")
-		}
-		if z25 == zoneYellow && prevZ25 == zoneRed {
-			addEvent("val25_l2d")
-		}
-		if z25 == zoneGreen && prevZ25 != zoneGreen {
-			addClear("val25_l1d")
+		if shouldNotify25 {
+			if effZ25 == zoneYellow && effOldZ25 == zoneGreen {
+				addEvent("val25_l2u")
+			}
+			if effZ25 == zoneRed && effOldZ25 != zoneRed {
+				addEvent("val25_l3u")
+			}
+			if effZ25 == zoneYellow && effOldZ25 == zoneRed {
+				addEvent("val25_l2d")
+			}
+			if effZ25 == zoneGreen && effOldZ25 != zoneGreen {
+				addClear("val25_l1d")
+			}
 		}
 
 		// Combined transitions

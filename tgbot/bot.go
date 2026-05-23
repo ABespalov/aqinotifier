@@ -46,6 +46,10 @@ const (
 	stateAwaitDeviceID
 	stateAwaitAQILazyUp
 	stateAwaitAQILazyDown
+	stateAwaitPM10LazyUp
+	stateAwaitPM10LazyDown
+	stateAwaitPM25LazyUp
+	stateAwaitPM25LazyDown
 )
 
 const (
@@ -83,6 +87,10 @@ const (
 	btnRename              = "btnRename"
 	btnLazySettings        = "btnLazySettings"
 	btnCancel              = "btnCancel"
+	btnPm25LazyUp          = "btnPm25LazyUp"
+	btnPm25LazyDown        = "btnPm25LazyDown"
+	btnPm10LazyUp          = "btnPm10LazyUp"
+	btnPm10LazyDown        = "btnPm10LazyDown"
 )
 
 const (

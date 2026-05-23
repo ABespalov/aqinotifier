@@ -150,6 +150,14 @@ func (b *Bot) handleMessage(msg *telego.Message) {
 		b.handleLazyUpdate(chatID, "aqi", "up", text)
 	case stateAwaitAQILazyDown:
 		b.handleLazyUpdate(chatID, "aqi", "down", text)
+	case stateAwaitPM10LazyUp:
+		b.handleLazyUpdate(chatID, "pm10", "up", text)
+	case stateAwaitPM10LazyDown:
+		b.handleLazyUpdate(chatID, "pm10", "down", text)
+	case stateAwaitPM25LazyUp:
+		b.handleLazyUpdate(chatID, "pm25", "up", text)
+	case stateAwaitPM25LazyDown:
+		b.handleLazyUpdate(chatID, "pm25", "down", text)
 	case stateAwaitDeviceName:
 		b.handleDeviceRename(chatID, msg)
 		return
@@ -320,7 +328,10 @@ func (b *Bot) promptLazy(chatID int64, metric, direction string) {
 	mcfg := b.GetUserSettings(chatID)
 	var currentVal int
 
-	if metric == "aqi" {
+	var metricLabel string
+	switch metric {
+	case "aqi":
+		metricLabel = "AQI"
 		if direction == "up" {
 			b.setState(chatID, stateAwaitAQILazyUp)
 			if mcfg.AQI.LazyNotify.Up != nil {
@@ -332,10 +343,37 @@ func (b *Bot) promptLazy(chatID int64, metric, direction string) {
 				currentVal = *mcfg.AQI.LazyNotify.Down
 			}
 		}
+	case "pm10":
+		metricLabel = "PM10"
+		if direction == "up" {
+			b.setState(chatID, stateAwaitPM10LazyUp)
+			if mcfg.PM10.LazyNotify.Up != nil {
+				currentVal = *mcfg.PM10.LazyNotify.Up
+			}
+		} else {
+			b.setState(chatID, stateAwaitPM10LazyDown)
+			if mcfg.PM10.LazyNotify.Down != nil {
+				currentVal = *mcfg.PM10.LazyNotify.Down
+			}
+		}
+	case "pm25":
+		metricLabel = "PM2.5"
+		if direction == "up" {
+			b.setState(chatID, stateAwaitPM25LazyUp)
+			if mcfg.PM25.LazyNotify.Up != nil {
+				currentVal = *mcfg.PM25.LazyNotify.Up
+			}
+		} else {
+			b.setState(chatID, stateAwaitPM25LazyDown)
+			if mcfg.PM25.LazyNotify.Down != nil {
+				currentVal = *mcfg.PM25.LazyNotify.Down
+			}
+		}
 	}
 
 	title := b.T(chatID, "msgLazyPromptTitle", map[string]interface{}{
-		"dir": direction,
+		"metric": metricLabel,
+		"dir":    direction,
 	})
 
 	text := b.T(chatID, "msgLazyPrompt", map[string]interface{}{
@@ -361,7 +399,10 @@ func (b *Bot) handleLazyUpdate(chatID int64, metric, direction, text string) {
 	mcfg := b.GetUserSettings(chatID)
 	var old int
 
-	if metric == "aqi" {
+	var metricLabel string
+	switch metric {
+	case "aqi":
+		metricLabel = "AQI"
 		if direction == "up" {
 			if mcfg.AQI.LazyNotify.Up != nil {
 				old = *mcfg.AQI.LazyNotify.Up
@@ -373,13 +414,40 @@ func (b *Bot) handleLazyUpdate(chatID int64, metric, direction, text string) {
 			}
 			mcfg.AQI.LazyNotify.Down = &val
 		}
+	case "pm10":
+		metricLabel = "PM10"
+		if direction == "up" {
+			if mcfg.PM10.LazyNotify.Up != nil {
+				old = *mcfg.PM10.LazyNotify.Up
+			}
+			mcfg.PM10.LazyNotify.Up = &val
+		} else {
+			if mcfg.PM10.LazyNotify.Down != nil {
+				old = *mcfg.PM10.LazyNotify.Down
+			}
+			mcfg.PM10.LazyNotify.Down = &val
+		}
+	case "pm25":
+		metricLabel = "PM2.5"
+		if direction == "up" {
+			if mcfg.PM25.LazyNotify.Up != nil {
+				old = *mcfg.PM25.LazyNotify.Up
+			}
+			mcfg.PM25.LazyNotify.Up = &val
+		} else {
+			if mcfg.PM25.LazyNotify.Down != nil {
+				old = *mcfg.PM25.LazyNotify.Down
+			}
+			mcfg.PM25.LazyNotify.Down = &val
+		}
 	}
 
 	b.store.UpdateSettings(chatID, mcfg)
 	b.setState(chatID, stateIdle)
 
 	title := b.T(chatID, "msgLazyPromptTitle", map[string]interface{}{
-		"dir": direction,
+		"metric": metricLabel,
+		"dir":    direction,
 	})
 
 	res := b.T(chatID, "msgLazyUpd", map[string]interface{}{

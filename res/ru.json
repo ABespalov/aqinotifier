@@ -240,8 +240,12 @@
   "btnLazySettings": "{icoTime} Задержки",
   "btnAqiLazyUp": "{icoTrendUp} Рост AQI: {val} изм.",
   "btnAqiLazyDown": "{icoTrendDown} Спад AQI: {val} изм.",
+  "btnPm25LazyUp": "{icoTrendUp} Рост PM2.5: {val} изм.",
+  "btnPm25LazyDown": "{icoTrendDown} Спад PM2.5: {val} изм.",
+  "btnPm10LazyUp": "{icoTrendUp} Рост PM10: {val} изм.",
+  "btnPm10LazyDown": "{icoTrendDown} Спад PM10: {val} изм.",
   "msgLazyMenu": "{icoTime} <b>Задержки уведомлений</b>\n\nНастройте задержки (в количестве последовательных измерений) для фильтрации колебаний на границах зон.",
-  "msgLazyPromptTitle": "Задержка AQI при {?dir == up%повышении%понижении} уровня",
+  "msgLazyPromptTitle": "Задержка {metric} при {?dir == up%повышении%понижении} уровня",
   "msgLazyPrompt": "<b>{title}</b>\n\nТекущее значение: <b>{curr}</b> изм.\nВведите новое целое число (0 для отключения):",
-  "msgLazyUpd": "{icoSuccess} Задержка AQI при {?dir == up%повышении%понижении} уровня обновлена с <b>{old}</b> до <b>{new}</b>"
+  "msgLazyUpd": "{icoSuccess} {title} обновлена с <b>{old}</b> до <b>{new}</b>"
 }
