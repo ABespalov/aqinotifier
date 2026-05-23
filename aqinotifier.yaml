@@ -192,21 +192,18 @@ monitor:
         - down
       - level3:
         - up
-        - down
     val10:
       - level2:
         - up
         - down
       - level3:
         - up
-        - down
     vals:
       - level2:
         - up
         - down
       - level3:
         - up
-        - down
 
 # Optional: metrics / observability settings could be added here later.
 

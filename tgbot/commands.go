@@ -552,9 +552,19 @@ func (b *Bot) cmdResetConfirm(chatID int64) {
 		}
 	}
 
+	lazyStr := func(v *int) string {
+		if v == nil {
+			return "-"
+		}
+		return fmt.Sprintf("%d", *v)
+	}
+
 	text := b.T(chatID, "msgResetConfirm", map[string]interface{}{
 		"l1_25": d.PM25.Level1, "l2_25": d.PM25.Level2, "dyn25": d.PM25.Diff,
 		"l1_10": d.PM10.Level1, "l2_10": d.PM10.Level2, "dyn10": d.PM10.Diff,
+		"lazyUp25": lazyStr(d.PM25.LazyNotify.Up), "lazyDown25": lazyStr(d.PM25.LazyNotify.Down),
+		"lazyUp10": lazyStr(d.PM10.LazyNotify.Up), "lazyDown10": lazyStr(d.PM10.LazyNotify.Down),
+		"lazyUpAqi": lazyStr(d.AQI.LazyNotify.Up), "lazyDownAqi": lazyStr(d.AQI.LazyNotify.Down),
 		"stdName": stdLabel, "aqiStandardFlag": b.I("icoFlag" + strings.ToUpper(std)),
 		"unitT": unitT, "unitP": unitP,
 		"alertsList": alertsSB.String(),
@@ -567,9 +577,19 @@ func (b *Bot) cmdResetExecute(chatID int64) {
 	b.store.ResetSettings(chatID, b.defaults)
 
 	mcfg := b.store.GetSettings(chatID, b.defaults)
+	lazyStr := func(v *int) string {
+		if v == nil {
+			return "-"
+		}
+		return fmt.Sprintf("%d", *v)
+	}
+
 	text := b.T(chatID, msgResetExecution, map[string]interface{}{
 		"l1_25": mcfg.PM25.Level1, "l2_25": mcfg.PM25.Level2, "dyn25": mcfg.PM25.Diff,
 		"l1_10": mcfg.PM10.Level1, "l2_10": mcfg.PM10.Level2, "dyn10": mcfg.PM10.Diff,
+		"lazyUp25": lazyStr(mcfg.PM25.LazyNotify.Up), "lazyDown25": lazyStr(mcfg.PM25.LazyNotify.Down),
+		"lazyUp10": lazyStr(mcfg.PM10.LazyNotify.Up), "lazyDown10": lazyStr(mcfg.PM10.LazyNotify.Down),
+		"lazyUpAqi": lazyStr(mcfg.AQI.LazyNotify.Up), "lazyDownAqi": lazyStr(mcfg.AQI.LazyNotify.Down),
 	})
 
 	b.sendWithKeyboard(chatID, text, b.settingsKeyboard(chatID))
