@@ -71,6 +71,7 @@ const (
 	chartThresholdPaddingCoef = 3.0
 	chartDotLargeCoef         = 2.4
 	chartDotSmallCoef         = 0.8
+	chartDotHistoryCoef       = 3.5
 	chartDashWidthCoef        = 0.35
 
 	chartAggregationWindow = 15 * time.Minute
@@ -182,7 +183,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	var buffers [][]byte
 	if len(aqiValues) > 0 {
 		aqiTitle := b.T(chatID, "txtChartTitleAqi")
-		aqiBuf, err := b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQI.Standard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+		aqiBuf, err := b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQI.Standard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth, true)
 		if err == nil {
 			buffers = append(buffers, aqiBuf)
 		}
@@ -191,7 +192,7 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	pmTitle := b.T(chatID, "txtChartPmTitle")
 	pmBuf, err := b.buildChart(chatID, deviceID, pmTitle, b.T(chatID, "txtUnitPm"), labels,
 		[]string{"PM2.5", "PM10"},
-		[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+		[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth, true)
 	if err == nil {
 		buffers = append(buffers, pmBuf)
 	}
@@ -199,21 +200,21 @@ func generateCharts(b *Bot, chatID int64, hist []monitor.Measurement, chartWidth
 	if len(tempValues) > 0 {
 		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "txtChartTitleTemp"), b.unitTempLabel(chatID), labels,
 			[]string{b.T(chatID, "msgTemp"), b.T(chatID, "msgDewPoint")},
-			[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+			[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth, true)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
 	}
 
 	if len(humValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "txtChartTitleHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "txtChartTitleHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth, true)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
 	}
 
 	if len(pressValues) > 0 {
-		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "txtChartTitlePress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+		buf, err := b.buildChart(chatID, deviceID, b.T(chatID, "txtChartTitlePress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth, true)
 		if err == nil {
 			buffers = append(buffers, buf)
 		}
@@ -320,31 +321,31 @@ func generateSingleChart(b *Bot, chatID int64, hist []monitor.Measurement, chart
 	case "pm":
 		return b.buildChart(chatID, deviceID, pmTitle, pmUnit,
 			labels, []string{"PM2.5", "PM10"},
-			[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+			[][]float64{pm25Values, pm10Values}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth, false)
 	case "temp":
 		if len(tempValues) > 0 {
 			return b.buildChart(chatID, deviceID, b.T(chatID, "msgTemp"), b.unitTempLabel(chatID),
 				labels, []string{b.T(chatID, "msgTemp"), b.T(chatID, "msgDewPoint")},
-				[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+				[][]float64{tempValues, dewPointValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth, false)
 		}
 	case "hum":
 		if len(humValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msgHum"), "%", labels, []string{b.T(chatID, "msgHum")}, [][]float64{humValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth, false)
 		}
 	case "press":
 		if len(pressValues) > 0 {
-			return b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+			return b.buildChart(chatID, deviceID, b.T(chatID, "msgPress"), b.unitPressLabel(chatID), labels, []string{b.T(chatID, "msgPress")}, [][]float64{pressValues}, false, chartWidth, chartHeight, chartFontSize, mcfg, smooth, false)
 		}
 	case "aqi":
 		if len(aqiValues) > 0 {
-			return b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQI.Standard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth)
+			return b.buildChart(chatID, deviceID, aqiTitle, mcfg.AQI.Standard, labels, []string{"AQI"}, [][]float64{aqiValues}, true, chartWidth, chartHeight, chartFontSize, mcfg, smooth, false)
 		}
 	}
 
 	return nil, nil
 }
 
-func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string, labels []string, seriesNames []string, data [][]float64, forceZero bool, chartWidth, chartHeight int, chartFontSize float64, mcfg *config.Monitor, smooth float64) ([]byte, error) {
+func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string, labels []string, seriesNames []string, data [][]float64, forceZero bool, chartWidth, chartHeight int, chartFontSize float64, mcfg *config.Monitor, smooth float64, drawPoints bool) ([]byte, error) {
 	isPM := title == b.T(chatID, "txtChartPmTitle")
 	isAQI := strings.Contains(title, "AQI")
 
@@ -508,9 +509,34 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		return y
 	}
 
-	drawSeriesPoints := func(seriesData []float64, color charts.Color, yOffset float64) {
-		// Dots on data points are now disabled globally.
-		// Threshold crossing dots are handled by drawDots function.
+	drawSeriesPoints := func(seriesData []float64, color charts.Color, yOffset float64, thresholds []float64) {
+		if !drawPoints || len(seriesData) < 2 {
+			return
+		}
+		for i, val := range seriesData {
+			if val == charts.GetNullValue() {
+				continue
+			}
+
+			// Skip points that are exactly on thresholds because they are rendered as circles with white centers
+			isOnThreshold := false
+			for _, tVal := range thresholds {
+				if math.Abs(val-tVal) < 0.0001 {
+					isOnThreshold = true
+					break
+				}
+			}
+			if isOnThreshold {
+				continue
+			}
+
+			x := float64(i) / float64(len(seriesData)-1) * gridW
+			y := yFunc(val) + yOffset
+
+			// Draw diagonal square (diamond)
+			diamondSize := int(math.Round(chartStrokeWidth * chartDotHistoryCoef))
+			pureCp.FilledDiamond(int(x), int(y), diamondSize, diamondSize, color, color, 0)
+		}
 	}
 
 	drawDots := func(seriesData []float64, threshold float64, color charts.Color, yOffset float64) {
@@ -610,8 +636,8 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		drawThreshold(mcfg.PM10.Level2, b.getChartColor("colorBlue"), false, y10Offset)
 		drawDots(data[1], mcfg.PM10.Level2, b.getChartColor("colorBlue"), y10Offset)
 
-		drawSeriesPoints(data[0], b.getChartColor("colorRed"), 0)
-		drawSeriesPoints(data[1], b.getChartColor("colorBlue"), g10Offset)
+		drawSeriesPoints(data[0], b.getChartColor("colorRed"), 0, []float64{mcfg.PM25.Level1, mcfg.PM25.Level2})
+		drawSeriesPoints(data[1], b.getChartColor("colorBlue"), g10Offset, []float64{mcfg.PM10.Level1, mcfg.PM10.Level2})
 	}
 
 	if isAQI {
@@ -655,7 +681,11 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 			pureCp.DashedLineStroke([]charts.Point{{X: 0, Y: int(y)}, {X: int(gridW), Y: int(y)}}, colors[i-1], dashWidth, dashPattern)
 			drawDots(data[0], val, b.getChartColor("colorGray"), 0)
 		}
-		drawSeriesPoints(data[0], b.getChartColor("colorGray"), 0)
+		var aqiThresholds []float64
+		if len(breakpoints) > 1 {
+			aqiThresholds = breakpoints[1:]
+		}
+		drawSeriesPoints(data[0], b.getChartColor("colorGray"), 0, aqiThresholds)
 	}
 
 	if !isPM && !isAQI {
@@ -667,7 +697,7 @@ func (b *Bot) buildChart(chatID int64, deviceID string, title, yAxisName string,
 		}
 		for i, c := range colors {
 			if i < len(data) {
-				drawSeriesPoints(data[i], c, 0)
+				drawSeriesPoints(data[i], c, 0, nil)
 			}
 		}
 	}
