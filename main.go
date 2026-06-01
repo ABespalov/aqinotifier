@@ -24,7 +24,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const BotVersion = "0.18.0a"
+const BotVersion = "0.18.1a"
 
 func main() {
 	execPath, err := os.Executable()

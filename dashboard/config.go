@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -153,5 +154,6 @@ func ParseConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing dashboard YAML: %w", err)
 	}
 
+	log.Info().Str("file", path).Msg("dashboard: loaded layout settings from file")
 	return &cfg, nil
 }

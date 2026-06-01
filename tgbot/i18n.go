@@ -143,7 +143,7 @@ func loadExternalTranslations(dir string) {
 			return nil
 		}
 		if filepath.Ext(path) == ".json" {
-			if info.Name() == "ico.json" {
+			if info.Name() == "ico.json" || info.Name() == "colors.json" || info.Name() == "aqi.json" {
 				return nil
 			}
 			data, err := os.ReadFile(path)
@@ -162,6 +162,7 @@ func loadExternalTranslations(dir string) {
 					langDicts[lang][k] = v
 				}
 				i18nMu.Unlock()
+				log.Info().Str("file", path).Msg("i18n: loaded translations from additional file")
 			} else {
 				log.Warn().Err(err).Str("path", path).Msg("i18n: failed to unmarshal translation file")
 			}
@@ -188,6 +189,7 @@ func loadIcons(dir string) {
 			iconsMap[k] = v
 		}
 		i18nMu.Unlock()
+		log.Info().Str("file", path).Msg("i18n: loaded icons from additional file")
 	} else {
 		log.Warn().Err(err).Str("path", path).Msg("i18n: failed to unmarshal icons file")
 	}
@@ -208,6 +210,7 @@ func loadColors(dir string) {
 			colorsMap[k] = v
 		}
 		i18nMu.Unlock()
+		log.Info().Str("file", path).Msg("i18n: loaded colors from additional file")
 	} else {
 		log.Warn().Err(err).Str("path", path).Msg("i18n: failed to unmarshal colors file")
 	}
@@ -228,6 +231,7 @@ func loadAQIStandards(dir string) {
 		log.Error().Err(err).Msg("i18n: failed to load AQI standards")
 		return
 	}
+	log.Info().Str("file", path).Msg("i18n: loaded AQI standards from additional file")
 
 	// Localize standards from loaded translations/icons.
 	// Use GetStandards() to get a thread-safe snapshot.

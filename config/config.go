@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v3"
 )
 
@@ -833,6 +834,7 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 	if err := yaml.Unmarshal(yamlFile, cfg); err != nil {
 		return fmt.Errorf("unmarshalling config file %q: %w", fileName, err)
 	}
+	log.Info().Str("file", fileName).Msg("config: loaded settings from main configuration file")
 
 	// 4. Post-processing for other fields that support {app}
 	if cfg.Database.File.Json != "" {
@@ -847,6 +849,7 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 				if err := yaml.Unmarshal(pgData, &cfg.Database); err != nil {
 					return fmt.Errorf("unmarshalling pgsql file %q: %w", cfg.Database.File.Pgsql, err)
 				}
+				log.Info().Str("file", cfg.Database.File.Pgsql).Msg("config: loaded database settings from additional pgsql file")
 			}
 		}
 	}
@@ -876,6 +879,7 @@ func (cfg *Config) LoadFromFile(fileName string) error {
 				}
 			}
 			cfg.TgBot.Token = strings.TrimSpace(content)
+			log.Info().Str("file", cfg.TgBot.File.Token).Msg("config: loaded Telegram bot token from additional file")
 		}
 	}
 

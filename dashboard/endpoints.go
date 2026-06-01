@@ -32,6 +32,8 @@ func RegisterHandlers(mux *http.ServeMux, appCfg *config.Config, ms *monitor.Mon
 			handleDashboardRequest(w, r, file, appCfg, ms)
 		})
 	}
+
+	log.Info().Msg("dashboard: listener started")
 }
 
 // findDefaultDevice attempts to resolve a fallback device ID if the client did not supply one.

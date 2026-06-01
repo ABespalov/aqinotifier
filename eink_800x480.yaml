@@ -36,9 +36,7 @@ output:
 
 # Access Control List (ACL) - allowed IP addresses or CIDR subnets to request this dashboard
 allowed:
-  - "192.168.1.0/24"
-  - "10.0.0.10"
-  - "fe80::/10"
+  - "192.168.101.0/24"
   - "127.0.0.1"
 
 # Unit overrides for various sensor types

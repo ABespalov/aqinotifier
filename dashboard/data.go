@@ -14,6 +14,7 @@ import (
 	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/monitor"
 	"github.com/ABespalov/aqinotifier/sensor"
+	"github.com/rs/zerolog/log"
 )
 
 const (
@@ -48,6 +49,7 @@ func LoadLanguageDict(lang string) map[string]string {
 			for k, v := range enDict {
 				dict[k] = v
 			}
+			log.Info().Str("file", enPath).Msg("dashboard: loaded base translations from additional file")
 		}
 	}
 
@@ -61,6 +63,7 @@ func LoadLanguageDict(lang string) map[string]string {
 				for k, v := range langDict {
 					dict[k] = v
 				}
+				log.Info().Str("file", langPath).Msg("dashboard: loaded localized translations from additional file")
 			}
 		}
 	}
