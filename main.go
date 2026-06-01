@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ABespalov/aqinotifier/config"
+	"github.com/ABespalov/aqinotifier/dashboard"
 	"github.com/ABespalov/aqinotifier/monitor"
 	"github.com/ABespalov/aqinotifier/sensor"
 	"github.com/ABespalov/aqinotifier/storage"
@@ -23,7 +24,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-const BotVersion = "0.17.3a"
+const BotVersion = "0.18.0a"
 
 func main() {
 	execPath, err := os.Executable()
@@ -141,6 +142,8 @@ func main() {
 					oldTgToken := cfg.TgBot.Token
 					oldLogLevel := cfg.Log.Level
 					oldLogFile := cfg.Log.LogFile
+					oldDashboardsEnabled := cfg.Dashboards.Enabled
+					oldEndpoints := cfg.Dashboards.Endpoints
 
 					*cfg = *newCfg
 					updateModTimes(cfg)
@@ -163,7 +166,8 @@ func main() {
 						}
 					}
 
-					if cfg.Server.Node() != oldNode || cfg.Server.Protocol != oldProto || cfg.Server.Url != oldUrl || cfg.Server.File.Cert != oldCert || cfg.Server.File.Key != oldKey {
+					dashboardsChanged := cfg.Dashboards.Enabled != oldDashboardsEnabled || !endpointsEqual(cfg.Dashboards.Endpoints, oldEndpoints)
+					if dashboardsChanged || cfg.Server.Node() != oldNode || cfg.Server.Protocol != oldProto || cfg.Server.Url != oldUrl || cfg.Server.File.Cert != oldCert || cfg.Server.File.Key != oldKey {
 						select {
 						case restartServer <- struct{}{}:
 						default:
@@ -227,6 +231,9 @@ func main() {
 		mux.HandleFunc(cfg.Server.Url, func(w http.ResponseWriter, r *http.Request) {
 			apiHandler(w, r, ms)
 		})
+		if cfg.Dashboards.Enabled {
+			dashboard.RegisterHandlers(mux, cfg, ms)
+		}
 		srv = &http.Server{
 			Addr:    cfg.Server.Node(),
 			Handler: mux,
@@ -274,4 +281,17 @@ func apiHandler(w http.ResponseWriter, r *http.Request, ms *monitor.MonitorServi
 	ms.Process(data)
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Data received")
+}
+
+// endpointsEqual checks if two lists of DashboardEndpoints are identical.
+func endpointsEqual(a, b []config.DashboardEndpoint) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Path != b[i].Path || a[i].File != b[i].File {
+			return false
+		}
+	}
+	return true
 }

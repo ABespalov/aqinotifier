@@ -12,7 +12,7 @@ import (
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 // Server holds HTTP server binding settings and the URL path used by the
@@ -258,18 +258,20 @@ func mapLevelDirToCanonical(lvl, dir string) string {
 	dir = strings.ToLower(strings.TrimSpace(dir))
 
 	// Normalize level prefix
-	if lvl == "l1" {
+	switch lvl {
+	case "l1":
 		lvl = "level1"
-	} else if lvl == "l2" {
+	case "l2":
 		lvl = "level2"
-	} else if lvl == "l3" {
+	case "l3":
 		lvl = "level3"
 	}
 
 	// Normalize direction
-	if dir == "u" {
+	switch dir {
+	case "u":
 		dir = "up"
-	} else if dir == "d" {
+	case "d":
 		dir = "down"
 	}
 
@@ -750,13 +752,26 @@ func NewTgBotConfig() *TgBot {
 	}
 }
 
+// DashboardEndpoint represents a custom dashboard HTTP endpoint definition.
+type DashboardEndpoint struct {
+	Path string `yaml:"path"`
+	File string `yaml:"file"`
+}
+
+// DashboardsConfig contains general configuration for serving custom dashboards.
+type DashboardsConfig struct {
+	Enabled   bool                `yaml:"enabled"`
+	Endpoints []DashboardEndpoint `yaml:"endpoints"`
+}
+
 type Config struct {
-	System   System   `yaml:"system"`
-	Server   Server   `yaml:"server"`
-	Database Database `yaml:"database"`
-	Monitor  Monitor  `yaml:"monitor"`
-	Log      Log      `yaml:"log"`
-	TgBot    TgBot    `yaml:"tgbot"`
+	System     System           `yaml:"system"`
+	Server     Server           `yaml:"server"`
+	Database   Database         `yaml:"database"`
+	Monitor    Monitor          `yaml:"monitor"`
+	Log        Log              `yaml:"log"`
+	TgBot      TgBot            `yaml:"tgbot"`
+	Dashboards DashboardsConfig `yaml:"dashboards"`
 }
 
 // NewConfig returns a Config initialized with defaults for all sub-sections.
@@ -768,6 +783,9 @@ func NewConfig() *Config {
 		Monitor:  *NewMonitorConfig(),
 		Log:      *NewLogConfig(),
 		TgBot:    *NewTgBotConfig(),
+		Dashboards: DashboardsConfig{
+			Enabled: false,
+		},
 	}
 }
 

@@ -1,0 +1,229 @@
+// Package dashboard handles loading layouts, managing visual endpoints,
+// preparing telemetry and rendering dashboard screens to EPD, PNG, or BMP.
+package dashboard
+
+import (
+	"fmt"
+	"net"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/ABespalov/aqinotifier/config"
+	"github.com/ABespalov/aqinotifier/monitor"
+	"github.com/rs/zerolog/log"
+)
+
+// RegisterHandlers binds visual dashboard routing paths specified in the main configuration
+// to the HTTP server multiplexer.
+func RegisterHandlers(mux *http.ServeMux, appCfg *config.Config, ms *monitor.MonitorService) {
+	if !appCfg.Dashboards.Enabled {
+		return
+	}
+
+	for _, ep := range appCfg.Dashboards.Endpoints {
+		path := ep.Path
+		file := ep.File
+
+		log.Info().Str("path", path).Str("file", file).Msg("dashboard: registering route")
+
+		// Create a separate handler instance for each route
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			handleDashboardRequest(w, r, file, appCfg, ms)
+		})
+	}
+}
+
+// findDefaultDevice attempts to resolve a fallback device ID if the client did not supply one.
+func findDefaultDevice(appCfg *config.Config) string {
+	// Try finding the first mapped device name
+	for id := range appCfg.Monitor.DeviceNames {
+		if id != "" {
+			return id
+		}
+	}
+	// Try finding the first correction formula device prefix
+	for id := range appCfg.Monitor.Corrections {
+		if id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// isAllowed validates if the client IP is allowed by the dashboard Access Control List (ACL).
+func isAllowed(remoteAddr string, allowedCIDRs []string) bool {
+	if len(allowedCIDRs) == 0 {
+		return true // Allow all if allowed CIDR list is empty
+	}
+
+	// Split host and port from RemoteAddr
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+
+	clientIP := net.ParseIP(host)
+	if clientIP == nil {
+		return false
+	}
+
+	for _, pattern := range allowedCIDRs {
+		pattern = strings.TrimSpace(pattern)
+		// Check CIDR format
+		if _, ipNet, err := net.ParseCIDR(pattern); err == nil {
+			if ipNet.Contains(clientIP) {
+				return true
+			}
+		} else {
+			// Check single IP format
+			if ip := net.ParseIP(pattern); ip != nil {
+				if ip.Equal(clientIP) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// handleDashboardRequest handles incoming GET queries for visual dashboards.
+// It loads layout configs dynamically, checks ACL, resolves telemetry/history,
+// renders layouts, and handles panics/errors visually.
+func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath string, appCfg *config.Config, ms *monitor.MonitorService) {
+	// Format settings (config defaults) used in case of panic/error page rendering
+	errFormat := "png"
+	var errMapping map[string][]int
+	var errPalette map[string]string
+	errWidth, errHeight := 800, 480 // fallback dimensions
+
+	// Setup panic recovery to display error message directly on the e-ink display
+	defer func() {
+		if rec := recover(); rec != nil {
+			errStr := fmt.Sprintf("Panic recovered: %v", rec)
+			log.Error().Str("panic", errStr).Msg("dashboard: panic recovered during rendering")
+			w.Header().Set("Content-Type", "image/png")
+			errBytes := RenderErrorImage(errWidth, errHeight, errStr, errFormat, errMapping, errPalette)
+			_, _ = w.Write(errBytes)
+		}
+	}()
+
+	// 1. Dynamic Live Parsing of dashboard layout config
+	layoutCfg, err := ParseConfig(layoutPath)
+	if err != nil {
+		log.Error().Err(err).Str("file", layoutPath).Msg("dashboard: failed to parse layout config")
+		w.Header().Set("Content-Type", "image/png")
+		errBytes := RenderErrorImage(errWidth, errHeight, "Failed to load layout: "+err.Error(), errFormat, errMapping, errPalette)
+		_, _ = w.Write(errBytes)
+		return
+	}
+
+	// Update error fallbacks with parsed config values
+	errWidth = layoutCfg.Screen.Width
+	errHeight = layoutCfg.Screen.Height
+	errFormat = layoutCfg.Output.Format
+	errMapping = layoutCfg.Output.Mapping
+	errPalette = layoutCfg.Screen.Palette
+
+	// 2. Access Control List check
+	if !isAllowed(r.RemoteAddr, layoutCfg.Allowed) {
+		log.Warn().Str("remote", r.RemoteAddr).Str("file", layoutPath).Msg("dashboard: forbidden IP address")
+		http.Error(w, "Forbidden: IP not allowed by ACL", http.StatusForbidden)
+		return
+	}
+
+	// 3. Resolve Target Device ID
+	deviceID := r.URL.Query().Get("device")
+	if deviceID == "" {
+		deviceID = r.URL.Query().Get("device_id")
+	}
+	if deviceID == "" {
+		deviceID = findDefaultDevice(appCfg)
+	}
+
+	if deviceID == "" {
+		log.Error().Msg("dashboard: no devices configured or requested")
+		w.Header().Set("Content-Type", getContentType(errFormat))
+		errBytes := RenderErrorImage(errWidth, errHeight, "No devices registered. Check device config or query params.", errFormat, errMapping, errPalette)
+		_, _ = w.Write(errBytes)
+		return
+	}
+
+	// 4. Fetch telemetry measurements
+	m := ms.LastMeasurement(deviceID)
+	if m == nil {
+		log.Error().Str("device", deviceID).Msg("dashboard: no measurement telemetry found")
+		w.Header().Set("Content-Type", getContentType(errFormat))
+		errBytes := RenderErrorImage(errWidth, errHeight, "No telemetry found for device: "+deviceID, errFormat, errMapping, errPalette)
+		_, _ = w.Write(errBytes)
+		return
+	}
+
+	// 5. Load localization dictionaries and build parameters map
+	lang := layoutCfg.Lang
+	if lang == "" {
+		lang = "ru"
+	}
+	dict := LoadLanguageDict(lang)
+	telemetryMap := BuildTelemetryMap(m, appCfg, dict)
+
+	// 6. Load database history for chart components
+	var history []monitor.Measurement
+	// Look up chart duration to pull right timeline depth
+	maxDuration := 24 * time.Hour
+	for _, el := range layoutCfg.Layout {
+		if el.Type == "chart" && el.Duration != "" {
+			if d, err := time.ParseDuration(el.Duration); err == nil {
+				if d > maxDuration {
+					maxDuration = d
+				}
+			}
+		}
+	}
+	history = ms.GetHistoryByDuration(deviceID, maxDuration)
+
+	// 7. Render layout elements to image
+	img, err := Render(layoutCfg, telemetryMap, history)
+	if err != nil {
+		log.Error().Err(err).Msg("dashboard: rendering failed")
+		w.Header().Set("Content-Type", getContentType(errFormat))
+		errBytes := RenderErrorImage(errWidth, errHeight, "Render failed: "+err.Error(), errFormat, errMapping, errPalette)
+		_, _ = w.Write(errBytes)
+		return
+	}
+
+	// 8. Determine target output format
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = layoutCfg.Output.Format
+	}
+	if format == "" {
+		format = "png"
+	}
+
+	outputBytes, err := EncodeImage(img, format, layoutCfg.Output.Mapping, layoutCfg.Screen.Palette)
+	if err != nil {
+		log.Error().Err(err).Msg("dashboard: serialization failed")
+		w.Header().Set("Content-Type", getContentType(errFormat))
+		errBytes := RenderErrorImage(errWidth, errHeight, "Encode failed: "+err.Error(), errFormat, errMapping, errPalette)
+		_, _ = w.Write(errBytes)
+		return
+	}
+
+	w.Header().Set("Content-Type", getContentType(format))
+	_, _ = w.Write(outputBytes)
+}
+
+// getContentType returns the MIME standard content-type string for formats.
+func getContentType(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "png":
+		return "image/png"
+	case "bmp":
+		return "image/bmp"
+	case "epd_raw":
+		return "application/octet-stream"
+	default:
+		return "image/png"
+	}
+}

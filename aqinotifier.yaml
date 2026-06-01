@@ -235,3 +235,12 @@ tgbot:
       # Default units for measurements (Temperature: c/f, Pressure: mmhg/hpa)
       temp: "c"
       press: "mmhg"
+
+# Custom visual dashboards configuration.
+dashboards:
+  # Enable or disable visual dashboard rendering endpoints.
+  enabled: true
+  # List of endpoints mapping HTTP GET paths to layout YAML configs.
+  endpoints:
+    - path: "/dashboard/eink75"
+      file: "eink_800x480.yaml"

@@ -53,6 +53,12 @@ Highly granular Telegram notifications for:
 - Automatic migration of legacy data on startup
 - Last N measurements per device kept in RAM for fast access
 
+### Visual Dashboards
+- **Multi-Format Rendering** — dynamic visual layouts parsed on the fly and rendered to `epd_raw` (e-Ink/EPD binary format), `png`, and `bmp`
+- **Embedded Error Fallback** — high-contrast recovery layout rendered using embedded `Tamzen8x16r` font on panics or storage issues
+- **Access Control List (ACL)** — IP/CIDR validation specified directly inside layout config templates
+- **Dynamic Hot Reload** — layout YAML files are reloaded per request for quick prototyping
+
 ### Operations
 - Hot config reload (polling interval configurable)
 - Structured JSON logging with rotation support (via lumberjack)
@@ -297,7 +303,8 @@ All UI text, icons, and AQI definitions are in the `res/` directory:
 | Charts | [go-analyze/charts](https://github.com/go-analyze/charts) |
 | PostgreSQL | [lib/pq](https://github.com/lib/pq) |
 | Logging | [rs/zerolog](https://github.com/rs/zerolog) + lumberjack |
-| Config | gopkg.in/yaml.v2 |
+| Graphics Rendering | [github.com/fogleman/gg](https://github.com/fogleman/gg) |
+| Config | gopkg.in/yaml.v3 |
 
 ---
 

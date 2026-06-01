@@ -4,13 +4,15 @@ go 1.25.7
 
 require (
 	github.com/expr-lang/expr v1.17.8
+	github.com/fogleman/gg v1.3.0
 	github.com/go-analyze/charts v0.5.27
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.10.9
 	github.com/mymmrac/telego v1.8.0
 	github.com/rs/zerolog v1.34.0
+	golang.org/x/image v0.24.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
-	gopkg.in/yaml.v2 v2.4.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -33,6 +35,6 @@ require (
 	github.com/valyala/fasthttp v1.69.0 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
-	golang.org/x/image v0.24.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/text v0.32.0 // indirect
 )
