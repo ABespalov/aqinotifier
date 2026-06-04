@@ -3,7 +3,7 @@ module github.com/ABespalov/aqinotifier
 go 1.26.3
 
 require (
-	github.com/ABespalov/csirender v0.0.0-00010101000000-000000000000
+	github.com/ABespalov/csirender v0.1.1-a
 	github.com/expr-lang/expr v1.17.8
 	github.com/go-analyze/charts v0.5.27
 	github.com/google/uuid v1.6.0
@@ -39,5 +39,3 @@ require (
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 )
-
-replace github.com/ABespalov/csirender => ../csirender
