@@ -14,6 +14,12 @@ screen:
     yellow: "#FFD500"
     red: "#FF0000"
 
+error:
+  margin:
+    x: 10
+    y: 10
+  size: 7
+
 # Localization language for labels retrieved from i18n dictionaries
 lang: "ru"
 
@@ -69,10 +75,10 @@ layout:
   # AQI block header (static text)
   - type: "text"
     position:
-      x: 20                 # X coordinate of the top-left corner
+      x: 10                 # X coordinate of the top-left corner
       y: 15                 # Y coordinate of the top-left corner
     size:
-      w: 180                # Container width in pixels
+      w: 175                # Container width in pixels
       h: 30                 # Container height in pixels
     font:
       face: "header"        # Font alias from fonts section
@@ -81,13 +87,13 @@ layout:
 
   # Main AQI value card (large rectangle with dynamic background)
   - type: "value"
-    source: "aqi.us.zone.index" # Telemetry data source
+    source: "aqi.us.value"     # Telemetry data source
     radius: 15              # Corner rounding radius for borders
     position:
-      x: 20
+      x: 10
       y: 70
     size:
-      w: 180
+      w: 175
       h: 160
     value:                  # Settings for the numeric value display
       font:
@@ -99,21 +105,21 @@ layout:
       thresholds:           # Dynamic rules to change text color based on values
         - { condition: "aqi.us.zone.index >= 3", fg: "white" } # White text if zone >= 3
     border:                 # Card border and background settings
-      thin: 2               # Border line thickness
-      fg: "black"           # Default border color
+      t: 2               # Border line thickness
+      color: "black"           # Default border color
       bg: "white"           # Default background color
       thresholds:           # Dynamic border and background changes based on thresholds
-        - { condition: "aqi.us.zone.index == 2", bg: "yellow", fg: "yellow" } # Moderate level (yellow bg)
-        - { condition: "aqi.us.zone.index >= 3", bg: "red", fg: "red" }       # Unhealthy level and above (red bg)
+        - { condition: "aqi.us.zone.index == 2", bg: "yellow", color: "yellow" } # Moderate level (yellow bg)
+        - { condition: "aqi.us.zone.index >= 3", bg: "red", color: "red" }       # Unhealthy level and above (red bg)
 
   # AQI zone name (e.g. "Good", "Moderate", "Unhealthy")
   - type: "value"
     source: "aqi.us.zone.name" # String representation of the AQI zone
     position:
-      x: 20
+      x: 10
       y: 180
     size:
-      w: 180
+      w: 175
       h: 30
     value:
       font:
@@ -127,10 +133,10 @@ layout:
     source: "pm25.value"
     format: "%.0f"          # Format string for float value
     position:
-      x: 20
+      x: 10
       y: 250
     size:
-      w: 180
+      w: 175
       h: 55
     value:
       font:
@@ -157,24 +163,24 @@ layout:
       thresholds:
         - { condition: "pm25.us.zone.index >= 3", fg: "white" }
     border:
-      thin: 0               # No border by default
+      t: 0               # No border by default
       padding: 8            # Inner border padding
       affects:              # border only covers specified components (value and unit)
         - value
         - unit
       thresholds:           # Color background on threshold breaches
-        - { condition: "pm25.us.zone.index == 2", fg: "yellow", bg: "yellow" }
-        - { condition: "pm25.us.zone.index >= 3", fg: "red", bg: "red" }
+        - { condition: "pm25.us.zone.index == 2", color: "yellow", bg: "yellow" }
+        - { condition: "pm25.us.zone.index >= 3", color: "red", bg: "red" }
 
   # PM10 value card
   - type: "value"
     source: "pm10.value"
     format: "%.0f"
     position:
-      x: 20
+      x: 10
       y: 340
     size:
-      w: 180
+      w: 175
       h: 55
     value:
       font:
@@ -201,22 +207,22 @@ layout:
       thresholds:
         - { condition: "pm10.us.zone.index >= 3", fg: "white" }
     border:
-      thin: 0
+      t: 0
       padding: 8
       affects:
         - value
         - unit
       thresholds:
-        - { condition: "pm10.us.zone.index == 2", fg: "yellow", bg: "yellow" }
-        - { condition: "pm10.us.zone.index >= 3", fg: "red", bg: "red" }
+        - { condition: "pm10.us.zone.index == 2", color: "yellow", bg: "yellow" }
+        - { condition: "pm10.us.zone.index >= 3", color: "red", bg: "red" }
 
   # Current date and time display block
   - type: "text"
     position:
-      x: 20
+      x: 10
       y: 430
     size:
-      w: 180
+      w: 175
       h: 40
     font:
       face: "datetime"
@@ -226,13 +232,12 @@ layout:
   # Vertical separator line between columns
   - type: "line"
     position:
-      x: 215
+      x: 195
       y: 20
-    size:
-      w: 1                  # Width of 1 pixel makes it a vertical line
-      h: 440
-    font:
-      fg: "black"           # Line color set via fg
+    l: 440
+    t: 1
+    angle: 90.0
+    color: "black"
 
   # ----------------------------------------------------------------------------
   # RIGHT COLUMN: Chart showing AQI history
@@ -241,39 +246,42 @@ layout:
   # Historical bar chart
   - type: "chart"
     position:
-      x: 260
+      x: 240
       y: 10
     size:
-      w: 520
+      w: 540
       h: 330
-    source: "aqi.usa.value" # History data source
+    source: "aqi.us.value" # History data source
     style: "bar"            # Chart style: bar (columns) or line
     duration: "24h"         # History depth (e.g. 24 hours)
     points: 48              # Number of points on chart (48 points for 24h = 1 point per 30 min)
     axis:                   # Coordinate axes definitions
       y: 
-        auto_scale: true    # Auto-scale Y axis based on data
-        w: 2                # Y axis line thickness
+        scale:
+          auto: true
+          min: 0
+          max: auto
+        t: 2                # Y axis line thickness
         fg: "black"         # Axis color
         min_step: 50        # Minimum step of grid lines
         show: false         # Show Y-axis line (false - hide line, keep labels/notches)
         labels:             # Y-axis labels configuration
           show: true
           count: 7          # Number of labels along Y axis
-          format: "%.0"     # Format string for labels
+          format: "%.0f"     # Format string for labels
           font:
             face: "axis_y"
             fg: "black"
           thresholds:       # Highlight Y-axis labels depending on danger zones
-            - { condition: "aqi.usa.zone.index == 2", fg: "black", bg: "yellow" }
-            - { condition: "aqi.usa.zone.index >= 3", fg: "white", bg: "red" }
+            - { condition: "aqi.us.zone.index == 2", fg: "black", bg: "yellow" }
+            - { condition: "aqi.us.zone.index >= 3", fg: "white", bg: "red" }
         notches:            # Notches along Y axis
           show: true
           fg: "black"
-          w: 8              # Notch length
-          h: 2              # Notch thickness
+          l: 8              # Notch length
+          t: 2              # Notch thickness
       x: 
-        h: 2                # X axis thickness
+        t: 2                # X axis thickness
         fg: "black"
         show: true
         labels:             # Time labels along X axis
@@ -286,26 +294,24 @@ layout:
         notches:
           show: true
           fg: "black"
-          w: 2
-          h: 8
+          l: 8
+          t: 2
     threshold_lines:        # Horizontal dashed threshold lines on chart
       # style: "dashed.<dash_width>.<gap_width>"
-      - { condition: "aqi.usa.zone.index == 2", fg: "yellow", w: 2, style: "dashed.2.14" }
-      - { condition: "aqi.usa.zone.index >= 3", fg: "red", w: 2, style: "dashed.2.14" }
+      - { condition: "aqi.us.zone.index == 2", color: "yellow", t: 2, style: "dashed.2.14" }
+      - { condition: "aqi.us.zone.index >= 3", color: "red", t: 2, style: "dashed.2.14" }
     thresholds:             # Dynamic bar color based on values
-      - { condition: "aqi.usa.zone.index == 2", bg: "yellow" }
-      - { condition: "aqi.usa.zone.index >= 3", bg: "red" }
+      - { condition: "aqi.us.zone.index == 2", bg: "yellow" }
+      - { condition: "aqi.us.zone.index >= 3", bg: "red" }
 
   # Horizontal separator line above bottom row
   - type: "line"
     position:
-      x: 240
-      y: 375
-    size:
-      w: 540
-      h: 1                  # Height of 1 pixel makes it a horizontal line
-    font:
-      fg: "black"
+      x: 205
+      y: 350
+    l: 584
+    t: 1
+    color: "black"
 
   # ----------------------------------------------------------------------------
   # BOTTOM ROW (Right Column): Environmental parameters (Temp, Hum, Press, Dew Point)
@@ -316,10 +322,10 @@ layout:
     source: "temp.value.to_celsius"
     format: "%+.1f"         # Display temp with +/- prefix and 1 decimal place
     position:
-      x: 240
+      x: 205
       y: 390
     size:
-      w: 135
+      w: 146
       h: 50
     value:
       font:
@@ -348,23 +354,22 @@ layout:
   # Vertical micro-separator between Temperature and Humidity
   - type: "line"
     position:
-      x: 375
-      y: 385
-    size:
-      w: 1
-      h: 80
-    font:
-      fg: "black"
+      x: 351
+      y: 360
+    l: 105
+    t: 1
+    angle: 90.0
+    color: "black"
 
   # Humidity sensor
   - type: "value"
     source: "humidity.value"
     format: "%.0f"
     position:
-      x: 375
+      x: 351
       y: 390
     size:
-      w: 135
+      w: 146
       h: 50
     value:
       font:
@@ -393,23 +398,22 @@ layout:
   # Vertical micro-separator between Humidity and Pressure
   - type: "line"
     position:
-      x: 510
-      y: 385
-    size:
-      w: 1
-      h: 80
-    font:
-      fg: "black"
+      x: 497
+      y: 360
+    l: 105
+    t: 1
+    angle: 90.0
+    color: "black"
 
   # Pressure sensor
   - type: "value"
     source: "pressure.value.to_mm_hg"
     format: "%.0f"
     position:
-      x: 510
+      x: 497
       y: 390
     size:
-      w: 135
+      w: 146
       h: 50
     value:
       font:
@@ -436,23 +440,22 @@ layout:
   # Vertical micro-separator between Pressure and Dew Point
   - type: "line"
     position:
-      x: 645
-      y: 385
-    size:
-      w: 1
-      h: 80
-    font:
-      fg: "black"
+      x: 643
+      y: 360
+    l: 105
+    t: 1
+    angle: 90.0
+    color: "black"
 
   # Dew point sensor
   - type: "value"
     source: "dew_point.value"
     format: "%+.1f"
     position:
-      x: 645
+      x: 643
       y: 390
     size:
-      w: 135
+      w: 146
       h: 50
     value:
       font:

@@ -337,7 +337,8 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 		}
 	}
 
-	argsMap := b.buildMeasurementArgs(chatID, m)
+	ctx := b.NewContext(chatID)
+	argsMap := ctx.buildMeasurementArgs(m)
 	argsMap["winnerID"] = winnerID
 	if strings.HasPrefix(winnerID, "aqi_l") {
 		argsMap["isAqi"] = true
@@ -391,54 +392,76 @@ func (b *Bot) Notify(chatID int64, m *monitor.Measurement, alerts []monitor.Aler
 	}
 
 	argsMap["isSilent"] = silent
-	text := b.TDevice(chatID, "msgAlertNotify", m.DeviceID, argsMap)
+	text := ctx.TDevice("msgAlertNotify", m.DeviceID, argsMap)
 
 	params := tu.Message(tu.ID(chatID), text).
 		WithParseMode(telego.ModeHTML).
-		WithReplyMarkup(b.mainKeyboard(chatID, m.DeviceID))
+		WithReplyMarkup(ctx.mainKeyboard(m.DeviceID))
 	params.DisableNotification = silent
 
-	b.clearLastPrompt(chatID)
+	ctx.clearLastPrompt()
 	msg, err := b.api.SendMessage(context.Background(), params)
 	if err != nil {
 		log.Error().Err(err).Int64("chat_id", chatID).Str("msg", text).Msg("tgbot: failed to send alert")
 	} else {
-		b.setLastPrompt(chatID, msg.GetMessageID())
+		ctx.setLastPrompt(msg.GetMessageID())
 	}
 }
 
-func (b *Bot) sendHelp(chatID int64) {
-	b.clearLastPrompt(chatID)
-	b.setState(chatID, stateIdle)
+func (ctx *RequestContext) sendHelp() {
+	ctx.clearLastPrompt()
+	ctx.Bot.setState(ctx.ChatID, stateIdle)
 
-	b.sendWithKeyboard(chatID, b.T(chatID, msgHelp, map[string]interface{}{
-		"botVersion": b.version,
-	}), b.mainKeyboard(chatID))
+	ctx.sendWithKeyboard(ctx.T(msgHelp, map[string]interface{}{
+		"botVersion": ctx.Bot.version,
+	}), ctx.mainKeyboard())
 }
 
 func (b *Bot) registerCommands() {
 	langs := AvailableLanguages()
 	for _, lang := range langs {
 		cmds := b.buildCommands(lang)
+		
+		log.Debug().Str("lang", lang).Interface("cmds", cmds).Msg("tgbot: registering global commands")
+		
 		err := b.api.SetMyCommands(context.Background(), &telego.SetMyCommandsParams{
 			Commands:     cmds,
 			LanguageCode: lang,
 		})
 		if err != nil {
-			log.Error().Err(err).Str("lang", lang).Msg("tgbot: failed to set global commands")
+			log.Error().Err(err).Str("lang", lang).Interface("cmds", cmds).Msg("tgbot: failed to set global commands")
+		} else {
+			log.Debug().Str("lang", lang).Msg("tgbot: successfully set global commands")
 		}
 	}
 }
 
 func (b *Bot) buildCommands(lang string) []telego.BotCommand {
+	// Try to get Description keys (*Desc). If they don't exist, we fallback to just text without icons.
+	getDesc := func(cmd string) string {
+		descKey := cmd + "Desc"
+		val := b.TLang(lang, descKey)
+		if strings.HasPrefix(val, "!!") {
+			// Fallback to the non-Desc key but strip icons (e.g. {icoStart})
+			val = b.TLang(lang, cmd)
+			if strings.Contains(val, "}") {
+				parts := strings.Split(val, "}")
+				if len(parts) > 1 {
+					val = strings.TrimSpace(parts[len(parts)-1])
+				}
+			}
+		}
+		return val
+	}
+
 	return []telego.BotCommand{
-		{Command: "start", Description: b.TLang(lang, "cmdStart")},
-		{Command: "help", Description: b.TLang(lang, "cmdHelp")},
-		{Command: "status", Description: b.TLang(lang, "cmdStatus")},
-		{Command: "list", Description: b.TLang(lang, "cmdList")},
-		{Command: "subscribe", Description: b.TLang(lang, "cmdSubscribe")},
-		{Command: "unsubscribe", Description: b.TLang(lang, "cmdUnsubscribe")},
-		{Command: "lang", Description: b.TLang(lang, "cmdLang")},
+		{Command: "start", Description: getDesc("cmdStart")},
+		{Command: "help", Description: getDesc("cmdHelp")},
+		{Command: "status", Description: getDesc("cmdStatus")},
+		{Command: "list", Description: getDesc("cmdList")},
+		{Command: "subscribe", Description: getDesc("cmdSubscribe")},
+		{Command: "unsubscribe", Description: getDesc("cmdUnsubscribe")},
+		{Command: "lang", Description: getDesc("cmdLang")},
 	}
 }
 
@@ -447,13 +470,28 @@ func (b *Bot) updateCommandsForUser(chatID int64, lang string) {
 		lang = "en"
 	}
 	cmds := b.buildCommands(lang)
+	
+	log.Debug().Int64("chat_id", chatID).Str("lang", lang).Interface("cmds", cmds).Msg("tgbot: registering per-user commands")
+	
+	// Delete any previously set language-specific commands for this chat to avoid precedence issues
+	for _, l := range AvailableLanguages() {
+		_ = b.api.DeleteMyCommands(context.Background(), &telego.DeleteMyCommandsParams{
+			Scope:        &telego.BotCommandScopeChat{Type: "chat", ChatID: tu.ID(chatID)},
+			LanguageCode: l,
+		})
+	}
+
 	err := b.api.SetMyCommands(context.Background(), &telego.SetMyCommandsParams{
-		Commands:     cmds,
-		Scope:        &telego.BotCommandScopeChat{Type: "chat", ChatID: tu.ID(chatID)},
-		LanguageCode: lang,
+		Commands: cmds,
+		Scope:    &telego.BotCommandScopeChat{Type: "chat", ChatID: tu.ID(chatID)},
+		// Do NOT set LanguageCode here. If we set LanguageCode to the language they chose, 
+		// but their Telegram app is in a different language, Telegram will ignore these commands 
+		// and fallback to the global commands of their app language. Leaving it empty forces it for this chat.
 	})
 	if err != nil {
-		log.Error().Err(err).Int64("chat_id", chatID).Msg("tgbot: failed to set per-user commands")
+		log.Error().Err(err).Int64("chat_id", chatID).Interface("cmds", cmds).Msg("tgbot: failed to set per-user commands")
+	} else {
+		log.Debug().Int64("chat_id", chatID).Msg("tgbot: successfully set per-user commands")
 	}
 }
 
@@ -463,52 +501,52 @@ func (b *Bot) Stop() {
 	b.handler.Stop()
 }
 
-func (b *Bot) clearLastPrompt(chatID int64) {
-	ids := b.store.GetLastPrompts(chatID)
+func (ctx *RequestContext) clearLastPrompt() {
+	ids := ctx.Bot.store.GetLastPrompts(ctx.ChatID)
 	if len(ids) == 0 {
 		return
 	}
 
-	b.store.ClearLastPrompts(chatID)
+	ctx.Bot.store.ClearLastPrompts(ctx.ChatID)
 
 	for _, id := range ids {
-		_, _ = b.api.EditMessageReplyMarkup(context.Background(), &telego.EditMessageReplyMarkupParams{
-			ChatID:      tu.ID(chatID),
+		_, _ = ctx.Bot.api.EditMessageReplyMarkup(context.Background(), &telego.EditMessageReplyMarkupParams{
+			ChatID:      tu.ID(ctx.ChatID),
 			MessageID:   id,
 			ReplyMarkup: nil,
 		})
 	}
 }
 
-func (b *Bot) cleanupMessage(chatID int64, cq *telego.CallbackQuery) {
+func (ctx *RequestContext) cleanupMessage(cq *telego.CallbackQuery) {
 	if cq == nil || cq.Message == nil {
 		return
 	}
 	msgID := cq.Message.GetMessageID()
 
 	// Remove only the keyboard, keep the message text
-	_, _ = b.api.EditMessageReplyMarkup(context.Background(), &telego.EditMessageReplyMarkupParams{
-		ChatID:      tu.ID(chatID),
+	_, _ = ctx.Bot.api.EditMessageReplyMarkup(context.Background(), &telego.EditMessageReplyMarkupParams{
+		ChatID:      tu.ID(ctx.ChatID),
 		MessageID:   msgID,
 		ReplyMarkup: nil,
 	})
 
-	b.store.RemoveLastPrompt(chatID, msgID)
+	ctx.Bot.store.RemoveLastPrompt(ctx.ChatID, msgID)
 }
 
-func (b *Bot) deleteMessage(chatID int64, cq *telego.CallbackQuery) {
+func (ctx *RequestContext) deleteMessage(cq *telego.CallbackQuery) {
 	if cq == nil || cq.Message == nil {
 		return
 	}
 	msgID := cq.Message.GetMessageID()
-	_ = b.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
-		ChatID:    tu.ID(chatID),
+	_ = ctx.Bot.api.DeleteMessage(context.Background(), &telego.DeleteMessageParams{
+		ChatID:    tu.ID(ctx.ChatID),
 		MessageID: msgID,
 	})
-	b.store.RemoveLastPrompt(chatID, msgID)
+	ctx.Bot.store.RemoveLastPrompt(ctx.ChatID, msgID)
 }
 
-func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
+func (ctx *RequestContext) handleAQIThresholdCycle(data string, msgID int) {
 	parts := strings.Split(data, ":")
 	if len(parts) < 3 {
 		return
@@ -520,7 +558,7 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 		currentTag = parts[3]
 	}
 
-	mcfg := b.GetUserSettings(chatID)
+	mcfg := ctx.Bot.GetUserSettings(ctx.ChatID)
 
 	var tags []string
 	allStds := sensor.GetStandards()
@@ -606,41 +644,41 @@ func (b *Bot) handleAQIThresholdCycle(chatID int64, data string, msgID int) {
 		}
 	}
 
-	b.store.UpdateSettings(chatID, mcfg)
-	b.cmdAQICycleMenu(chatID, msgID, map[string]string{
+	ctx.Bot.store.UpdateSettings(ctx.ChatID, mcfg)
+	ctx.cmdAQICycleMenu(msgID, map[string]string{
 		pmType + ":" + levelKey: nextTag,
 	})
 }
 
-func (b *Bot) sendChartForDevice(chatID int64, deviceID, chartType string) {
-	hist := b.monitor.GetHistoryByDuration(deviceID, 24*time.Hour)
+func (ctx *RequestContext) sendChartForDevice(deviceID, chartType string) {
+	hist := ctx.Bot.monitor.GetHistoryByDuration(deviceID, 24*time.Hour)
 	if len(hist) == 0 {
-		b.sendWithKeyboard(chatID, b.T(chatID, msgHistoryError), nil)
+		ctx.sendWithKeyboard(ctx.T(msgHistoryError), nil)
 		return
 	}
 
-	buf, err := generateSingleChart(b, chatID, hist, chartType, b.cfg.Chart.Width, b.cfg.Chart.Height, b.cfg.Chart.FontSize, chartSmoothing24h)
+	buf, err := generateSingleChart(ctx, hist, chartType, ctx.Bot.cfg.Chart.Width, ctx.Bot.cfg.Chart.Height, ctx.Bot.cfg.Chart.FontSize, chartSmoothing24h)
 	if err != nil {
 		log.Error().Err(err).Str("device", deviceID).Str("type", chartType).Msg("tgbot: failed to generate chart")
-		b.sendWithKeyboard(chatID, b.T(chatID, msgHistoryError), nil)
+		ctx.sendWithKeyboard(ctx.T(msgHistoryError), nil)
 		return
 	}
 
 	nr := &bytesNamedReader{Reader: bytes.NewReader(buf), name: "chart.png"}
 	params := &telego.SendPhotoParams{
-		ChatID:      tu.ID(chatID),
+		ChatID:      tu.ID(ctx.ChatID),
 		Photo:       tu.File(nr),
-		ReplyMarkup: b.chartsMenuKeyboard(chatID, deviceID),
+		ReplyMarkup: ctx.chartsMenuKeyboard(deviceID),
 	}
 
-	b.clearLastPrompt(chatID)
-	m, err := b.api.SendPhoto(context.Background(), params)
+	ctx.clearLastPrompt()
+	m, err := ctx.Bot.api.SendPhoto(context.Background(), params)
 	if err == nil {
-		b.setLastPrompt(chatID, m.GetMessageID())
+		ctx.setLastPrompt(m.GetMessageID())
 	}
 }
 
-func (b *Bot) formatFormula(chatID int64, f string) string {
+func (ctx *RequestContext) formatFormula(f string) string {
 	f = strings.TrimSpace(f)
 	if strings.HasPrefix(f, "?") {
 		parts := strings.Split(f[1:], ":")
@@ -660,7 +698,7 @@ func (b *Bot) formatFormula(chatID int64, f string) string {
 				falseVal = falseVal[1 : len(falseVal)-1]
 			}
 
-			return b.T(chatID, "msgFormulaTernary", map[string]interface{}{
+			return ctx.T("msgFormulaTernary", map[string]interface{}{
 				"cond":     cond,
 				"trueVal":  trueVal,
 				"falseVal": falseVal,
@@ -670,14 +708,14 @@ func (b *Bot) formatFormula(chatID int64, f string) string {
 	return f
 }
 
-func (b *Bot) buildDeviceSettingsText(chatID int64, deviceID string) string {
-	devType := b.GetDeviceType(deviceID)
+func (ctx *RequestContext) buildDeviceSettingsText(deviceID string) string {
+	devType := ctx.Bot.GetDeviceType(deviceID)
 	stdDisplay := sensor.DeviceStandard(devType).DisplayName()
 
 	var correctionsList string
 	var hasCorrections bool
-	if b.defaults != nil && b.defaults.Corrections != nil {
-		if corrs, ok := b.defaults.Corrections[devType]; ok && len(corrs) > 0 {
+	if ctx.Bot.defaults != nil && ctx.Bot.defaults.Corrections != nil {
+		if corrs, ok := ctx.Bot.defaults.Corrections[devType]; ok && len(corrs) > 0 {
 			var keys []string
 			for k := range corrs {
 				keys = append(keys, k)
@@ -686,12 +724,12 @@ func (b *Bot) buildDeviceSettingsText(chatID int64, deviceID string) string {
 
 			var lines []string
 			for _, k := range keys {
-				formatted := b.formatFormula(chatID, corrs[k])
-				fieldName := b.T(chatID, "labelField_"+k)
+				formatted := ctx.formatFormula(corrs[k])
+				fieldName := ctx.T("labelField_" + k)
 				if strings.HasPrefix(fieldName, "!!") {
 					fieldName = k
 				}
-				line := b.T(chatID, "msgDeviceSettingsCorrItem", map[string]interface{}{
+				line := ctx.T("msgDeviceSettingsCorrItem", map[string]interface{}{
 					"key":     fieldName,
 					"formula": formatted,
 				})
@@ -708,5 +746,5 @@ func (b *Bot) buildDeviceSettingsText(chatID int64, deviceID string) string {
 		"correctionsList": correctionsList,
 	}
 
-	return b.TDevice(chatID, "msgDeviceSettings", deviceID, args)
+	return ctx.TDevice("msgDeviceSettings", deviceID, args)
 }

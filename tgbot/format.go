@@ -46,56 +46,56 @@ func (b *Bot) getAQIIcon(level sensor.AQILevel, standard string) string {
 	key := fmt.Sprintf("icoAqi%sLevel%d", strings.ToUpper(standard), level)
 	return b.I(key)
 }
-func (b *Bot) formatDeviceStatus(chatID int64, deviceID string) string {
-	log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: formatDeviceStatus start")
-	m := b.monitor.LastMeasurement(deviceID)
+func (ctx *RequestContext) formatDeviceStatus(deviceID string) string {
+	log.Debug().Int64("chat_id", ctx.ChatID).Str("device_id", deviceID).Msg("tgbot: formatDeviceStatus start")
+	m := ctx.Bot.monitor.LastMeasurement(deviceID)
 	if m == nil {
-		log.Debug().Int64("chat_id", chatID).Str("device_id", deviceID).Msg("tgbot: no measurement found")
-		return b.TDevice(chatID, "msgStatusNoData", deviceID)
+		log.Debug().Int64("chat_id", ctx.ChatID).Str("device_id", deviceID).Msg("tgbot: no measurement found")
+		return ctx.TDevice("msgStatusNoData", deviceID)
 	}
-	res := b.formatMeasurement(chatID, m)
-	log.Debug().Int64("chat_id", chatID).Int("len", len(res)).Msg("tgbot: formatDeviceStatus end")
+	res := ctx.formatMeasurement(m)
+	log.Debug().Int64("chat_id", ctx.ChatID).Int("len", len(res)).Msg("tgbot: formatDeviceStatus end")
 	return res
 }
-func (b *Bot) formatDeviceIDPlain(chatID int64, deviceID string) string {
-	mcfg := b.GetUserSettings(chatID)
+func (ctx *RequestContext) formatDeviceIDPlain(deviceID string) string {
+	mcfg := ctx.Bot.GetUserSettings(ctx.ChatID)
 	name, ok := mcfg.DeviceNames[deviceID]
 	if ok && name != "" {
 		return fmt.Sprintf("%s (%s)", name, deviceID)
 	}
-	return fmt.Sprintf("%s %s", b.T(chatID, "msgDevice"), deviceID)
+	return fmt.Sprintf("%s %s", ctx.T("msgDevice"), deviceID)
 }
-func (b *Bot) convertTemp(celsius float64, chatID int64) float64 {
-	unit := b.store.GetUnitTemp(chatID)
+func (ctx *RequestContext) convertTemp(celsius float64) float64 {
+	unit := ctx.Bot.store.GetUnitTemp(ctx.ChatID)
 	if unit == "f" {
 		return celsius*1.8 + 32
 	}
 	return celsius
 }
-func (b *Bot) convertPress(hpa float64, chatID int64) float64 {
-	unit := b.store.GetUnitPress(chatID)
+func (ctx *RequestContext) convertPress(hpa float64) float64 {
+	unit := ctx.Bot.store.GetUnitPress(ctx.ChatID)
 	if unit == "mmhg" {
 		return hpa * hPaToMmHg
 	}
 	return hpa
 }
-func (b *Bot) unitTempLabel(chatID int64) string {
-	unit := b.store.GetUnitTemp(chatID)
+func (ctx *RequestContext) unitTempLabel() string {
+	unit := ctx.Bot.store.GetUnitTemp(ctx.ChatID)
 	if unit == "f" {
 		return "°F"
 	}
 	return "°C"
 }
-func (b *Bot) unitPressLabel(chatID int64) string {
-	unit := b.store.GetUnitPress(chatID)
+func (ctx *RequestContext) unitPressLabel() string {
+	unit := ctx.Bot.store.GetUnitPress(ctx.ChatID)
 	if unit == "mmhg" {
-		return b.T(chatID, "unitMmhg")
+		return ctx.T("unitMmhg")
 	}
-	return b.T(chatID, "unitHpa")
+	return ctx.T("unitHpa")
 }
 
-func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[string]interface{} {
-	mcfg := b.GetUserSettings(chatID)
+func (ctx *RequestContext) buildMeasurementArgs(m *monitor.Measurement) map[string]interface{} {
+	mcfg := ctx.Bot.GetUserSettings(ctx.ChatID)
 
 	args := map[string]interface{}{
 		"date": m.Timestamp,
@@ -106,12 +106,12 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 		"val25":     m.PM25,
 		"prev25":    m.PM25Prev,
 		"curr25":    m.PM25,
-		"unitPm":    b.T(chatID, "unitPm"),
+		"unitPm":    ctx.T("unitPm"),
 		"val10":     m.PM10,
 		"prev10":    m.PM10Prev,
 		"curr10":    m.PM10,
-		"labelPm25": b.T(chatID, "labelPm25"),
-		"labelPm10": b.T(chatID, "labelPm10"),
+		"labelPm25": ctx.T("labelPm25"),
+		"labelPm10": ctx.T("labelPm10"),
 		"l1_25":     mcfg.PM25.Level1,
 		"l2_25":     mcfg.PM25.Level2,
 		"l1_10":     mcfg.PM10.Level1,
@@ -121,7 +121,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	if name, ok := mcfg.DeviceNames[m.DeviceID]; ok && name != "" {
 		args["deviceName"] = name
 	} else {
-		args["deviceName"] = b.T(chatID, "msgDevice") + " " + m.DeviceID
+		args["deviceName"] = ctx.T("msgDevice") + " " + m.DeviceID
 	}
 
 	if m.PM25Diff != nil {
@@ -137,32 +137,32 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 
 	diff25 := m.PM25 - m.PM25Prev
 	if diff25 > 0 {
-		args["trend25Icon"] = b.I(kIcoTrendUp)
+		args["trend25Icon"] = ctx.Bot.I(kIcoTrendUp)
 	} else if diff25 < 0 {
-		args["trend25Icon"] = b.I(kIcoTrendDown)
+		args["trend25Icon"] = ctx.Bot.I(kIcoTrendDown)
 	} else {
-		args["trend25Icon"] = b.I(kIcoTrendFlat)
+		args["trend25Icon"] = ctx.Bot.I(kIcoTrendFlat)
 	}
 	args["diff25"] = diff25
 
 	diff10 := m.PM10 - m.PM10Prev
 	if diff10 > 0 {
-		args["trend10Icon"] = b.I(kIcoTrendUp)
+		args["trend10Icon"] = ctx.Bot.I(kIcoTrendUp)
 	} else if diff10 < 0 {
-		args["trend10Icon"] = b.I(kIcoTrendDown)
+		args["trend10Icon"] = ctx.Bot.I(kIcoTrendDown)
 	} else {
-		args["trend10Icon"] = b.I(kIcoTrendFlat)
+		args["trend10Icon"] = ctx.Bot.I(kIcoTrendFlat)
 	}
 	args["diff10"] = diff10
 
 	getZoneIcon := func(v, g, y float64) string {
 		if v <= g {
-			return b.I(kIcoPmLevel1)
+			return ctx.Bot.I(kIcoPmLevel1)
 		}
 		if v <= y {
-			return b.I(kIcoPmLevel2)
+			return ctx.Bot.I(kIcoPmLevel2)
 		}
-		return b.I(kIcoPmLevel3)
+		return ctx.Bot.I(kIcoPmLevel3)
 	}
 	args["zone25Icon"] = getZoneIcon(m.PM25, mcfg.PM25.Level1, mcfg.PM25.Level2)
 	args["zone10Icon"] = getZoneIcon(m.PM10, mcfg.PM10.Level1, mcfg.PM10.Level2)
@@ -177,7 +177,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	}
 
 	levelChar := fmt.Sprintf("l%d", level)
-	args["aqiIcon"] = b.getAQIIcon(level, mcfg.AQI.Standard)
+	args["aqiIcon"] = ctx.Bot.getAQIIcon(level, mcfg.AQI.Standard)
 	args["aqiVal"] = aqi
 	args["aqiLevel"] = int(level)
 
@@ -188,7 +188,7 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	}
 	// Try localization if available
 	key := fmt.Sprintf("aqiName%s%s", strings.Title(levelChar), strings.Title(strings.ToLower(mcfg.AQI.Standard)))
-	if localized := b.T(chatID, key); !strings.HasPrefix(localized, "!!") {
+	if localized := ctx.T(key); !strings.HasPrefix(localized, "!!") {
 		aqiName = localized
 	}
 	args["aqiName"] = aqiName
@@ -200,29 +200,29 @@ func (b *Bot) buildMeasurementArgs(chatID int64, m *monitor.Measurement) map[str
 	log.Debug().Interface("args", args).Msg("tgbot: measurement args built")
 
 	if m.Temperature != 0 {
-		args["labelT"] = b.T(chatID, "msgTemp")
-		args["valT"] = b.convertTemp(m.Temperature, chatID)
-		args["unitT"] = b.unitTempLabel(chatID)
+		args["labelT"] = ctx.T("msgTemp")
+		args["valT"] = ctx.convertTemp(m.Temperature)
+		args["unitT"] = ctx.unitTempLabel()
 	}
 	if m.Humidity != 0 {
-		args["labelH"] = b.T(chatID, "msgHum")
+		args["labelH"] = ctx.T("msgHum")
 		args["valH"] = m.Humidity
 		if m.Temperature != 0 {
 			dp := CalcDewPoint(m.Temperature, m.Humidity)
-			args["labelDp"] = b.T(chatID, "msgDewPoint")
-			args["valDp"] = b.convertTemp(dp, chatID)
+			args["labelDp"] = ctx.T("msgDewPoint")
+			args["valDp"] = ctx.convertTemp(dp)
 		}
 	}
 	if m.Pressure != 0 {
-		args["labelP"] = b.T(chatID, "msgPress")
-		args["valP"] = b.convertPress(m.Pressure, chatID)
-		args["unitP"] = b.unitPressLabel(chatID)
+		args["labelP"] = ctx.T("msgPress")
+		args["valP"] = ctx.convertPress(m.Pressure)
+		args["unitP"] = ctx.unitPressLabel()
 	}
 
 	return args
 }
 
-func (b *Bot) formatMeasurement(chatID int64, m *monitor.Measurement) string {
-	args := b.buildMeasurementArgs(chatID, m)
-	return b.T(chatID, "msgStatus", args)
+func (ctx *RequestContext) formatMeasurement(m *monitor.Measurement) string {
+	args := ctx.buildMeasurementArgs(m)
+	return ctx.T("msgStatus", args)
 }

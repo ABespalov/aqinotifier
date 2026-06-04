@@ -100,9 +100,22 @@ func (s *Store) saveLocked(chatID int64) {
 
 // GetSettings returns the personalized settings for a chat.
 func (s *Store) GetSettings(chatID int64, defaults *config.Monitor) *config.Monitor {
+	s.mu.RLock()
+	sub, ok := s.subs[chatID]
+	if ok && sub.Settings != nil {
+		s.mu.RUnlock()
+		log.Debug().Int64("chat_id", chatID).
+			Float64("pm25_l1", sub.Settings.PM25.Level1).
+			Float64("pm10_l1", sub.Settings.PM10.Level1).
+			Msg("tgbot: returning existing settings")
+		return sub.Settings
+	}
+	s.mu.RUnlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sub, ok := s.subs[chatID]
+	// Check again inside the full lock
+	sub, ok = s.subs[chatID]
 	if !ok || sub.Settings == nil {
 		if !ok {
 			sub = &Subscription{
@@ -114,11 +127,11 @@ func (s *Store) GetSettings(chatID int64, defaults *config.Monitor) *config.Moni
 		} else {
 			sub.Settings = s.cloneMonitor(defaults)
 		}
+		sub.Settings.Validate()
 		s.saveLocked(chatID)
 		return sub.Settings
 	}
 
-	sub.Settings.Validate()
 	log.Debug().Int64("chat_id", chatID).
 		Float64("pm25_l1", sub.Settings.PM25.Level1).
 		Float64("pm10_l1", sub.Settings.PM10.Level1).

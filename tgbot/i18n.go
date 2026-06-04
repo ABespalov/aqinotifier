@@ -39,14 +39,18 @@ func init() {
 	}
 
 	langDicts["en"] = make(map[string]string)
-	for k, v := range fallbackEN {
-		langDicts["en"][k] = v
-	}
 
-	loadExternalTranslations("res")
-	loadIcons("res")
-	loadColors("res")
-	loadAQIStandards("res")
+	execPath, err := os.Executable()
+	baseDir := "."
+	if err == nil {
+		baseDir = filepath.Dir(execPath)
+	}
+	resDir := filepath.Join(baseDir, "res")
+
+	loadExternalTranslations(resDir)
+	loadIcons(resDir)
+	loadColors(resDir)
+	loadAQIStandards(resDir)
 }
 
 var defaultIcons = map[string]string{
@@ -279,10 +283,17 @@ func loadAQIStandards(dir string) {
 }
 
 func ReloadAll() {
-	loadExternalTranslations("res")
-	loadIcons("res")
-	loadColors("res")
-	loadAQIStandards("res")
+	execPath, err := os.Executable()
+	baseDir := "."
+	if err == nil {
+		baseDir = filepath.Dir(execPath)
+	}
+	resDir := filepath.Join(baseDir, "res")
+
+	loadExternalTranslations(resDir)
+	loadIcons(resDir)
+	loadColors(resDir)
+	loadAQIStandards(resDir)
 }
 
 func AvailableLanguages() []string {
@@ -290,7 +301,12 @@ func AvailableLanguages() []string {
 	defer i18nMu.RUnlock()
 	seen := map[string]bool{"en": true}
 	langs := []string{"en"}
-	dir := "res"
+	execPath, err := os.Executable()
+	baseDir := "."
+	if err == nil {
+		baseDir = filepath.Dir(execPath)
+	}
+	dir := filepath.Join(baseDir, "res")
 
 	// Language code pattern: "xx" or "xx-XX"
 	langRegex := regexp.MustCompile(`^[a-z]{2}(-[A-Z]{2})?$`)
@@ -610,30 +626,11 @@ func splitByTopLevelPercent(s string, max int) []string {
 	return parts
 }
 
-func (b *Bot) T(chatID int64, key string, args ...interface{}) string {
-	lang := b.store.GetLanguage(chatID)
-	return b.TLang(lang, key, args...)
-}
-
-func (b *Bot) TDevice(chatID int64, key string, deviceID string, args ...map[string]interface{}) string {
-	m := make(map[string]interface{})
-	if len(args) > 0 {
-		for k, v := range args[0] {
-			m[k] = v
-		}
-	}
-	mcfg := b.GetUserSettings(chatID)
-	m["deviceId"] = deviceID
-	m["deviceName"] = ""
-	if name, ok := mcfg.DeviceNames[deviceID]; ok {
-		m["deviceName"] = name
-	}
-	return b.T(chatID, key, m)
-}
-
 func (b *Bot) detectLang(langCode string) string {
-	if strings.HasPrefix(langCode, "ru") {
-		return "ru"
+	for _, l := range AvailableLanguages() {
+		if strings.HasPrefix(langCode, l) {
+			return l
+		}
 	}
 	return "en"
 }
@@ -699,7 +696,30 @@ func (b *Bot) Resolve(s string) string {
 	return resolveTemplateLocked("en", s, nil, 0)
 }
 
-var fallbackEN = map[string]string{
-	"msgTemp":     "Temperature",
-	"msgDewPoint": "Dew point",
+func GetResolvedLanguageDict(lang string) map[string]string {
+	i18nMu.RLock()
+	defer i18nMu.RUnlock()
+
+	dict := make(map[string]string)
+	if lang == "" {
+		lang = "en"
+	}
+
+	// Load base English translations
+	if enDict, ok := langDicts["en"]; ok {
+		for k, v := range enDict {
+			dict[k] = resolveTemplateLocked(lang, v, nil, 0)
+		}
+	}
+
+	// Override with target language
+	if lang != "en" {
+		if langDict, ok := langDicts[lang]; ok {
+			for k, v := range langDict {
+				dict[k] = resolveTemplateLocked(lang, v, nil, 0)
+			}
+		}
+	}
+
+	return dict
 }

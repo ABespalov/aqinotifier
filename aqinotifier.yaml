@@ -242,5 +242,7 @@ dashboards:
   enabled: true
   # List of endpoints mapping HTTP GET paths to layout YAML configs.
   endpoints:
-    - path: "/dashboard/eink75"
-      file: "eink_800x480.yaml"
+    - path: "/dashboard/epd4c800x480"
+      file: "epd4c800x480.yaml"
+    - path: "/dashboard/lcd2880x1800"
+      file: "lcd2880x1800.yaml"

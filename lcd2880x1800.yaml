@@ -1,0 +1,453 @@
+# ==============================================================================
+#  Dashboard Configuration: LCD (2880x1800)
+#  Used to describe the visual layout of the screen.
+# ==============================================================================
+
+# Global screen settings
+screen:
+    width: 2880 # Screen width in pixels
+    height: 1800 # Screen height in pixels
+    anti_aliasing: true # Enable/disable anti-aliasing
+    palette: # Global color palette used in the layout
+        white: "#FFFFFF"
+        black: "#000000"
+        yellow: "#FFD500"
+        red: "#FF0000"
+
+error:
+    margin:
+        x: 10
+        y: 10
+    size: 8
+# Localization language for labels retrieved from i18n dictionaries
+lang: "ru"
+# Default settings for layout elements
+defaults:
+    fit_text: true # Automatic font size fitting to container bounds
+    align: # Default text alignment
+        h: "center" # Horizontal: center, left, right
+        v: "center" # Vertical: center, top, bottom
+# Output format for the final generated image
+output:
+    format: "png" # Output format (PNG for LCD displays)
+    background: "white" # Background color used to fill the screen before rendering
+
+# Access Control List (ACL) - allowed IP addresses or CIDR subnets to request this dashboard
+allowed:
+    - "192.168.101.0/24"
+    - "127.0.0.1"
+# Unit overrides for various sensor types
+units:
+    temperature: "c" # Temperature unit (celsius)
+    pressure: "mmhg" # Pressure unit (mmHg)
+# Font definitions: aliases mapped to TTF files and sizes
+fonts:
+    aqi: {file: "fonts/PT-Root-UI_Bold.ttf", size: 375} # Font for the main AQI index
+    values: {file: "fonts/PT-Root-UI_Bold.ttf", size: 113} # Font for sensor values
+    header: {file: "fonts/PT-Root-UI_Bold.ttf", size: 105} # Font for headers
+    zone: {file: "fonts/PT-Root-UI_Medium.ttf", size: 90, hinting: "none"} # Font for the AQI zone name
+    labels: {file: "fonts/PT-Root-UI_Medium.ttf", size: 75, hinting: "none"} # Font for sensor labels
+    units: {file: "fonts/PT-Root-UI_Medium.ttf", size: 56} # Font for units
+    axis_x: {file: "fonts/PT-Root-UI_Medium.ttf", size: 53} # Font for chart X-axis labels
+    axis_y: {file: "fonts/PT-Root-UI_Medium.ttf", size: 60} # Font for chart Y-axis labels
+    datetime: {file: "fonts/PT-Root-UI_Regular.ttf", size: 68} # Font for date and time
+# ==============================================================================
+#  LAYOUT DEFINITIONS
+# ==============================================================================
+# The layout array contains elements rendered sequentially (text, cards, charts, lines).
+layout:
+    # ----------------------------------------------------------------------------
+    # LEFT COLUMN: Main Air Quality parameters (AQI, PM2.5, PM10) and Date/Time
+    # ----------------------------------------------------------------------------
+
+    # AQI block header (static text)
+    - type: "text"
+      position:
+        x: 36 # X coordinate of the top-left corner
+        y: 56 # Y coordinate of the top-left corner
+      size:
+        w: 630 # Container width in pixels
+        h: 113 # Container height in pixels
+      font:
+        face: "header" # Font alias from fonts section
+        fg: "black" # Text color
+      template: "AQI USA" # Display template
+    # Main AQI value card (large rectangle with dynamic background)
+    - type: "value"
+      source: "aqi.us.value" # Telemetry data source
+      radius: 56 # Corner rounding radius for borders
+      position:
+        x: 36
+        y: 263
+      size:
+        w: 630
+        h: 600
+      value: # Settings for the numeric value display
+        font:
+            face: "aqi"
+            fg: "black"
+        margin:
+            t: 38 # Top margin
+            b: 113 # Bottom margin
+        thresholds: # Dynamic rules to change text color based on values
+            - {condition: "aqi.us.zone.index >= 3", fg: "white"} # White text if zone >= 3
+      border: # Card border and background settings
+        t: 8 # Border line thickness
+        color: "black" # Default border color
+        bg: "white" # Default background color
+        thresholds: # Dynamic border and background changes based on thresholds
+            - {condition: "aqi.us.zone.index == 2", bg: "yellow", color: "yellow"} # Moderate level (yellow bg)
+            - {condition: "aqi.us.zone.index >= 3", bg: "red", color: "red"} # Unhealthy level and above (red bg)
+    # AQI zone name (e.g. "Good", "Moderate", "Unhealthy")
+    - type: "value"
+      source: "aqi.us.zone.name" # String representation of the AQI zone
+      position:
+        x: 36
+        y: 675
+      size:
+        w: 630
+        h: 113
+      value:
+        font:
+            face: "zone"
+            fg: "black"
+        thresholds:
+            - {condition: "aqi.us.zone.index >= 3", fg: "white"} # White text on high danger zones
+    # PM2.5 value card
+    - type: "value"
+      source: "pm25.value"
+      format: "%.0f" # Format string for float value
+      position:
+        x: 36
+        y: 938
+      size:
+        w: 630
+        h: 206
+      value:
+        font:
+            face: "values"
+            fg: "black"
+        align:
+            v: "bottom" # Align value to bottom edge
+        thresholds:
+            - {condition: "pm25.us.zone.index >= 3", fg: "white"}
+      label: # Text label settings for the sensor
+        font:
+            face: "labels"
+            fg: "black"
+        align:
+            v: "top" # Place sensor name at the top
+      unit: # Units display settings
+        font:
+            face: "units"
+            fg: "black"
+        align:
+            p: "right" # Position units to the right of value (right, left, bottom, none)
+            s: 11 # Spacing in pixels between value and unit
+            v: "1/2" # Vertical alignment offset (1/2 means middle of value height)
+        thresholds:
+            - {condition: "pm25.us.zone.index >= 3", fg: "white"}
+      border:
+        t: 0 # No border by default
+        padding: 30 # Inner border padding
+        affects: # border only covers specified components (value and unit)
+            - value
+            - unit
+        thresholds: # Color background on threshold breaches
+            - {condition: "pm25.us.zone.index == 2", color: "yellow", bg: "yellow"}
+            - {condition: "pm25.us.zone.index >= 3", color: "red", bg: "red"}
+    # PM10 value card
+    - type: "value"
+      source: "pm10.value"
+      format: "%.0f"
+      position:
+        x: 36
+        y: 1275
+      size:
+        w: 630
+        h: 206
+      value:
+        font:
+            face: "values"
+            fg: "black"
+        align:
+            v: "bottom"
+        thresholds:
+            - {condition: "pm10.us.zone.index >= 3", fg: "white"}
+      label:
+        font:
+            face: "labels"
+            fg: "black"
+        align:
+            v: "top"
+      unit:
+        font:
+            face: "units"
+            fg: "black"
+        align:
+            p: "right"
+            s: 11
+            v: "1/2"
+        thresholds:
+            - {condition: "pm10.us.zone.index >= 3", fg: "white"}
+      border:
+        t: 0
+        padding: 30
+        affects:
+            - value
+            - unit
+        thresholds:
+            - {condition: "pm10.us.zone.index == 2", color: "yellow", bg: "yellow"}
+            - {condition: "pm10.us.zone.index >= 3", color: "red", bg: "red"}
+    # Current date and time display block
+    - type: "text"
+      position:
+        x: 36
+        y: 1613
+      size:
+        w: 630
+        h: 150
+      font:
+        face: "datetime"
+        fg: "black"
+      template: "{date:02.01.2006} {time:15:04}" # Time format template (Go-style)
+    # Vertical separator line between columns
+    - type: "line"
+      position:
+        x: 702
+        y: 72
+      l: 1656
+      t: 4
+      angle: 90
+      color: "black"
+    # ----------------------------------------------------------------------------
+    # RIGHT COLUMN: Chart showing AQI history
+    # ----------------------------------------------------------------------------
+
+    # Historical bar chart
+    - type: "chart"
+      position:
+        x: 864
+        y: 38
+      size:
+        w: 1920
+        h: 1238
+      source: "aqi.us.value" # History data source
+      style: "bar" # Chart style: bar (columns) or line
+      duration: "24h" # History depth
+      points: 48 # Number of points on chart (48 points for 24h = 1 point per 30 min)
+      axis: # Coordinate axes definitions
+        y:
+            scale:
+                auto: true
+                min: 0
+                max: auto
+            t: 7 # Y axis line thickness
+            fg: "black" # Axis color
+            min_step: 25 # Minimum step of grid lines
+            show: false # Show Y-axis line (false - hide line, keep labels/notches)
+            labels: # Y-axis labels configuration
+                show: true
+                count: 7 # Number of labels along Y axis
+                format: "%.0f" # Format string for labels
+                font:
+                    face: "axis_y"
+                    fg: "black"
+                thresholds: # Highlight Y-axis labels depending on danger zones
+                    - {condition: "aqi.us.zone.index == 2", fg: "black", bg: "yellow"}
+                    - {condition: "aqi.us.zone.index >= 3", fg: "white", bg: "red"}
+            notches: # Notches along Y axis
+                show: true
+                fg: "black"
+                l: 29 # Notch length
+                t: 8 # Notch thickness
+        x:
+            t: 8 # X axis thickness
+            fg: "black"
+            show: true
+            labels: # Time labels along X axis
+                show: true
+                count: 7 # Number of labels
+                format: "15:04" # Time format
+                font:
+                    face: "axis_x"
+                    fg: "black"
+            notches:
+                show: true
+                fg: "black"
+                l: 30 # Notch length
+                t: 7 # Notch thickness
+      threshold_lines: # Horizontal dashed threshold lines on chart
+        # style: "dashed.<dash_width>.<gap_width>"
+        - {condition: "aqi.us.zone.index == 2", color: "yellow", t: 7, style: "dashed.7.50"}
+        - {condition: "aqi.us.zone.index >= 3", color: "red", t: 7, style: "dashed.7.50"}
+      thresholds: # Dynamic bar color based on values
+        - {condition: "aqi.us.zone.index == 2", bg: "yellow"}
+        - {condition: "aqi.us.zone.index >= 3", bg: "red"}
+    # Horizontal separator line above bottom row
+    - type: "line"
+      position:
+        x: 741
+        y: 1406
+      l: 2100
+      t: 4
+      color: "black"
+    # ----------------------------------------------------------------------------
+    # BOTTOM ROW (Right Column): Environmental parameters (Temp, Hum, Press, Dew Point)
+    # ----------------------------------------------------------------------------
+
+    # Temperature sensor
+    - type: "value"
+      source: "temp.value.to_celsius"
+      format: "%+.1f" # Display temp with +/- prefix and 1 decimal place
+      position:
+        x: 741
+        y: 1463
+      size:
+        w: 525
+        h: 188
+      value:
+        font:
+            face: "values"
+            fg: "black"
+        align:
+            v: "bottom"
+        thresholds:
+            - {condition: "temp.value.to_celsius >= 30", fg: "red"} # Red color warning if temperature >= 30°C
+      label:
+        template: "Температура" # Localized card header
+        font:
+            face: "labels"
+            fg: "black"
+        align:
+            v: "top"
+      unit:
+        parameter: "celsius" # Maps to unit string (e.g. °C)
+        font:
+            face: "units"
+            fg: "black"
+        align:
+            p: "bottom" # Place unit underneath the value
+            s: 30 # Spacing in pixels
+    # Vertical micro-separator between Temperature and Humidity
+    - type: "line"
+      position:
+        x: 1266
+        y: 1444
+      l: 300
+      t: 4
+      angle: 90
+      color: "black"
+    # Humidity sensor
+    - type: "value"
+      source: "humidity.value"
+      format: "%.0f"
+      position:
+        x: 1266
+        y: 1463
+      size:
+        w: 525
+        h: 188
+      value:
+        font:
+            face: "values"
+            fg: "black"
+        align:
+            v: "bottom"
+        thresholds:
+            - {condition: "humidity.value <= 30", fg: "red"} # Red warning if humidity <= 30%
+      label:
+        template: "Влажность"
+        font:
+            face: "labels"
+            fg: "black"
+        align:
+            v: "top"
+      unit:
+        parameter: "percent" # Maps to %
+        font:
+            face: "units"
+            fg: "black"
+        align:
+            p: "bottom"
+            s: 30
+    # Vertical micro-separator between Humidity and Pressure
+    - type: "line"
+      position:
+        x: 1791
+        y: 1444
+      l: 300
+      t: 4
+      angle: 90
+      color: "black"
+    # Pressure sensor
+    - type: "value"
+      source: "pressure.value.to_mm_hg"
+      format: "%.0f"
+      position:
+        x: 1791
+        y: 1463
+      size:
+        w: 525
+        h: 188
+      value:
+        font:
+            face: "values"
+            fg: "black"
+        align:
+            v: "bottom"
+      label:
+        template: "Давление"
+        font:
+            face: "labels"
+            fg: "black"
+        align:
+            v: "top"
+      unit:
+        parameter: "mmhg" # Maps to mmHg unit label
+        font:
+            face: "units"
+            fg: "black"
+        align:
+            p: "bottom"
+            s: 30
+    # Vertical micro-separator between Pressure and Dew Point
+    - type: "line"
+      position:
+        x: 2316
+        y: 1444
+      l: 300
+      t: 4
+      angle: 90
+      color: "black"
+    # Dew point sensor
+    - type: "value"
+      source: "dew_point.value"
+      format: "%+.1f"
+      position:
+        x: 2316
+        y: 1463
+      size:
+        w: 525
+        h: 188
+      value:
+        font:
+            face: "values"
+            fg: "black"
+        align:
+            v: "bottom"
+      label:
+        template: "Точка росы"
+        font:
+            face: "labels"
+            fg: "black"
+        align:
+            v: "top"
+      unit:
+        parameter: "celsius" # Maps to °C
+        font:
+            face: "units"
+            fg: "black"
+        align:
+            p: "bottom"
+            s: 30

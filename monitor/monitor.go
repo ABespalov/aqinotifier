@@ -146,11 +146,11 @@ func processLazyZoneTransition(state *pmLazyState, currentZone, delayUp, delayDo
 
 // MonitorService processes incoming sensor measurements, evaluates expressions, detects alerts, and triggers notifications.
 type MonitorService struct {
-	cfg        *config.Config
-	history    map[string][]Measurement
-	mu         sync.RWMutex
-	notifier   Notifier
-	store      MeasurementStore
+	cfg            *config.Config
+	history        map[string][]Measurement
+	mu             sync.RWMutex
+	notifier       Notifier
+	store          MeasurementStore
 	evaluators     map[string]*DeviceEvaluator
 	lazyStates     map[aqiLazyKey]*aqiLazyState
 	pm10LazyStates map[aqiLazyKey]*pmLazyState
@@ -210,8 +210,8 @@ func NewMonitorService(cfg *config.Config, store MeasurementStore) *MonitorServi
 	}
 
 	s := &MonitorService{
-		cfg:        cfg,
-		history:    hist,
+		cfg:            cfg,
+		history:        hist,
 		evaluators:     evaluatorsMap,
 		store:          store,
 		lazyStates:     make(map[aqiLazyKey]*aqiLazyState),

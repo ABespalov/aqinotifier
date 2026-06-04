@@ -86,7 +86,7 @@ layout:
   - type: "line"
     position: { x: 215, y: 20 }
     size: { w: 1, h: 440 }
-    font: { fg: "black" }
+    color: "black"
 
   # Карточка показателя датчика
   - type: "value"
@@ -106,7 +106,7 @@ layout:
       font: { face: "units", fg: "black" }
       align: { p: "right", s: 3, v: "1/2" }
     border:
-      thin: 2
+      t: 2
       fg: "black"
       bg: "white"
       padding: 8
@@ -118,7 +118,7 @@ layout:
   - type: "chart"
     position: { x: 260, y: 10 }
     size: { w: 520, h: 330 }
-    source: "aqi.usa.value"
+    source: "aqi.us.value"
     style: "bar"
     duration: "24h"
     points: 48
@@ -133,9 +133,9 @@ layout:
         labels: { show: true, count: 7, format: "15:04", font: "axis_x" }
         notches: { show: true, fg: "black", w: 2, h: 8 }
     threshold_lines:
-      - { condition: "aqi.usa.zone.index >= 3", fg: "red", w: 2, style: "dashed.2.14" }
+      - { condition: "aqi.us.zone.index >= 3", color: "red", t: 2, style: "dashed.2.14" }
     thresholds:
-      - { condition: "aqi.usa.zone.index >= 3", bg: "red" }
+      - { condition: "aqi.us.zone.index >= 3", bg: "red" }
 ```
 
 ---

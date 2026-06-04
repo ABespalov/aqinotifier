@@ -11,6 +11,7 @@ import (
 
 	"github.com/ABespalov/aqinotifier/config"
 	"github.com/ABespalov/aqinotifier/monitor"
+	"github.com/ABespalov/csirender"
 	"github.com/rs/zerolog/log"
 )
 
@@ -97,6 +98,8 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	errFormat := "png"
 	var errMapping map[string][]int
 	var errPalette map[string]string
+	var errMarginX, errMarginY int
+	var errFontSize int
 	errWidth, errHeight := 800, 480 // fallback dimensions
 
 	// Setup panic recovery to display error message directly on the e-ink display
@@ -105,7 +108,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 			errStr := fmt.Sprintf("Panic recovered: %v", rec)
 			log.Error().Str("panic", errStr).Msg("dashboard: panic recovered during rendering")
 			w.Header().Set("Content-Type", "image/png")
-			errBytes := RenderErrorImage(errWidth, errHeight, errStr, errFormat, errMapping, errPalette)
+			errBytes := csirender.RenderErrorImage(errWidth, errHeight, errStr, errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 			_, _ = w.Write(errBytes)
 		}
 	}()
@@ -115,7 +118,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	if err != nil {
 		log.Error().Err(err).Str("file", layoutPath).Msg("dashboard: failed to parse layout config")
 		w.Header().Set("Content-Type", "image/png")
-		errBytes := RenderErrorImage(errWidth, errHeight, "Failed to load layout: "+err.Error(), errFormat, errMapping, errPalette)
+		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "Failed to load layout: "+err.Error(), errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
 		return
 	}
@@ -126,6 +129,9 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	errFormat = layoutCfg.Output.Format
 	errMapping = layoutCfg.Output.Mapping
 	errPalette = layoutCfg.Screen.Palette
+	errMarginX = layoutCfg.Error.Margin.X
+	errMarginY = layoutCfg.Error.Margin.Y
+	errFontSize = layoutCfg.Error.Size
 
 	// 2. Access Control List check
 	if !isAllowed(r.RemoteAddr, layoutCfg.Allowed) {
@@ -146,7 +152,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	if deviceID == "" {
 		log.Error().Msg("dashboard: no devices configured or requested")
 		w.Header().Set("Content-Type", getContentType(errFormat))
-		errBytes := RenderErrorImage(errWidth, errHeight, "No devices registered. Check device config or query params.", errFormat, errMapping, errPalette)
+		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "No devices registered. Check device config or query params.", errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
 		return
 	}
@@ -156,7 +162,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	if m == nil {
 		log.Error().Str("device", deviceID).Msg("dashboard: no measurement telemetry found")
 		w.Header().Set("Content-Type", getContentType(errFormat))
-		errBytes := RenderErrorImage(errWidth, errHeight, "No telemetry found for device: "+deviceID, errFormat, errMapping, errPalette)
+		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "No telemetry found for device: "+deviceID, errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
 		return
 	}
@@ -164,32 +170,60 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	// 5. Load localization dictionaries and build parameters map
 	lang := layoutCfg.Lang
 	if lang == "" {
-		lang = "ru"
+		lang = "en"
 	}
 	dict := LoadLanguageDict(lang)
 	telemetryMap := BuildTelemetryMap(m, appCfg, dict)
 
 	// 6. Load database history for chart components
-	var history []monitor.Measurement
 	// Look up chart duration to pull right timeline depth
 	maxDuration := 24 * time.Hour
-	for _, el := range layoutCfg.Layout {
-		if el.Type == "chart" && el.Duration != "" {
-			if d, err := time.ParseDuration(el.Duration); err == nil {
-				if d > maxDuration {
-					maxDuration = d
+	for _, wrap := range layoutCfg.Layout {
+		if chartEl, ok := wrap.Element.(*csirender.ChartElement); ok {
+			if chartEl.Duration != "" {
+				if d, err := time.ParseDuration(chartEl.Duration); err == nil {
+					if d > maxDuration {
+						maxDuration = d
+					}
 				}
 			}
 		}
 	}
-	history = ms.GetHistoryByDuration(deviceID, maxDuration)
+	history := ms.GetHistoryByDuration(deviceID, maxDuration)
+	charts := make(map[string][]float64)
+
+	// Pre-sample data for each chart
+	for _, wrap := range layoutCfg.Layout {
+		if chartEl, ok := wrap.Element.(*csirender.ChartElement); ok {
+			d := 24 * time.Hour
+			if chartEl.Duration != "" {
+				if p, err := time.ParseDuration(chartEl.Duration); err == nil {
+					d = p
+				}
+			}
+			points := chartEl.Points
+			if points == 0 {
+				points = 48
+			}
+			charts[chartEl.Source] = ResampleHistory(history, d, points, chartEl.Source, "")
+		}
+	}
+
+	renderData := csirender.RenderData{
+		Values: telemetryMap,
+		Charts: charts,
+	}
+
+	engine := csirender.New()
+	engine.Resolver = ResolveThresholdValue
+	engine.Enricher = EnrichChartTelemetry
 
 	// 7. Render layout elements to image
-	img, err := Render(layoutCfg, telemetryMap, history)
+	img, err := engine.Render(&layoutCfg.LayoutConfig, renderData)
 	if err != nil {
 		log.Error().Err(err).Msg("dashboard: rendering failed")
 		w.Header().Set("Content-Type", getContentType(errFormat))
-		errBytes := RenderErrorImage(errWidth, errHeight, "Render failed: "+err.Error(), errFormat, errMapping, errPalette)
+		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "Render failed: "+err.Error(), errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
 		return
 	}
@@ -203,11 +237,11 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 		format = "png"
 	}
 
-	outputBytes, err := EncodeImage(img, format, layoutCfg.Output.Mapping, layoutCfg.Screen.Palette)
+	outputBytes, err := csirender.EncodeImage(img, format, layoutCfg.Output.Mapping, layoutCfg.Screen.Palette)
 	if err != nil {
 		log.Error().Err(err).Msg("dashboard: serialization failed")
 		w.Header().Set("Content-Type", getContentType(errFormat))
-		errBytes := RenderErrorImage(errWidth, errHeight, "Encode failed: "+err.Error(), errFormat, errMapping, errPalette)
+		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "Encode failed: "+err.Error(), errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
 		return
 	}
