@@ -1,3 +1,5 @@
+github.com/ABespalov/csi18n v0.1.0-a h1:84fbh7NHiFY1Qe0tQJbCieAkSw/8ge1mcXrxbUnUhgU=
+github.com/ABespalov/csi18n v0.1.0-a/go.mod h1:EvMlGeAFE/HK3QYtMT12ZILMBYwr2wLw+4nrGw+9eo4=
 github.com/ABespalov/csirender v0.1.1-a h1:5CfUG6n+fsFnzLWMSAe1q4VaiI8X9uoINMBTikWim4I=
 github.com/ABespalov/csirender v0.1.1-a/go.mod h1:mNAtxl3WLq6zDAalJb6Hl/ly2PsyTRLda+/AeBrnJ3k=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
