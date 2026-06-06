@@ -261,7 +261,7 @@ Each user can toggle any notification on/off and set its sound mode independentl
 
 ## AQI Standards
 
-AQI calculation and zoning is completely data-driven. The calculation rules, breakpoints, rounding methods, and display names are defined in `res/aqi.json`. By default, the following standards are included (user-selectable in-bot):
+AQI calculation and zoning is completely data-driven. The calculation rules, breakpoints, rounding methods, and display names are defined in `assets/aqi.json`. By default, the following standards are included (user-selectable in-bot):
 
 | Standard | Zones | Typical Use |
 |---|---|---|
@@ -269,7 +269,7 @@ AQI calculation and zoning is completely data-driven. The calculation rules, bre
 | **US EPA** | 1-7 (Good -> Hazardous) | US AQI |
 | **CN** | 1-7 (Excellent -> Hazardous) | China AQI |
 
-You can add or modify standards in `res/aqi.json` on the fly without recompiling the code. The bot will automatically reload the changes if config hot-reload is enabled.
+You can add or modify standards in `assets/aqi.json` on the fly without recompiling the code. The bot will automatically reload the changes if config hot-reload is enabled.
 
 ---
 
@@ -281,16 +281,16 @@ See the annotated [`aqinotifier.yaml`](aqinotifier.yaml) for the full configurat
 
 ## Resource Files
 
-All UI text, icons, and AQI definitions are in the `res/` directory:
+All UI text, icons, and AQI definitions are in the `assets/` directory:
 
 | File | Purpose |
 |---|---|
-| `res/ru.json` | Russian localization |
-| `res/en.json` | English localization |
-| `res/ico.json` | Icon definitions (emoji placeholders) |
-| `res/colors.json` | Color mappings |
-| `res/aqi.json` | AQI breakpoints per standard |
-| `res/readme.en.md` | [Template engine documentation](res/readme.en.md) |
+| `assets/ru.json` | Russian localization |
+| `assets/en.json` | English localization |
+| `assets/ico.json` | Icon definitions (emoji placeholders) |
+| `assets/colors.json` | Color mappings |
+| `assets/aqi.json` | AQI breakpoints per standard |
+| `assets/readme.en.md` | [Template engine documentation](assets/readme.en.md) |
 
 ---
 
