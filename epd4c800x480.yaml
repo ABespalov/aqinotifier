@@ -32,7 +32,7 @@ defaults:
 
 # Output format for the final generated image
 output:
-  format: "epd_raw"         # Output format (binary raw buffers format for EPD displays)
+  format: "epd_pr"         # Output format (binary raw buffers format for EPD displays)
   background: "white"       # Background color used to fill the screen before rendering
   mapping:                  # Mapping of logical palette colors to buffer bits [Buffer 1, Buffer 2]
     black:  [0, 0]          # Black color: 0 in first buffer, 0 in second
