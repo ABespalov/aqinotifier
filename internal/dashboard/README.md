@@ -19,7 +19,9 @@ The `dashboard` module enables dynamic rendering and serialization of air qualit
 Dashboards are registered in the main configuration file under `dashboards` and served via HTTP GET.
 
 **Query Parameters:**
-- `format` (optional): `png`, `bmp`, or `epd_raw`. Overrides the default format specified in the dashboard YAML file.
+- `format` (optional): `png`, `bmp`, `epd_raw`, or `epd_pr`. Overrides the default format specified in the dashboard YAML file.
+- `mac` (optional): Used by `epd_pr` format to cache the previous frame for partial updates.
+- `force_full` (optional): Used by `epd_pr` format to ignore the cache and force a full screen refresh.
 - `device` / `device_id` (optional): The ID of the target sensor device. If omitted, falls back to the first device registered in the application.
 
 **Example Request:**
@@ -149,6 +151,19 @@ When serialization format is set to `epd_raw`:
    - `white: [1, 0]` writes `1` to Buffer 1, `0` to Buffer 2.
 3. Bits are packed MSB-first: 8 horizontal pixels are packed into a single byte.
 4. The output HTTP payload is the concatenation of the buffers: `Buffer 1 bytes` followed immediately by `Buffer 2 bytes`.
+
+### Partial Refresh (`epd_pr`)
+
+The `epd_pr` format enables incremental updates to E-Ink screens. It generates the same bitplane data as `epd_raw` but limits the payload to the changed rectangular areas.
+
+1. **In-Memory Caching:** The server caches the last rendered `image.Image` state for each device based on its `mac` address query parameter.
+2. **Difference Bounding Boxes:** When requested, the server compares the cached state with the newly rendered state using an 8x8 pixel grid. It finds all changed pixels and creates the minimal number of connected bounding boxes.
+3. **8x8 Grid Benefits:** Bounding boxes are guaranteed to have coordinates and widths that are multiples of 8. This aligns the start and end of every tile row perfectly to byte boundaries, avoiding complex bit shifts during bitplane encoding and client-side extraction.
+4. **Binary Protocol (Little-Endian):**
+   - The payload starts with a 2-byte header `N` (number of tiles).
+   - Followed by `N` tile headers, each containing 4 unsigned 16-bit integers: `[X] [Y] [Width] [Height]`.
+   - The header is immediately followed by the packed bitplane data for the tile.
+5. **Full Refresh Fallback:** If the `mac` is not in cache, or `force_full=true` is provided, the server outputs `N=1` and a single tile covering the entire screen `X=0, Y=0, W=Width, H=Height`.
 
 ---
 

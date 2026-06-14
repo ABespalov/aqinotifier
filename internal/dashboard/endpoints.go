@@ -4,6 +4,7 @@ package dashboard
 
 import (
 	"fmt"
+	"image"
 	"net"
 	"net/http"
 	"strings"
@@ -231,8 +232,27 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	if format == "" {
 		format = "png"
 	}
+	format = strings.ToLower(strings.TrimSpace(format))
 
-	outputBytes, err := csirender.EncodeImage(img, format, layoutCfg.Output.Mapping, layoutCfg.Screen.Palette)
+	var outputBytes []byte
+
+	if format == "epd_pr" {
+		mac := r.URL.Query().Get("mac")
+		forceFull := r.URL.Query().Get("force_full") == "true" || r.URL.Query().Get("force_full") == "1"
+		
+		var oldImg image.Image
+		if !forceFull && mac != "" {
+			oldImg = globalEPDCache.Get(mac)
+		}
+
+		outputBytes, err = csirender.EncodePartialImage(oldImg, img, format, layoutCfg.Output.Mapping, layoutCfg.Screen.Palette)
+		if err == nil && mac != "" {
+			globalEPDCache.Set(mac, img)
+		}
+	} else {
+		outputBytes, err = csirender.EncodeImage(img, format, layoutCfg.Output.Mapping, layoutCfg.Screen.Palette)
+	}
+
 	if err != nil {
 		log.Error().Err(err).Msg("dashboard: serialization failed")
 		w.Header().Set("Content-Type", getContentType(errFormat))
@@ -252,7 +272,7 @@ func getContentType(format string) string {
 		return "image/png"
 	case "bmp":
 		return "image/bmp"
-	case "epd_raw":
+	case "epd_raw", "epd_pr":
 		return "application/octet-stream"
 	default:
 		return "image/png"
