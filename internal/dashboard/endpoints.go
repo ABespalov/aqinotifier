@@ -96,6 +96,8 @@ func isAllowed(remoteAddr string, allowedCIDRs []string) bool {
 // It loads layout configs dynamically, checks ACL, resolves telemetry/history,
 // renders layouts, and handles panics/errors visually.
 func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath string, appCfg *config.Config, ms *monitor.MonitorService, translator *csi18n.Translator) {
+	log.Info().Str("method", r.Method).Str("remote", r.RemoteAddr).Str("url", r.URL.String()).Str("layout", layoutPath).Msg("dashboard: received request")
+
 	// Format settings (config defaults) used in case of panic/error page rendering
 	errFormat := "png"
 	var errMapping map[string][]int
@@ -108,7 +110,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	defer func() {
 		if rec := recover(); rec != nil {
 			errStr := fmt.Sprintf("Panic recovered: %v", rec)
-			log.Error().Str("panic", errStr).Msg("dashboard: panic recovered during rendering")
+			log.Warn().Str("panic", errStr).Msg("dashboard: panic recovered during rendering")
 			w.Header().Set("Content-Type", "image/png")
 			errBytes := csirender.RenderErrorImage(errWidth, errHeight, errStr, errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 			_, _ = w.Write(errBytes)
@@ -118,7 +120,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	// 1. Dynamic Live Parsing of dashboard layout config
 	layoutCfg, err := ParseConfig(layoutPath)
 	if err != nil {
-		log.Error().Err(err).Str("file", layoutPath).Msg("dashboard: failed to parse layout config")
+		log.Warn().Err(err).Str("file", layoutPath).Msg("dashboard: failed to parse layout config")
 		w.Header().Set("Content-Type", "image/png")
 		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "Failed to load layout: "+err.Error(), errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
@@ -152,7 +154,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	}
 
 	if deviceID == "" {
-		log.Error().Msg("dashboard: no devices configured or requested")
+		log.Warn().Msg("dashboard: no devices configured or requested")
 		w.Header().Set("Content-Type", getContentType(errFormat))
 		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "No devices registered. Check device config or query params.", errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
@@ -162,7 +164,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	// 4. Fetch telemetry measurements
 	m := ms.LastMeasurement(deviceID)
 	if m == nil {
-		log.Error().Str("device", deviceID).Msg("dashboard: no measurement telemetry found")
+		log.Warn().Str("device", deviceID).Msg("dashboard: no measurement telemetry found")
 		w.Header().Set("Content-Type", getContentType(errFormat))
 		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "No telemetry found for device: "+deviceID, errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
@@ -217,7 +219,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	// 7. Render layout elements to image
 	img, err := engine.RenderWithProvider(&layoutCfg.LayoutConfig, provider)
 	if err != nil {
-		log.Error().Err(err).Msg("dashboard: rendering failed")
+		log.Warn().Err(err).Msg("dashboard: rendering failed")
 		w.Header().Set("Content-Type", getContentType(errFormat))
 		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "Render failed: "+err.Error(), errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
@@ -254,7 +256,7 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	}
 
 	if err != nil {
-		log.Error().Err(err).Msg("dashboard: serialization failed")
+		log.Warn().Err(err).Msg("dashboard: serialization failed")
 		w.Header().Set("Content-Type", getContentType(errFormat))
 		errBytes := csirender.RenderErrorImage(errWidth, errHeight, "Encode failed: "+err.Error(), errFormat, errMapping, errPalette, errFontSize, errMarginX, errMarginY)
 		_, _ = w.Write(errBytes)
@@ -262,6 +264,11 @@ func handleDashboardRequest(w http.ResponseWriter, r *http.Request, layoutPath s
 	}
 
 	w.Header().Set("Content-Type", getContentType(format))
+	log.Info().
+		Str("format", format).
+		Int("size", len(outputBytes)).
+		Str("remote", r.RemoteAddr).
+		Msg("dashboard: successfully rendered and sent image")
 	_, _ = w.Write(outputBytes)
 }
 

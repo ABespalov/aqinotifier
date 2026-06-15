@@ -303,7 +303,7 @@ func updateAQIStandards(translator *csi18n.Translator, resDir string) {
 }
 
 func apiHandler(w http.ResponseWriter, r *http.Request, ms *monitor.MonitorService) {
-	log.Debug().Str("method", r.Method).Str("remote", r.RemoteAddr).Str("url", r.URL.String()).Msg("server: received request")
+	log.Info().Str("method", r.Method).Str("remote", r.RemoteAddr).Str("url", r.URL.String()).Msg("server: received request")
 
 	if r.Method != http.MethodPost {
 		log.Warn().Str("method", r.Method).Str("remote", r.RemoteAddr).Msg("server: rejected non-POST request")
@@ -312,13 +312,13 @@ func apiHandler(w http.ResponseWriter, r *http.Request, ms *monitor.MonitorServi
 	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Error().Err(err).Msg("server: error reading body")
+		log.Warn().Err(err).Msg("server: error reading body")
 		http.Error(w, "Error reading body", http.StatusInternalServerError)
 		return
 	}
 	data, err := sensor.Parse(r.RemoteAddr, body)
 	if err != nil {
-		log.Error().Err(err).Str("body", string(body)).Msg("server: error parsing JSON")
+		log.Warn().Err(err).Str("body", string(body)).Msg("server: error parsing JSON")
 		http.Error(w, "Error parsing JSON", http.StatusBadRequest)
 		return
 	}

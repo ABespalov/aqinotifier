@@ -102,15 +102,13 @@ layout:
       margin:
         t: 10               # Top margin
         b: 30               # Bottom margin
-      thresholds:           # Dynamic rules to change text color based on values
-        - { condition: "aqi.us.zone.index >= 3", fg: "white" } # White text if zone >= 3
     border:                 # Card border and background settings
-      t: 2               # Border line thickness
+      t: 5               # Border line thickness
       color: "black"           # Default border color
       bg: "white"           # Default background color
       thresholds:           # Dynamic border and background changes based on thresholds
-        - { condition: "aqi.us.zone.index == 2", bg: "yellow", color: "yellow" } # Moderate level (yellow bg)
-        - { condition: "aqi.us.zone.index >= 3", bg: "red", color: "red" }       # Unhealthy level and above (red bg)
+        - { condition: "aqi.us.zone.index == 2", color: "yellow" } # Moderate level (yellow bg)
+        - { condition: "aqi.us.zone.index >= 3", color: "red" }       # Unhealthy level and above (red bg)
 
   # AQI zone name (e.g. "Good", "Moderate", "Unhealthy")
   - type: "value"
@@ -125,8 +123,23 @@ layout:
       font:
         face: "zone"
         fg: "black"
+
+  # Shape for PM2.5
+  - type: "shape"
+    kind: "rect"
+    position:
+      x: 35
+      y: 265
+    size:
+      w: 125
+      h: 44
+    corner_radius: 8
+    border:
+      t: 3
+      color: "transparent"
       thresholds:
-        - { condition: "aqi.us.zone.index >= 3", fg: "white" } # White text on high danger zones
+        - { condition: "pm25.us.zone.index == 2", fg: "yellow" }
+        - { condition: "pm25.us.zone.index >= 3", fg: "red" }
 
   # PM2.5 value card
   - type: "value"
@@ -144,8 +157,6 @@ layout:
         fg: "black"
       align:
         v: "bottom"         # Align value to bottom edge
-      thresholds:
-        - { condition: "pm25.us.zone.index >= 3", fg: "white" }
     label:                  # Text label settings for the sensor
       font:
         face: "labels"
@@ -160,17 +171,23 @@ layout:
         p: "right"          # Position units to the right of value (right, left, bottom, none)
         s: 3                # Spacing in pixels between value and unit
         v: "1/2"            # Vertical alignment offset (1/2 means middle of value height)
-      thresholds:
-        - { condition: "pm25.us.zone.index >= 3", fg: "white" }
+
+  # Shape for PM10
+  - type: "shape"
+    kind: "rect"
+    position:
+      x: 35
+      y: 355
+    size:
+      w: 125
+      h: 44
+    corner_radius: 8
     border:
-      t: 0               # No border by default
-      padding: 8            # Inner border padding
-      affects:              # border only covers specified components (value and unit)
-        - value
-        - unit
-      thresholds:           # Color background on threshold breaches
-        - { condition: "pm25.us.zone.index == 2", color: "yellow", bg: "yellow" }
-        - { condition: "pm25.us.zone.index >= 3", color: "red", bg: "red" }
+      t: 3
+      color: "transparent"
+      thresholds:
+        - { condition: "pm10.us.zone.index == 2", fg: "yellow" }
+        - { condition: "pm10.us.zone.index >= 3", fg: "red" }
 
   # PM10 value card
   - type: "value"
@@ -188,8 +205,6 @@ layout:
         fg: "black"
       align:
         v: "bottom"
-      thresholds:
-        - { condition: "pm10.us.zone.index >= 3", fg: "white" }
     label:
       font:
         face: "labels"
@@ -204,17 +219,6 @@ layout:
         p: "right"
         s: 3
         v: "1/2"
-      thresholds:
-        - { condition: "pm10.us.zone.index >= 3", fg: "white" }
-    border:
-      t: 0
-      padding: 8
-      affects:
-        - value
-        - unit
-      thresholds:
-        - { condition: "pm10.us.zone.index == 2", color: "yellow", bg: "yellow" }
-        - { condition: "pm10.us.zone.index >= 3", color: "red", bg: "red" }
 
   # Current date and time display block
   - type: "text"
@@ -308,7 +312,7 @@ layout:
   - type: "line"
     position:
       x: 205
-      y: 350
+      y: 375
     l: 584
     t: 1
     color: "black"
@@ -317,13 +321,29 @@ layout:
   # BOTTOM ROW (Right Column): Environmental parameters (Temp, Hum, Press, Dew Point)
   # ----------------------------------------------------------------------------
   
+  # Shape for Temp
+  - type: "shape"
+    kind: "rect"
+    position:
+      x: 225
+      y: 413
+    size:
+      w: 106
+      h: 55
+    corner_radius: 8
+    border:
+      t: 3
+      color: "transparent"
+      thresholds:
+        - { condition: "temp.value.to_celsius >= 30", fg: "red" }
+
   # Temperature sensor
   - type: "value"
     source: "temp.value.to_celsius"
     format: "%+.1f"         # Display temp with +/- prefix and 1 decimal place
     position:
       x: 205
-      y: 390
+      y: 391
     size:
       w: 146
       h: 50
@@ -333,8 +353,6 @@ layout:
         fg: "black"
       align:
         v: "bottom"
-      thresholds:
-        - { condition: "temp.value.to_celsius >= 30", fg: "red" } # Red color warning if temperature >= 30°C
     label:
       template: "Температура" # Localized card header
       font:
@@ -355,19 +373,35 @@ layout:
   - type: "line"
     position:
       x: 351
-      y: 360
-    l: 105
+      y: 390
+    l: 75
     t: 1
     angle: 90.0
     color: "black"
 
+  # Shape for Hum
+  - type: "shape"
+    kind: "rect"
+    position:
+      x: 371
+      y: 413
+    size:
+      w: 106
+      h: 55
+    corner_radius: 8
+    border:
+      t: 3
+      color: "transparent"
+      thresholds:
+        - { condition: "humidity.value <= 30", fg: "red" }
+
   # Humidity sensor
   - type: "value"
     source: "humidity.value"
-    format: "%.0f"
+    format: "%.1f"
     position:
       x: 351
-      y: 390
+      y: 391
     size:
       w: 146
       h: 50
@@ -377,8 +411,6 @@ layout:
         fg: "black"
       align:
         v: "bottom"
-      thresholds:
-        - { condition: "humidity.value <= 30", fg: "red" } # Red warning if humidity <= 30%
     label:
       template: "Влажность"
       font:
@@ -399,8 +431,8 @@ layout:
   - type: "line"
     position:
       x: 497
-      y: 360
-    l: 105
+      y: 390
+    l: 75
     t: 1
     angle: 90.0
     color: "black"
@@ -411,7 +443,7 @@ layout:
     format: "%.0f"
     position:
       x: 497
-      y: 390
+      y: 391
     size:
       w: 146
       h: 50
@@ -441,8 +473,8 @@ layout:
   - type: "line"
     position:
       x: 643
-      y: 360
-    l: 105
+      y: 390
+    l: 75
     t: 1
     angle: 90.0
     color: "black"
@@ -453,7 +485,7 @@ layout:
     format: "%+.1f"
     position:
       x: 643
-      y: 390
+      y: 391
     size:
       w: 146
       h: 50
