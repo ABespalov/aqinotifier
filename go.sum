@@ -1,7 +1,11 @@
 github.com/ABespalov/csi18n v0.1.0-a h1:84fbh7NHiFY1Qe0tQJbCieAkSw/8ge1mcXrxbUnUhgU=
 github.com/ABespalov/csi18n v0.1.0-a/go.mod h1:EvMlGeAFE/HK3QYtMT12ZILMBYwr2wLw+4nrGw+9eo4=
+github.com/ABespalov/csirender v0.2.0 h1:FvoXjxd8wDqNDkVdLrUpLIa2jEXT9mVJeR19QWC49Kc=
+github.com/ABespalov/csirender v0.2.0/go.mod h1:mNAtxl3WLq6zDAalJb6Hl/ly2PsyTRLda+/AeBrnJ3k=
 github.com/ABespalov/csirender v0.2.1-0.20260614190049-c9c4231b151d h1:E2tUi/PIjd5yXS6UqQ/w85JQ0NuKYIj383AobR7jL8I=
 github.com/ABespalov/csirender v0.2.1-0.20260614190049-c9c4231b151d/go.mod h1:mNAtxl3WLq6zDAalJb6Hl/ly2PsyTRLda+/AeBrnJ3k=
+github.com/ABespalov/csirender v0.2.1-0.20260615160033-f7860c7bd682 h1:tr+A5dJGgxVZ8Fpq6A6UpcxOi07kHbWtX7FOyUcupfY=
+github.com/ABespalov/csirender v0.2.1-0.20260615160033-f7860c7bd682/go.mod h1:mNAtxl3WLq6zDAalJb6Hl/ly2PsyTRLda+/AeBrnJ3k=
 github.com/andybalholm/brotli v1.2.0 h1:ukwgCxwYrmACq68yiUqwIWnGY0cTPox/M94sVwToPjQ=
 github.com/andybalholm/brotli v1.2.0/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/bytedance/gopkg v0.1.3 h1:TPBSwH8RsouGCBcMBktLt1AymVo2TVsBVCY4b6TnZ/M=

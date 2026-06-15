@@ -75,7 +75,7 @@ layout:
   # AQI block header (static text)
   - type: "text"
     position:
-      x: 10                 # X coordinate of the top-left corner
+      x: 5                 # X coordinate of the top-left corner
       y: 15                 # Y coordinate of the top-left corner
     size:
       w: 175                # Container width in pixels
@@ -90,7 +90,7 @@ layout:
     source: "aqi.us.value"     # Telemetry data source
     radius: 15              # Corner rounding radius for borders
     position:
-      x: 10
+      x: 5
       y: 70
     size:
       w: 175
@@ -101,7 +101,7 @@ layout:
         fg: "black"
       margin:
         t: 10               # Top margin
-        b: 30               # Bottom margin
+        b: 15               # Bottom margin
     border:                 # Card border and background settings
       t: 5               # Border line thickness
       color: "black"           # Default border color
@@ -114,7 +114,7 @@ layout:
   - type: "value"
     source: "aqi.us.zone.name" # String representation of the AQI zone
     position:
-      x: 10
+      x: 5
       y: 180
     size:
       w: 175
@@ -128,11 +128,11 @@ layout:
   - type: "shape"
     kind: "rect"
     position:
-      x: 35
-      y: 265
+      x: 25
+      y: 262
     size:
-      w: 125
-      h: 44
+      w: 135
+      h: 50
     corner_radius: 8
     border:
       t: 3
@@ -146,7 +146,7 @@ layout:
     source: "pm25.value"
     format: "%.0f"          # Format string for float value
     position:
-      x: 10
+      x: 5
       y: 250
     size:
       w: 175
@@ -176,11 +176,11 @@ layout:
   - type: "shape"
     kind: "rect"
     position:
-      x: 35
-      y: 355
+      x: 25
+      y: 352
     size:
-      w: 125
-      h: 44
+      w: 135
+      h: 50
     corner_radius: 8
     border:
       t: 3
@@ -194,7 +194,7 @@ layout:
     source: "pm10.value"
     format: "%.0f"
     position:
-      x: 10
+      x: 5
       y: 340
     size:
       w: 175
@@ -223,7 +223,7 @@ layout:
   # Current date and time display block
   - type: "text"
     position:
-      x: 10
+      x: 5
       y: 430
     size:
       w: 175
@@ -325,11 +325,11 @@ layout:
   - type: "shape"
     kind: "rect"
     position:
-      x: 225
-      y: 413
+      x: 223
+      y: 411
     size:
-      w: 106
-      h: 55
+      w: 110
+      h: 59
     corner_radius: 8
     border:
       t: 3
@@ -383,11 +383,11 @@ layout:
   - type: "shape"
     kind: "rect"
     position:
-      x: 371
-      y: 413
+      x: 369
+      y: 411
     size:
-      w: 106
-      h: 55
+      w: 110
+      h: 59
     corner_radius: 8
     border:
       t: 3
